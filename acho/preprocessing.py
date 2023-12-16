@@ -1,7 +1,8 @@
+import random
+from typing import Tuple, Optional
+
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-from typing import Tuple, Optional
-import random
 
 
 def train_val_split(

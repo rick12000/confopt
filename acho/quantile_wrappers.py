@@ -1,8 +1,9 @@
-from typing import List, Union
-import numpy as np
-from sklearn.ensemble import GradientBoostingRegressor
 import abc
+from typing import List, Union
+
+import numpy as np
 from sklearn.base import BaseEstimator
+from sklearn.ensemble import GradientBoostingRegressor
 
 
 class BiQuantileEstimator:

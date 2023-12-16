@@ -1,3 +1,12 @@
+import random
+from copy import deepcopy
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from acho.config import GBM_NAME
+from acho.optimization import RuntimeTracker
 from acho.tuning import (
     is_interval_breach,
     score_predictions,
@@ -6,13 +15,6 @@ from acho.tuning import (
     normalize_estimation_data,
     update_adaptive_interval,
 )
-import pytest
-import numpy as np
-import pandas as pd
-import random
-from acho.optimization import RuntimeTracker
-from acho.config import GBM_NAME
-from copy import deepcopy
 
 DEFAULT_SEED = 1234
 

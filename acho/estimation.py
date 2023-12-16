@@ -26,8 +26,8 @@ from acho.config import (
     QUANTILE_MODEL_TYPES,
 )
 from acho.optimization import RuntimeTracker
-from acho.utils import get_tuning_configurations, get_perceptron_layers
 from acho.quantile_wrappers import QuantileGBM
+from acho.utils import get_tuning_configurations, get_perceptron_layers
 
 logger = logging.getLogger(__name__)
 

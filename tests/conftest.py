@@ -1,14 +1,16 @@
-import pytest
+import random
+from typing import Dict
+
 import numpy as np
+import pytest
+from sklearn.ensemble import GradientBoostingRegressor
+
 from acho.estimation import (
     QuantileConformalRegression,
     LocallyWeightedConformalRegression,
 )
-import random
-from typing import Dict
-from acho.utils import get_tuning_configurations
 from acho.tuning import ConformalSearcher
-from sklearn.ensemble import GradientBoostingRegressor
+from acho.utils import get_tuning_configurations
 
 DEFAULT_SEED = 1234
 

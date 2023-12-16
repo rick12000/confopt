@@ -1,6 +1,7 @@
-from acho.tuning import ConformalSearcher
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.datasets import fetch_california_housing
+from sklearn.ensemble import RandomForestRegressor
+
+from acho.tuning import ConformalSearcher
 
 # Set up toy data:
 X, y = fetch_california_housing(return_X_y=True)

@@ -1,6 +1,7 @@
-from acho.preprocessing import train_val_split
-import pytest
 import numpy as np
+import pytest
+
+from acho.preprocessing import train_val_split
 
 DEFAULT_SEED = 1234
 
