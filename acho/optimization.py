@@ -60,16 +60,11 @@ def derive_optimal_tuning_count(
         Optimal number of search model tuning evaluations, given runtime
         ratio constraint.
     """
-
-    logger.debug(
-        f"RS runtime per iter to C runtime per iter: {baseline_model_runtime / search_model_runtime}"
-    )
-
     search_model_tuning_count = (
         baseline_model_runtime * search_model_retraining_freq
     ) / (search_model_runtime * (1 / search_to_baseline_runtime_ratio) ** 2)
 
-    # Hard coded:
+    # Hard coded number of maximum useful evaluations (arbitrary):
     count_ceiling = 60
     search_model_tuning_count = min(
         count_ceiling, max(1, int(round(search_model_tuning_count)))
