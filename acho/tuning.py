@@ -5,6 +5,7 @@ import numpy as np
 from sklearn.metrics import mean_squared_error, accuracy_score, log_loss
 from sklearn.preprocessing import StandardScaler
 from copy import deepcopy
+from tqdm import tqdm
 
 from acho.estimation import (
     QuantileConformalRegression,
@@ -231,6 +232,7 @@ class ConformalSearcher:
         self,
         min_training_iterations: int,
         max_runtime: int,
+        verbose: bool = True,
         random_state: Optional[int] = None,
     ):
         random.seed(random_state)
@@ -251,6 +253,10 @@ class ConformalSearcher:
 
         model_training_timer = RuntimeTracker()
         model_training_timer.pause_runtime()
+        if verbose:
+            randomly_sampled_configurations = tqdm(
+                randomly_sampled_configurations, desc="Random searches: "
+            )
         for config_idx, hyperparameter_configuration in enumerate(
             randomly_sampled_configurations
         ):
@@ -298,7 +304,7 @@ class ConformalSearcher:
         enable_adaptive_intervals: bool = True,
         conformal_learning_rate: float = 0.1,
         runtime_budget: int = 600,
-        verbose: bool = False,
+        verbose: bool = True,
         random_state: Optional[int] = None,
     ):
 
@@ -312,6 +318,7 @@ class ConformalSearcher:
         ) = self._random_search(
             min_training_iterations=n_random_searches,
             max_runtime=runtime_budget,
+            verbose=verbose,
             random_state=random_state,
         )
 
@@ -323,9 +330,15 @@ class ConformalSearcher:
 
         best_cqr_config = None
 
-        for hyperparameter_idx in range(
-            len(self.tuning_configurations) - n_random_searches
-        ):
+        search_idx_range = range(len(self.tuning_configurations) - n_random_searches)
+        for config_idx in search_idx_range:
+            if verbose:
+                print(
+                    f"Conformal searches: {config_idx + 1}"
+                    + " | "
+                    + f"Budget consumed: {int(self.search_timer.return_runtime())}s/{runtime_budget}s",
+                    end="\r",
+                )
             searchable_configurations = [
                 configuration
                 for configuration in self.tuning_configurations
@@ -378,11 +391,11 @@ class ConformalSearcher:
                 )
 
             is_retraining_interval_passed = (
-                hyperparameter_idx % conformal_retraining_frequency == 0
+                config_idx % conformal_retraining_frequency == 0
             )
-            if hyperparameter_idx == 0 or is_retraining_interval_passed:
+            if config_idx == 0 or is_retraining_interval_passed:
                 logger.info("Triggering conformal retraining...")
-                if hyperparameter_idx == 0:
+                if config_idx == 0:
                     latest_confidence_level = confidence_level
 
                 if interval_type == "quantile_regression":
@@ -542,7 +555,7 @@ class ConformalSearcher:
             self.searched_configurations.append(maximal_parameter.copy())
             self.searched_performances.append(validation_performance)
 
-            logger.info(f"Iteration: {hyperparameter_idx}")
+            logger.info(f"Iteration: {config_idx}")
             logger.info(f"Iteration's validation performance: {validation_performance}")
 
             if self.search_timer.return_runtime() > runtime_budget:
