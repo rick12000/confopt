@@ -73,7 +73,7 @@ def process_and_split_estimation_data(
     searched_performances: np.array,
     train_split: float,
     filter_outliers: Optional[bool] = False,
-    outlier_method: Optional[str] = "top_and_bottom",
+    outlier_scope: Optional[str] = "top_and_bottom",
     random_state: Optional[int] = None,
 ):
     X = searched_configurations.copy()
@@ -82,7 +82,7 @@ def process_and_split_estimation_data(
     logger.debug(f"Maximum accuracy/loss in searcher's sampled data: {y.max()}")
 
     if filter_outliers:
-        X, y = remove_iqr_outliers(X=X, y=y, scope=outlier_method)
+        X, y = remove_iqr_outliers(X=X, y=y, scope=outlier_scope)
 
     X_train, y_train, X_val, y_val = train_val_split(
         X=X,
@@ -169,7 +169,7 @@ class ConformalSearcher:
             self.model = model
         else:
             raise ValueError(
-                f"Model to tune must be wrapped in class with 'fit' and 'predict' methods."
+                "Model to tune must be wrapped in class with 'fit' and 'predict' methods."
             )
 
         self.X_train = X_train
@@ -303,7 +303,6 @@ class ConformalSearcher:
     ):
 
         self.random_state = random_state
-
         self.search_timer = RuntimeTracker()
 
         (
@@ -316,7 +315,14 @@ class ConformalSearcher:
             random_state=random_state,
         )
 
-        n_of_search_estimator_tuning_iterations = 30
+        starting_search_estimator_tunings = 30
+
+        best_lw_pe_config = None
+        best_lw_de_config = None
+        best_lw_ve_config = None
+
+        best_cqr_config = None
+
         for hyperparameter_idx in range(
             len(self.tuning_configurations) - n_random_searches
         ):
@@ -335,8 +341,13 @@ class ConformalSearcher:
             validation_split = ConformalSearcher._set_conformal_validation_split(
                 tabularized_searched_configurations
             )
-            # remove_outliers = True if self.custom_loss_function == "log_loss" or self.prediction_type == "regression" else False
-            remove_outliers = False
+            remove_outliers = (
+                True
+                if self.custom_loss_function == "log_loss"
+                or self.prediction_type == "regression"
+                else False
+            )
+            outlier_scope = "top_only"
             (
                 X_train_conformal,
                 y_train_conformal,
@@ -347,7 +358,7 @@ class ConformalSearcher:
                 searched_performances=np.array(self.searched_performances),
                 train_split=(1 - validation_split),
                 filter_outliers=remove_outliers,
-                outlier_method="top_only",
+                outlier_scope=outlier_scope,
                 random_state=random_state,
             )
 
@@ -380,11 +391,11 @@ class ConformalSearcher:
                         random_state=random_state,
                     )
 
-                    if hyperparameter_idx == 0:
-                        previous_best_cqr_config = None
-
-                    else:
-                        previous_best_cqr_config = best_cqr_config.copy()
+                    previous_best_cqr_config = (
+                        best_cqr_config
+                        if best_cqr_config is None
+                        else best_cqr_config.copy()
+                    )
                     logger.debug(
                         f"Tune fitting with custom best configuration: {previous_best_cqr_config}"
                     )
@@ -394,7 +405,7 @@ class ConformalSearcher:
                         X_val=X_val_conformal,
                         y_val=y_val_conformal,
                         confidence_level=latest_confidence_level,
-                        tuning_param_combinations=n_of_search_estimator_tuning_iterations,
+                        tuning_param_combinations=starting_search_estimator_tunings,
                         custom_best_param_combination=previous_best_cqr_config,
                     )
                     if conformal_regressor.tuning_runtime is not None:
@@ -419,7 +430,8 @@ class ConformalSearcher:
                         random_state=random_state,
                     )
                     logger.debug(
-                        f"Obtained sub training set of size {HR_X_pe_fitting.shape} and sub validation set of size {HR_X_ve_fitting.shape}"
+                        f"Obtained sub training set of size {HR_X_pe_fitting.shape} "
+                        f"and sub validation set of size {HR_X_ve_fitting.shape}"
                     )
 
                     conformal_regressor = LocallyWeightedConformalRegression(
@@ -429,14 +441,21 @@ class ConformalSearcher:
                         random_state=random_state,
                     )
 
-                    if hyperparameter_idx == 0:
-                        previous_best_lw_pe_config = None
-                        previous_best_lw_de_config = None
-                        previous_best_lw_ve_config = None
-                    else:
-                        previous_best_lw_pe_config = best_lw_pe_config.copy()
-                        previous_best_lw_de_config = best_lw_de_config.copy()
-                        previous_best_lw_ve_config = best_lw_ve_config.copy()
+                    previous_best_lw_pe_config = (
+                        best_lw_pe_config
+                        if best_lw_pe_config is None
+                        else best_lw_pe_config.copy()
+                    )
+                    previous_best_lw_de_config = (
+                        best_lw_de_config
+                        if best_lw_de_config is None
+                        else best_lw_de_config.copy()
+                    )
+                    previous_best_lw_ve_config = (
+                        best_lw_ve_config
+                        if best_lw_ve_config is None
+                        else best_lw_ve_config.copy()
+                    )
 
                     logger.debug(
                         f"Tune fitting with custom best configurations: {previous_best_lw_pe_config}"
@@ -455,7 +474,7 @@ class ConformalSearcher:
                         X_val=X_val_conformal,
                         y_val=y_val_conformal,
                         confidence_level=latest_confidence_level,
-                        tuning_param_combinations=n_of_search_estimator_tuning_iterations,
+                        tuning_param_combinations=starting_search_estimator_tunings,
                         custom_best_pe_param_combination=previous_best_lw_pe_config,
                         custom_best_de_param_combination=previous_best_lw_de_config,
                         custom_best_ve_param_combination=previous_best_lw_ve_config,
@@ -468,14 +487,14 @@ class ConformalSearcher:
                 else:
                     ValueError(f"{interval_type} is not a valid interval type.")
 
-            n_of_search_estimator_tuning_iterations = derive_optimal_tuning_count(
+            starting_search_estimator_tunings = derive_optimal_tuning_count(
                 base_model_runtime=runtime_per_search,
                 search_model_runtime=hyperreg_model_runtime_per_iter,
                 search_retraining_freq=conformal_retraining_frequency,
                 search_to_base_runtime_ratio=0.3,
             )
             logger.info(
-                f"Optimal number of searcher hyperparameters to search: {n_of_search_estimator_tuning_iterations}"
+                f"Optimal number of searcher hyperparameters to search: {starting_search_estimator_tunings}"
             )
 
             (

@@ -102,7 +102,7 @@ def test_process_and_split_estimation_data(dummy_configurations):
         searched_performances=dummy_searched_performances,
         train_split=train_split,
         filter_outliers=False,
-        outlier_method=None,
+        outlier_scope=None,
         random_state=dummy_seed,
     )
 
@@ -146,7 +146,7 @@ def test_process_and_split_estimation_data__reproducibility(dummy_configurations
         searched_performances=dummy_searched_performances,
         train_split=train_split,
         filter_outliers=False,
-        outlier_method=None,
+        outlier_scope=None,
         random_state=dummy_seed,
     )
     (
@@ -159,7 +159,7 @@ def test_process_and_split_estimation_data__reproducibility(dummy_configurations
         searched_performances=dummy_searched_performances,
         train_split=train_split,
         filter_outliers=False,
-        outlier_method=None,
+        outlier_scope=None,
         random_state=dummy_seed,
     )
 

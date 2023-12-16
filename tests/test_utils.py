@@ -1,8 +1,5 @@
 from acho.utils import (
-    try_numeric,
-    tabularize_configurations,
     get_tuning_configurations,
-    enforce_hierarchical_configuration_types,
     get_perceptron_layers,
 )
 
