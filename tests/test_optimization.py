@@ -34,10 +34,10 @@ def test_derive_optimal_tuning_count(
     search_retraining_freq,
 ):
     n_iterations = derive_optimal_tuning_count(
-        base_model_runtime=base_model_runtime,
+        baseline_model_runtime=base_model_runtime,
         search_model_runtime=search_model_runtime,
-        search_to_base_runtime_ratio=search_to_base_runtime_ratio,
-        search_retraining_freq=search_retraining_freq,
+        search_to_baseline_runtime_ratio=search_to_base_runtime_ratio,
+        search_model_retraining_freq=search_retraining_freq,
     )
     assert n_iterations >= 1
     assert isinstance(n_iterations, int)
@@ -45,9 +45,9 @@ def test_derive_optimal_tuning_count(
 
 def test_derive_optimal_tuning_count__no_iterations():
     n_iterations = derive_optimal_tuning_count(
-        base_model_runtime=1,
+        baseline_model_runtime=1,
         search_model_runtime=1,
-        search_to_base_runtime_ratio=1,
-        search_retraining_freq=1,
+        search_to_baseline_runtime_ratio=1,
+        search_model_retraining_freq=1,
     )
     assert n_iterations == 1

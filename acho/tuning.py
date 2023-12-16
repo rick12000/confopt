@@ -502,10 +502,10 @@ class ConformalSearcher:
                     ValueError(f"{interval_type} is not a valid interval type.")
 
             starting_search_estimator_tunings = derive_optimal_tuning_count(
-                base_model_runtime=runtime_per_search,
+                baseline_model_runtime=runtime_per_search,
                 search_model_runtime=hyperreg_model_runtime_per_iter,
-                search_retraining_freq=conformal_retraining_frequency,
-                search_to_base_runtime_ratio=0.3,
+                search_model_retraining_freq=conformal_retraining_frequency,
+                search_to_baseline_runtime_ratio=0.3,
             )
             logger.info(
                 f"Optimal number of searcher hyperparameters to search: {starting_search_estimator_tunings}"

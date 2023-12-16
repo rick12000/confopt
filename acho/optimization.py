@@ -27,24 +27,52 @@ class RuntimeTracker:
 
 
 def derive_optimal_tuning_count(
-    base_model_runtime: float,
+    baseline_model_runtime: float,
     search_model_runtime: float,
-    search_retraining_freq: int,
-    search_to_base_runtime_ratio: float,
+    search_model_retraining_freq: int,
+    search_to_baseline_runtime_ratio: float,
 ) -> int:
+    """
+    Derives the optimal number of tuning evaluations to perform on a search model.
+
+    The number of evaluations will satisfy a specified runtime ratio between
+    the search model and the baseline model being optimized by it.
+
+    Parameters
+    ----------
+    baseline_model_runtime :
+        Baseline model training time (per training event).
+    search_model_runtime :
+        Search model training time (per training event).
+    search_model_retraining_freq :
+        Search model retraining frequency. Determines how often the
+        search model will be retrained and thus re-tuned.
+    search_to_baseline_runtime_ratio :
+        Desired ratio between the total training time of the search
+        model and the baseline model. A ratio > 1 indicates the search
+        model is allowed to train for longer than the baseline model
+        and vice versa. The number of tuning evaluations will be set
+        to ensure the runtime ratio is met (or closely matched).
+
+    Returns
+    -------
+    search_model_tuning_count :
+        Optimal number of search model tuning evaluations, given runtime
+        ratio constraint.
+    """
+
     logger.debug(
-        f"RS runtime per iter to C runtime per iter: {base_model_runtime / search_model_runtime}"
+        f"RS runtime per iter to C runtime per iter: {baseline_model_runtime / search_model_runtime}"
     )
 
-    optimal_n_of_secondary_model_param_combinations = (
-        base_model_runtime * search_retraining_freq
-    ) / (search_model_runtime * (1 / search_to_base_runtime_ratio) ** 2)
-    optimal_n_of_secondary_model_param_combinations = max(
-        1, int(round(optimal_n_of_secondary_model_param_combinations))
-    )
-    n_combinations_ceiling = 60
-    optimal_n_of_secondary_model_param_combinations = min(
-        n_combinations_ceiling, optimal_n_of_secondary_model_param_combinations
+    search_model_tuning_count = (
+        baseline_model_runtime * search_model_retraining_freq
+    ) / (search_model_runtime * (1 / search_to_baseline_runtime_ratio) ** 2)
+
+    # Hard coded:
+    count_ceiling = 60
+    search_model_tuning_count = min(
+        count_ceiling, max(1, int(round(search_model_tuning_count)))
     )
 
-    return optimal_n_of_secondary_model_param_combinations
+    return search_model_tuning_count
