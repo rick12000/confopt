@@ -7,6 +7,13 @@ from sklearn.ensemble import GradientBoostingRegressor
 
 
 class BiQuantileEstimator:
+    """
+    Base class for bi-quantile estimators.
+
+    Estimators fit on X features to predict two symmetrical conditional
+    quantiles of some target Y variable.
+    """
+
     def __init__(
         self,
         quantiles: List[float],
@@ -25,6 +32,26 @@ class BiQuantileEstimator:
         hi_quantile_estimator: BaseEstimator,
         X: np.array,
     ) -> np.array:
+        """
+        Make quantile predictions using features in X.
+
+        Parameters
+        ----------
+        lo_quantile_estimator :
+            Trained lower quantile estimator.
+        hi_quantile_estimator :
+            Trained upper quantile estimator.
+        X :
+            Features used to return predictions.
+
+        Returns
+        -------
+        y_pred :
+            Quantile predictions, organized in a len(X) by
+            2 array, where the first column contains lower
+            quantile predictions, and the second contains
+            higher quantile predictions.
+        """
         lo_y_pred = lo_quantile_estimator.predict(X).reshape(len(X), 1)
         hi_y_pred = hi_quantile_estimator.predict(X).reshape(len(X), 1)
         y_pred = np.hstack([lo_y_pred, hi_y_pred])
@@ -33,6 +60,10 @@ class BiQuantileEstimator:
 
 
 class QuantileGBM(BiQuantileEstimator):
+    """
+    Quantile gradient boosted machine estimator.
+    """
+
     def __init__(
         self,
         quantiles: List[float],
@@ -57,6 +88,21 @@ class QuantileGBM(BiQuantileEstimator):
         return "QuantileGBM()"
 
     def fit(self, X: np.array, y: np.array):
+        """
+        Trains a bi-quantile GBM model on X and y data.
+
+        Two separate quantile estimators are trained, one predicting
+        an upper quantile and one predicting a symmetrical lower quantile.
+        The estimators are aggregated in a tuple, for later joint
+        use in prediction.
+
+        Parameters
+        ----------
+        X :
+            Feature variables.
+        y :
+            Target variable.
+        """
         trained_estimators = ()
         for quantile in self.quantiles:
             quantile_estimator = GradientBoostingRegressor(
