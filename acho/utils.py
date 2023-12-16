@@ -8,24 +8,6 @@ import math
 logger = logging.getLogger(__name__)
 
 
-def try_numeric(value: Any) -> Any:
-    try:
-        if float(value) % 1 == 0:
-            return int(value)
-        else:
-            return float(value)
-    except ValueError:
-        return value
-
-
-# TODO: Check if this is actually needed anymore:
-def enforce_hierarchical_configuration_types(configuration: Dict) -> Dict:
-    type_enforced_configuration = {}
-    for parameter_name, parameter_value in configuration.items():
-        type_enforced_configuration[parameter_name] = try_numeric(parameter_value)
-    return type_enforced_configuration
-
-
 def get_perceptron_layers(
     n_layers_grid: List[int],
     layer_size_grid: List[int],
@@ -46,13 +28,6 @@ def get_perceptron_layers(
     return layer_tuples
 
 
-def pivot_classes(y: np.array, n_classes: int) -> np.array:
-    pivoted_array = np.zeros((len(y), n_classes))
-    for i in range(0, len(y)):
-        pivoted_array[i, y[i]] = 1
-    return pivoted_array
-
-
 def get_tuning_configurations(
     parameter_grid: Dict, n_configurations: int, random_state: Optional[int] = None
 ) -> List[Dict]:
@@ -66,8 +41,6 @@ def get_tuning_configurations(
             configuration[parameter_name] = parameter_value
         if configuration not in configurations:
             configurations.append(configuration)
-    # # TODO: Check if below works as expected to remove duplicates:
-    # configurations = list(map(dict, set(tuple(sorted(config.items())) for config in configurations)))
 
     return configurations
 

@@ -9,33 +9,6 @@ from acho.utils import (
 DEFAULT_SEED = 1234
 
 
-def test_try_numeric():
-    string_value = "some-string"
-    float_value = 1.1
-    int_value = 1
-
-    stringified_float = "1.1"
-    stringified_int = "1"
-    floatified_int = 1.0
-
-    assert isinstance(try_numeric(string_value), str)
-    assert isinstance(try_numeric(float_value), float)
-    assert isinstance(try_numeric(int_value), int)
-
-    assert isinstance(try_numeric(stringified_float), float)
-    assert isinstance(try_numeric(stringified_int), int)
-    assert isinstance(try_numeric(floatified_int), int)
-
-
-def test_enforce_hierarchical_configuration_types():
-    raw_configuration = {"value1": "1", "value2": "1.1", "value3": 1.0}
-    correctly_typed_configuration = {"value1": 1, "value2": 1.1, "value3": 1}
-
-    typed_configuration = enforce_hierarchical_configuration_types(raw_configuration)
-    for k, v in typed_configuration.items():
-        assert type(v) == type(correctly_typed_configuration[k])
-
-
 def test_get_perceptron_layers():
     dummy_seed = DEFAULT_SEED
     dummy_n_layers_grid = [2, 3, 4]
