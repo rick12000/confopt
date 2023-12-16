@@ -13,6 +13,41 @@ def train_val_split(
     ordinal: bool = False,
     random_state: int = None,
 ) -> Tuple[np.array, np.array, np.array, np.array]:
+    """
+    Split X and y data into training and validation sets.
+
+    Splits can be carried out randomly or sequentially, with or without normalization.
+
+    Parameters
+    ----------
+    X :
+        Feature variables.
+    y :
+        Target variable.
+    train_split :
+        Percentage of training data to carve out of the overall
+        data. Values must be contained in the [0, 1] interval.
+    normalize :
+        Whether X features in both the training and validation
+        splits should be normalized according to the training split.
+    ordinal :
+        Whether the split should occur ordinally (only set to True
+        if the X and y data was passed according to some sequential
+        order, eg. sorted by date), else split will be random.
+    random_state :
+        Random seed.
+
+    Returns
+    -------
+    X_train :
+        X features training split.
+    y_train :
+        y target training split.
+    X_val :
+        X features validation split.
+    y_val :
+        y target validation split.
+    """
     if random_state is not None:
         random.seed(random_state)
         np.random.seed(random_state)
@@ -44,6 +79,33 @@ def train_val_split(
 def remove_iqr_outliers(
     X: np.array, y: np.array, scope: str, iqr_factor: Optional[float] = 1.5
 ) -> Tuple[np.array, np.array]:
+    """
+    Remove data outliers via interquartile range filtering.
+
+    Interquartile range is applied to target variable only.
+
+    Parameters
+    ----------
+    X :
+        Feature variables.
+    y :
+        Target variable.
+    scope :
+        Determines which outliers are removed. Takes:
+            - 'top_only': Only upper threshold outliers are removed.
+            - 'bottom_only': Only lower threshold outliers are removed.
+            - 'top_and_bottom': All outliers are removed.
+    iqr_factor :
+        Factor by which to multiply the interquartile range when
+        determining outlier thresholds.
+
+    Returns
+    -------
+    X_retained :
+        Outlier filtered X features variables.
+    y_retained :
+        Outlier filtered y target variable.
+    """
     q1 = np.quantile(y, 0.25)
     q3 = np.quantile(y, 0.75)
     iqr = abs(q3 - q1)
