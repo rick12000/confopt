@@ -401,9 +401,7 @@ def test_random_search__reproducibility(
 
 def test_search(dummy_initialized_conformal_searcher__gbm_mse):
     confidence_level = 0.2
-    interval_type = "locally_weighted"
     conformal_model_type = GBM_NAME
-    conformal_variance_model_type = GBM_NAME
     conformal_retraining_frequency = 1
     conformal_learning_rate = 0.01
 
@@ -416,10 +414,8 @@ def test_search(dummy_initialized_conformal_searcher__gbm_mse):
     )
 
     dummy_initialized_conformal_searcher__gbm_mse.search(
-        conformal_model_type=conformal_model_type,
+        conformal_search_model=conformal_model_type,
         confidence_level=confidence_level,
-        conformal_variance_model_type=conformal_variance_model_type,
-        interval_type=interval_type,
         n_random_searches=min_training_iterations,
         runtime_budget=max_runtime,
         conformal_retraining_frequency=conformal_retraining_frequency,
@@ -442,9 +438,7 @@ def test_search(dummy_initialized_conformal_searcher__gbm_mse):
 def test_search__reproducibility(dummy_double_initialized_conformal_searcher__gbm_mse):
     dummy_seed = DEFAULT_SEED
     confidence_level = 0.2
-    interval_type = "locally_weighted"
     conformal_model_type = GBM_NAME
-    conformal_variance_model_type = GBM_NAME
     conformal_retraining_frequency = 1
     conformal_learning_rate = 0.01
 
@@ -457,10 +451,8 @@ def test_search__reproducibility(dummy_double_initialized_conformal_searcher__gb
     ) = dummy_double_initialized_conformal_searcher__gbm_mse
 
     searcher_first_call.search(
-        conformal_model_type=conformal_model_type,
+        conformal_search_model=conformal_model_type,
         confidence_level=confidence_level,
-        conformal_variance_model_type=conformal_variance_model_type,
-        interval_type=interval_type,
         n_random_searches=min_training_iterations,
         runtime_budget=max_runtime,
         conformal_retraining_frequency=conformal_retraining_frequency,
@@ -470,10 +462,8 @@ def test_search__reproducibility(dummy_double_initialized_conformal_searcher__gb
         random_state=dummy_seed,
     )
     searcher_second_call.search(
-        conformal_model_type=conformal_model_type,
+        conformal_search_model=conformal_model_type,
         confidence_level=confidence_level,
-        conformal_variance_model_type=conformal_variance_model_type,
-        interval_type=interval_type,
         n_random_searches=min_training_iterations,
         runtime_budget=max_runtime,
         conformal_retraining_frequency=conformal_retraining_frequency,

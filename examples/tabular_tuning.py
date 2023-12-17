@@ -35,13 +35,10 @@ searcher = ConformalSearcher(
 
 # Carry out hyperparameter search:
 searcher.search(
-    interval_type="quantile_regression",
-    conformal_model_type="qgbm",
+    conformal_search_model="qgbm",
     n_random_searches=20,
     runtime_budget=90,
     confidence_level=0.5,
-    conformal_retraining_frequency=1,
-    enable_adaptive_intervals=True,
 )
 
 # Retrieve desired outputs from search:

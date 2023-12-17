@@ -286,19 +286,19 @@ class LocallyWeightedConformalRegression:
         X_val: np.array,
         y_val: np.array,
         confidence_level: float,
-        tuning_param_combinations: Optional[int] = 0,
+        tuning_count: Optional[int] = 0,
         custom_best_pe_param_combination: Optional[Dict] = None,
         custom_best_de_param_combination: Optional[Dict] = None,
         custom_best_ve_param_combination: Optional[Dict] = None,
     ):
-        if tuning_param_combinations > 1:
+        if tuning_count > 1:
             optimal_pe_config, pe_tuning_runtime = tune_combinations(
                 estimator_type=self.point_estimator_architecture,
                 X=X_pe,
                 y=y_pe,
                 confidence_level=confidence_level,
                 scoring_function=self.scoring_function,
-                n_of_param_combinations=tuning_param_combinations,
+                n_of_param_combinations=tuning_count,
                 custom_best_param_combination=custom_best_pe_param_combination,
                 random_state=self.random_state,
             )
@@ -313,14 +313,14 @@ class LocallyWeightedConformalRegression:
         optimal_pe_estimator.fit(X_pe, y_pe)
         pe_residuals = np.array(y_ve) - np.array(optimal_pe_estimator.predict(X_ve))
 
-        if tuning_param_combinations > 1:
+        if tuning_count > 1:
             optimal_de_config, de_tuning_runtime = tune_combinations(
                 estimator_type=self.demeaning_estimator_architecture,
                 X=X_ve,
                 y=pe_residuals,
                 confidence_level=confidence_level,
                 scoring_function=self.scoring_function,
-                n_of_param_combinations=tuning_param_combinations,
+                n_of_param_combinations=tuning_count,
                 custom_best_param_combination=custom_best_de_param_combination,
                 random_state=self.random_state,
             )
@@ -336,14 +336,14 @@ class LocallyWeightedConformalRegression:
         optimal_de_estimator.fit(X_ve, pe_residuals)
         demeaned_pe_residuals = abs(pe_residuals - optimal_de_estimator.predict(X_ve))
 
-        if tuning_param_combinations > 1:
+        if tuning_count > 1:
             optimal_ve_config, ve_tuning_runtime = tune_combinations(
                 estimator_type=self.variance_estimator_architecture,
                 X=X_ve,
                 y=demeaned_pe_residuals,
                 confidence_level=confidence_level,
                 scoring_function=self.scoring_function,
-                n_of_param_combinations=tuning_param_combinations,
+                n_of_param_combinations=tuning_count,
                 custom_best_param_combination=custom_best_ve_param_combination,
                 random_state=self.random_state,
             )
@@ -357,7 +357,7 @@ class LocallyWeightedConformalRegression:
         )
         optimal_ve_estimator.fit(X_ve, demeaned_pe_residuals)
 
-        if tuning_param_combinations > 1:
+        if tuning_count > 1:
             self.tuning_runtime = (
                 pe_tuning_runtime + de_tuning_runtime + ve_tuning_runtime
             )

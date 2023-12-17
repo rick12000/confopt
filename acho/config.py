@@ -13,9 +13,11 @@ DNN_NAME: str = "dnn"
 # Reference names of quantile regression models:
 QUANTILE_MODEL_TYPES: List[str] = [QGBM_NAME, QRF_NAME]
 
-# Models that don't need their input data normalized:
+# Reference names of models that don't need their input data normalized:
 NON_NORMALIZING_MODEL_TYPES: List[str] = [RF_NAME, GBM_NAME, QRF_NAME, QGBM_NAME]
 
+# Lookup of metrics to their direction of optimization (direct
+# for performance metrics, inverse for loss or error metrics)
 METRIC_PROPORTIONALITY_LOOKUP: Dict[str, str] = {
     "accuracy_score": "direct",
     "log_loss": "inverse",

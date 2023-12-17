@@ -11,7 +11,7 @@ from tqdm import tqdm
 from acho.config import (
     NON_NORMALIZING_MODEL_TYPES,
     METRIC_PROPORTIONALITY_LOOKUP,
-    KNN_NAME,
+    QUANTILE_MODEL_TYPES,
 )
 from acho.estimation import (
     QuantileConformalRegression,
@@ -296,11 +296,9 @@ class ConformalSearcher:
 
     def search(
         self,
-        conformal_model_type: str,
+        conformal_search_model: str,
         confidence_level: float,
         n_random_searches: int = 20,
-        interval_type: str = "quantile_regression",
-        conformal_variance_model_type: str = KNN_NAME,
         conformal_retraining_frequency: int = 1,
         enable_adaptive_intervals: bool = True,
         conformal_learning_rate: float = 0.1,
@@ -323,7 +321,7 @@ class ConformalSearcher:
             random_state=random_state,
         )
 
-        starting_search_estimator_tunings = 30
+        search_model_tuning_count = 30
 
         best_lw_pe_config = None
         best_lw_de_config = None
@@ -376,11 +374,7 @@ class ConformalSearcher:
                 random_state=random_state,
             )
 
-            if (
-                conformal_model_type.lower() not in NON_NORMALIZING_MODEL_TYPES
-                or conformal_variance_model_type.lower()
-                not in NON_NORMALIZING_MODEL_TYPES
-            ):
+            if conformal_search_model.lower() not in NON_NORMALIZING_MODEL_TYPES:
                 (
                     X_train_conformal,
                     X_val_conformal,
@@ -391,17 +385,15 @@ class ConformalSearcher:
                     searchable_configurations=tabularized_searchable_configurations,
                 )
 
-            is_retraining_interval_passed = (
-                config_idx % conformal_retraining_frequency == 0
-            )
-            if config_idx == 0 or is_retraining_interval_passed:
+            hit_retraining_interval = config_idx % conformal_retraining_frequency == 0
+            if config_idx == 0 or hit_retraining_interval:
                 logger.info("Triggering conformal retraining...")
                 if config_idx == 0:
                     latest_confidence_level = confidence_level
 
-                if interval_type == "quantile_regression":
+                if conformal_search_model in QUANTILE_MODEL_TYPES:
                     conformal_regressor = QuantileConformalRegression(
-                        quantile_estimator_architecture=conformal_model_type,
+                        quantile_estimator_architecture=conformal_search_model,
                         random_state=random_state,
                     )
 
@@ -419,7 +411,7 @@ class ConformalSearcher:
                         X_val=X_val_conformal,
                         y_val=y_val_conformal,
                         confidence_level=latest_confidence_level,
-                        tuning_param_combinations=starting_search_estimator_tunings,
+                        tuning_param_combinations=search_model_tuning_count,
                         custom_best_param_combination=previous_best_cqr_config,
                     )
                     if conformal_regressor.tuning_runtime is not None:
@@ -427,7 +419,7 @@ class ConformalSearcher:
                             conformal_regressor.tuning_runtime
                         )
 
-                elif interval_type == "locally_weighted":
+                else:
                     logger.debug(
                         "Subsplitting training set into sub training and sub validation sets..."
                     )
@@ -448,10 +440,14 @@ class ConformalSearcher:
                         f"and sub validation set of size {HR_X_ve_fitting.shape}"
                     )
 
+                    # TODO: Currently passing the same search model architecture
+                    # into all LWCR estimators, but in future consider allowing
+                    # user to select different estimators for each directly from
+                    # search call:
                     conformal_regressor = LocallyWeightedConformalRegression(
-                        point_estimator_architecture=conformal_model_type,
-                        demeaning_estimator_architecture=conformal_variance_model_type,
-                        variance_estimator_architecture=conformal_variance_model_type,
+                        point_estimator_architecture=conformal_search_model,
+                        demeaning_estimator_architecture=conformal_search_model,
+                        variance_estimator_architecture=conformal_search_model,
                         random_state=random_state,
                     )
 
@@ -488,7 +484,7 @@ class ConformalSearcher:
                         X_val=X_val_conformal,
                         y_val=y_val_conformal,
                         confidence_level=latest_confidence_level,
-                        tuning_param_combinations=starting_search_estimator_tunings,
+                        tuning_count=search_model_tuning_count,
                         custom_best_pe_param_combination=previous_best_lw_pe_config,
                         custom_best_de_param_combination=previous_best_lw_de_config,
                         custom_best_ve_param_combination=previous_best_lw_ve_config,
@@ -498,17 +494,14 @@ class ConformalSearcher:
                             conformal_regressor.tuning_runtime
                         )
 
-                else:
-                    ValueError(f"{interval_type} is not a valid interval type.")
-
-            starting_search_estimator_tunings = derive_optimal_tuning_count(
+            search_model_tuning_count = derive_optimal_tuning_count(
                 baseline_model_runtime=runtime_per_search,
                 search_model_runtime=hyperreg_model_runtime_per_iter,
                 search_model_retraining_freq=conformal_retraining_frequency,
                 search_to_baseline_runtime_ratio=0.3,
             )
             logger.info(
-                f"Optimal number of searcher hyperparameters to search: {starting_search_estimator_tunings}"
+                f"Optimal number of searcher hyperparameters to search: {search_model_tuning_count}"
             )
 
             (

@@ -399,7 +399,7 @@ def test_locally_weighted_regression_tune_fit(
         X_val=X_val,
         y_val=y_val,
         confidence_level=confidence_level,
-        tuning_param_combinations=tuning_param_combinations,
+        tuning_count=tuning_param_combinations,
     )
 
     assert lwcr.nonconformity_scores is not None
@@ -457,7 +457,7 @@ def test_locally_weighted_regression_predict(
         X_val=X_val,
         y_val=y_val,
         confidence_level=confidence_level,
-        tuning_param_combinations=tuning_param_combinations,
+        tuning_count=tuning_param_combinations,
     )
 
     y_low_bounds, y_high_bounds = lwcr.predict(X_val, confidence_level=confidence_level)
