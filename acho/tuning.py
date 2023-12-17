@@ -397,13 +397,8 @@ class ConformalSearcher:
                         random_state=random_state,
                     )
 
-                    previous_best_cqr_config = (
-                        best_cqr_config
-                        if best_cqr_config is None
-                        else best_cqr_config.copy()
-                    )
                     logger.debug(
-                        f"Tune fitting with custom best configuration: {previous_best_cqr_config}"
+                        f"Tune fitting with custom best configuration: {best_cqr_config}"
                     )
                     best_cqr_config = conformal_regressor.tune_fit(
                         X_train=X_train_conformal,
@@ -412,7 +407,7 @@ class ConformalSearcher:
                         y_val=y_val_conformal,
                         confidence_level=latest_confidence_level,
                         tuning_param_combinations=search_model_tuning_count,
-                        custom_best_param_combination=previous_best_cqr_config,
+                        custom_best_param_combination=best_cqr_config,
                     )
                     if conformal_regressor.tuning_runtime is not None:
                         hyperreg_model_runtime_per_iter = (
@@ -451,26 +446,10 @@ class ConformalSearcher:
                         random_state=random_state,
                     )
 
-                    previous_best_lw_pe_config = (
-                        best_lw_pe_config
-                        if best_lw_pe_config is None
-                        else best_lw_pe_config.copy()
-                    )
-                    previous_best_lw_de_config = (
-                        best_lw_de_config
-                        if best_lw_de_config is None
-                        else best_lw_de_config.copy()
-                    )
-                    previous_best_lw_ve_config = (
-                        best_lw_ve_config
-                        if best_lw_ve_config is None
-                        else best_lw_ve_config.copy()
-                    )
-
                     logger.debug(
-                        f"Tune fitting with custom best configurations: {previous_best_lw_pe_config}"
-                        f"{previous_best_lw_de_config}"
-                        f"{previous_best_lw_ve_config}"
+                        f"Tune fitting with custom best configurations: {best_lw_pe_config}"
+                        f"{best_lw_de_config}"
+                        f"{best_lw_ve_config}"
                     )
                     (
                         best_lw_pe_config,
@@ -485,9 +464,9 @@ class ConformalSearcher:
                         y_val=y_val_conformal,
                         confidence_level=latest_confidence_level,
                         tuning_count=search_model_tuning_count,
-                        custom_best_pe_param_combination=previous_best_lw_pe_config,
-                        custom_best_de_param_combination=previous_best_lw_de_config,
-                        custom_best_ve_param_combination=previous_best_lw_ve_config,
+                        custom_best_pe_param_combination=best_lw_pe_config,
+                        custom_best_de_param_combination=best_lw_de_config,
+                        custom_best_ve_param_combination=best_lw_ve_config,
                     )
                     if conformal_regressor.tuning_runtime is not None:
                         hyperreg_model_runtime_per_iter = (
