@@ -18,6 +18,23 @@ DEFAULT_SEED = 1234
 def get_discretized_quantile_dict(
     X: np.array, y: np.array, quantile_level: float
 ) -> Dict:
+    """
+    Helper function to obtain dictionary of quantiles per X value.
+
+    Parameters
+    ----------
+    X :
+        Explanatory variables.
+    y :
+        Target variable.
+    quantile_level :
+        Desired quantile to take.
+
+    Returns
+    -------
+    quantile_dict :
+        Dictionary relating X values to their quantile.
+    """
     quantile_dict = {}
     for discrete_x_coordinate in np.unique(X):
         conditional_y_at_x = y[X == discrete_x_coordinate]
@@ -28,31 +45,29 @@ def get_discretized_quantile_dict(
 
 
 def test_initialize_point_estimator():
-    dummy_seed = DEFAULT_SEED
     dummy_estimator_name = GBM_NAME
 
     initialized_model = initialize_point_estimator(
         estimator_architecture=dummy_estimator_name,
         initialization_params={},
-        random_state=dummy_seed,
+        random_state=DEFAULT_SEED,
     )
 
     assert hasattr(initialized_model, "predict")
 
 
 def test_initialize_point_estimator__reproducibility():
-    dummy_seed = DEFAULT_SEED
     dummy_estimator_name = GBM_NAME
 
     initialized_model_first_call = initialize_point_estimator(
         estimator_architecture=dummy_estimator_name,
         initialization_params={},
-        random_state=dummy_seed,
+        random_state=DEFAULT_SEED,
     )
     initialized_model_second_call = initialize_point_estimator(
         estimator_architecture=dummy_estimator_name,
         initialization_params={},
-        random_state=dummy_seed,
+        random_state=DEFAULT_SEED,
     )
     assert (
         initialized_model_first_call.random_state
@@ -61,7 +76,6 @@ def test_initialize_point_estimator__reproducibility():
 
 
 def test_initialize_quantile_estimator():
-    dummy_seed = DEFAULT_SEED
     dummy_estimator_name = QRF_NAME
     dummy_pinball_loss_alpha = [0.25, 0.75]
 
@@ -69,14 +83,13 @@ def test_initialize_quantile_estimator():
         estimator_architecture=dummy_estimator_name,
         initialization_params={},
         pinball_loss_alpha=dummy_pinball_loss_alpha,
-        random_state=dummy_seed,
+        random_state=DEFAULT_SEED,
     )
 
     assert hasattr(initialized_model, "predict")
 
 
 def test_initialize_quantile_estimator__reproducibility():
-    dummy_seed = DEFAULT_SEED
     dummy_estimator_name = QRF_NAME
     dummy_pinball_loss_alpha = [0.25, 0.75]
 
@@ -84,13 +97,13 @@ def test_initialize_quantile_estimator__reproducibility():
         estimator_architecture=dummy_estimator_name,
         initialization_params={},
         pinball_loss_alpha=dummy_pinball_loss_alpha,
-        random_state=dummy_seed,
+        random_state=DEFAULT_SEED,
     )
     initialized_model_second_call = initialize_quantile_estimator(
         estimator_architecture=dummy_estimator_name,
         initialization_params={},
         pinball_loss_alpha=dummy_pinball_loss_alpha,
-        random_state=dummy_seed,
+        random_state=DEFAULT_SEED,
     )
     assert (
         initialized_model_first_call.random_state
@@ -101,7 +114,6 @@ def test_initialize_quantile_estimator__reproducibility():
 def test_cross_validate_estimator_configurations__point_estimator_mse(
     dummy_gbm_configurations, dummy_stationary_gaussian_dataset
 ):
-    dummy_seed = DEFAULT_SEED
     estimator_type = GBM_NAME
     X, y = (
         dummy_stationary_gaussian_dataset[:, 0].reshape(-1, 1),
@@ -114,7 +126,7 @@ def test_cross_validate_estimator_configurations__point_estimator_mse(
         y=y,
         k_fold_splits=3,
         quantiles=None,
-        random_state=dummy_seed,
+        random_state=DEFAULT_SEED,
     )
 
     assert len(scored_configurations) == len(scores)
@@ -136,7 +148,6 @@ def test_cross_validate_estimator_configurations__point_estimator_mse(
 def test_cross_validate_estimator_configurations__point_estimator_mse__reproducibility(
     dummy_gbm_configurations, dummy_stationary_gaussian_dataset
 ):
-    dummy_seed = DEFAULT_SEED
     estimator_type = GBM_NAME
     X, y = (
         dummy_stationary_gaussian_dataset[:, 0].reshape(-1, 1),
@@ -153,7 +164,7 @@ def test_cross_validate_estimator_configurations__point_estimator_mse__reproduci
         y=y,
         k_fold_splits=3,
         quantiles=None,
-        random_state=dummy_seed,
+        random_state=DEFAULT_SEED,
     )
     (
         scored_configurations_second_call,
@@ -165,7 +176,7 @@ def test_cross_validate_estimator_configurations__point_estimator_mse__reproduci
         y=y,
         k_fold_splits=3,
         quantiles=None,
-        random_state=dummy_seed,
+        random_state=DEFAULT_SEED,
     )
 
     assert scored_configurations_first_call == scored_configurations_second_call
@@ -173,7 +184,7 @@ def test_cross_validate_estimator_configurations__point_estimator_mse__reproduci
 
 
 @pytest.mark.parametrize("confidence_level", [0.2, 0.8])
-@pytest.mark.parametrize("tuning_param_combinations", [2, 5])
+@pytest.mark.parametrize("tuning_param_combinations", [0, 1, 3])
 @pytest.mark.parametrize("quantile_estimator_architecture", [QGBM_NAME, QRF_NAME])
 def test_quantile_regression_tune_fit(
     dummy_fixed_quantile_dataset,
@@ -211,7 +222,7 @@ def test_quantile_regression_tune_fit(
 
 
 @pytest.mark.parametrize("confidence_level", [0.2, 0.8])
-@pytest.mark.parametrize("tuning_param_combinations", [10])
+@pytest.mark.parametrize("tuning_param_combinations", [5])
 @pytest.mark.parametrize("quantile_estimator_architecture", [QGBM_NAME, QRF_NAME])
 def test_quantile_regression_predict(
     dummy_fixed_quantile_dataset,
@@ -301,8 +312,8 @@ def test_quantile_regression_predict(
 
 
 @pytest.mark.parametrize("confidence_level", [0.2, 0.8])
-@pytest.mark.parametrize("tuning_param_combinations", [2, 5])
-@pytest.mark.parametrize("point_estimator_architecture", ["gbm", RF_NAME])
+@pytest.mark.parametrize("tuning_param_combinations", [0, 1, 3])
+@pytest.mark.parametrize("point_estimator_architecture", [GBM_NAME, RF_NAME])
 @pytest.mark.parametrize("demeaning_estimator_architecture", [GBM_NAME])
 @pytest.mark.parametrize("variance_estimator_architecture", [GBM_NAME])
 def test_locally_weighted_regression_tune_fit(
@@ -356,9 +367,7 @@ def test_locally_weighted_regression_tune_fit(
 
 
 @pytest.mark.parametrize("confidence_level", [0.2, 0.8])
-@pytest.mark.parametrize(
-    "tuning_param_combinations", [2, 5]
-)  # TODO: fix None case or 0 case
+@pytest.mark.parametrize("tuning_param_combinations", [5])
 @pytest.mark.parametrize("point_estimator_architecture", [GBM_NAME, RF_NAME])
 @pytest.mark.parametrize("demeaning_estimator_architecture", [GBM_NAME])
 @pytest.mark.parametrize("variance_estimator_architecture", [GBM_NAME])

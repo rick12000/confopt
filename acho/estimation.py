@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 
 import numpy as np
 from quantile_forest import RandomForestQuantileRegressor
@@ -104,6 +104,29 @@ def initialize_point_estimator(
     initialization_params: Dict,
     random_state: Optional[int] = None,
 ):
+    """
+    Initialize a point estimator class from an input dictionary.
+
+    Classes are usually scikit-learn estimators and dictionaries must
+    contain all required inputs for the class, in addition to any
+    optional inputs to be overridden.
+
+    Parameters
+    ----------
+    estimator_architecture :
+        String name for the type of estimator to initialize.
+    initialization_params :
+        Dictionary of initialization parameters, where each key and
+        value pair corresponds to a variable name and variable value
+        to pass to the estimator class to initialize.
+    random_state :
+        Random generation seed.
+
+    Returns
+    -------
+    initialized_model :
+        An initialized estimator class instance.
+    """
     if estimator_architecture == DNN_NAME:
         initialized_model = MLPRegressor(
             **initialization_params, random_state=random_state
@@ -135,9 +158,39 @@ def initialize_point_estimator(
 def initialize_quantile_estimator(
     estimator_architecture: str,
     initialization_params: Dict,
-    pinball_loss_alpha: List,
+    pinball_loss_alpha: List[float],
     random_state: Optional[int] = None,
 ):
+    """
+    Initialize a quantile estimator class from an input dictionary.
+
+    Classes are usually external dependancies or custom wrappers or
+    scikit-learn estimator classes. Passed dictionaries must
+    contain all required inputs for the class, in addition to any
+    optional inputs to be overridden.
+
+    Parameters
+    ----------
+    estimator_architecture :
+        String name for the type of estimator to initialize.
+    initialization_params :
+        Dictionary of initialization parameters, where each key and
+        value pair corresponds to a variable name and variable value
+        to pass to the estimator class to initialize.
+    pinball_loss_alpha :
+        List of pinball loss alpha levels that will result in the
+        estimator predicting the alpha-corresponding quantiles.
+        For eg. passing [0.25, 0.75] will initialize a quantile
+        estimator that predicts the 25th and 75th percentiles of
+        the data.
+    random_state :
+        Random generation seed.
+
+    Returns
+    -------
+    initialized_model :
+        An initialized estimator class instance.
+    """
     if estimator_architecture == QRF_NAME:
         initialized_model = RandomForestQuantileRegressor(
             **initialization_params,
@@ -158,15 +211,20 @@ def initialize_quantile_estimator(
     return initialized_model
 
 
-def average_scores_across_folds(scored_configurations, scores):
+def average_scores_across_folds(
+    scored_configurations: List[Dict], scores: List[float]
+) -> Tuple[List[Dict], List[float]]:
+    # TODO: Refactor so it's more efficient or contained.
+    #  This is a very convoluted function that does something
+    #  very simple.
     aggregated_scores = {}
     fold_counts = {}
 
     for configuration, score in zip(scored_configurations, scores):
         tuplified_configuration = tuple(configuration.items())
         if tuplified_configuration not in aggregated_scores:
-            aggregated_scores[tuplified_configuration] = 0
-            fold_counts[tuplified_configuration] = 0
+            aggregated_scores[tuplified_configuration] = score
+            fold_counts[tuplified_configuration] = 1
         else:
             aggregated_scores[tuplified_configuration] += score
             fold_counts[tuplified_configuration] += 1
@@ -191,9 +249,46 @@ def cross_validate_configurations(
     X: np.array,
     y: np.array,
     k_fold_splits: int = 3,
-    quantiles: List[float] = None,
-    random_state: int = None,
-):
+    quantiles: Optional[List[float]] = None,
+    random_state: Optional[int] = None,
+) -> Tuple[List[Dict], List[float]]:
+    """
+    Cross validates a specified estimator on a passed X, y dataset.
+
+    Cross validation loops through a list of passed hyperparameter
+    configurations for the previously specified estimator and returns
+    an average score across folds for each.
+
+    Parameters
+    ----------
+    configurations :
+        List of estimator parameter configurations, where each
+        configuration contains all parameter values necessary
+        to create an estimator instance.
+    estimator_architecture :
+        String name for the type of estimator to cross validate.
+    X :
+        Explanatory variables to train estimator on.
+    y :
+        Target variable to train estimator on.
+    k_fold_splits :
+        Number of cross validation data splits.
+    quantiles :
+        If the estimator to cross validate is a quantile estimator,
+        specify the quantiles it should estimate as a list in this
+        variable (eg. [0.25, 0.75] will cross validate an estimator
+        predicting the 25th and 75th percentiles of the target variable).
+    random_state :
+        Random generation seed.
+
+    Returns
+    -------
+    cross_fold_scored_configurations :
+        List of cross validated configurations.
+    cross_fold_scores :
+        List of corresponding cross validation scores (averaged across
+        folds).
+    """
     scored_configurations, scores = [], []
     kf = KFold(n_splits=k_fold_splits, random_state=random_state, shuffle=True)
     for train_index, test_index in kf.split(X):
@@ -264,6 +359,15 @@ def cross_validate_configurations(
 
 
 class LocallyWeightedConformalRegression:
+    """
+    Carry out locally weighted conformal regression.
+
+    Fits sequential estimators on X and y data to form point and
+    variability predictions for y.
+
+    The class contains tuning, fitting and prediction methods.
+    """
+
     def __init__(
         self,
         point_estimator_architecture: str,
@@ -285,6 +389,36 @@ class LocallyWeightedConformalRegression:
         k_fold_splits: int = 3,
         random_state: Optional[int] = None,
     ) -> Dict:
+        """
+        Tune specified estimator's hyperparameters.
+
+        Hyperparameters are selected randomly as part of the
+        tuning process and a final optimal hyperparameter
+        configuration is returned.
+
+        Parameters
+        ----------
+        X :
+            Explanatory variables.
+        y :
+            Target variable.
+        estimator_architecture :
+            String name for the type of estimator to tune.
+        n_searches :
+            Number of tuning searches to perform (eg. 5 means
+            the model will randomly select 5 hyperparameter
+            configurations for the estimator to evaluate).
+        k_fold_splits :
+            Number of cross validation data splits.
+        random_state :
+            Random generation seed.
+
+        Returns
+        -------
+        best_configuration :
+            Best performing hyperparameter configuration
+            in tuning.
+        """
         tuning_configurations = get_tuning_configurations(
             parameter_grid=SEARCH_MODEL_TUNING_SPACE[estimator_architecture],
             n_configurations=n_searches,
@@ -315,6 +449,35 @@ class LocallyWeightedConformalRegression:
         tuning_iterations,
         random_state: Optional[int] = None,
     ):
+        """
+        Fit component estimator with option to tune.
+
+        Component estimators are loosely defined, general use
+        point estimators. Their final purpose is dependent on
+        what X and y data is passed to the function (eg. if y is
+        a target, a residual, etc.).
+
+        Parameters
+        ----------
+        X :
+            Explanatory variables.
+        y :
+            Target variable.
+        estimator_architecture :
+            String name for the type of estimator to tune.
+        tuning_iterations :
+            Number of tuning searches to perform (eg. 5 means
+            the model will randomly select 5 hyperparameter
+            configurations for the estimator to evaluate).
+            To skip tuning during fitting, set this to 0.
+        random_state :
+            Random generation seed.
+
+        Returns
+        -------
+        estimator :
+            Fitted estimator object.
+        """
         if tuning_iterations > 1:
             initialization_params = self._tune_component_estimator(
                 X=X,
@@ -349,6 +512,47 @@ class LocallyWeightedConformalRegression:
         tuning_iterations: Optional[int] = 0,
         random_state: Optional[int] = None,
     ):
+        """
+        Fit conformal regression model on specified data.
+
+        Fitting process involves the following sequential steps:
+            1.  Fitting an estimator on a first portion of the
+                data, training on X to predict y.
+            2.  Obtaining residuals between the estimator and
+                observed y's on a second portion of the data.
+            3.  Fitting a conditional mean estimator on the
+                residual data.
+            4.  Using the mean estimator to de-mean the residual
+                data.
+            5.  Fitting an estimator to predict absolute, de-meaned
+                residuals (residual spread around the local mean).
+            6.  Using a third portion of the data as a conformal
+                hold out set to calibrate intervals for the estimator.
+
+        Parameters
+        ----------
+        X_pe :
+            Explanatory variables used to train the point estimator.
+        y_pe :
+            Target variable used to train the point estimator.
+        X_ve :
+            Explanatory variables used to train the residual spread
+            (variability) estimator.
+        y_ve :
+            Target variable used to train the residual spread
+            (variability) estimator.
+        X_val :
+            Explanatory variables used to calibrate the point estimator.
+        y_val :
+            Target variable used to calibrate the point estimator.
+        tuning_iterations :
+            Number of tuning searches to perform (eg. 5 means
+            the model will randomly select 5 hyperparameter
+            configurations for the estimator to evaluate).
+            To skip tuning during fitting, set this to 0.
+        random_state :
+            Random generation seed.
+        """
         self.training_time_tracker = RuntimeTracker()
         self.training_time_tracker.pause_runtime()
 
@@ -387,6 +591,28 @@ class LocallyWeightedConformalRegression:
         self.training_time = self.training_time_tracker.return_runtime()
 
     def predict(self, X: np.array, confidence_level: float):
+        """
+        Predict conformal interval bounds for specified X examples.
+
+        Must be called after a relevant conformal estimator has
+        been trained.
+
+        Parameters
+        ----------
+        X :
+            Explanatory variables to return targets for.
+        confidence_level :
+            Confidence level used to generate intervals.
+
+        Returns
+        -------
+        lower_interval_bound :
+            Lower bound(s) of conformal interval for specified
+            X example(s).
+        upper_interval_bound :
+            Upper bound(s) of conformal interval for specified
+            X example(s).
+        """
         score_quantile = np.quantile(self.nonconformity_scores, confidence_level)
 
         y_pred = np.array(self.pe_estimator.predict(X))
@@ -402,6 +628,15 @@ class LocallyWeightedConformalRegression:
 
 
 class QuantileConformalRegression:
+    """
+    Carry out quantile conformal regression.
+
+    Fits quantile estimators on X and y data and applies non-conformity
+    adjustments to validate quantile estimates.
+
+    The class contains tuning, fitting and prediction methods.
+    """
+
     def __init__(self, quantile_estimator_architecture: str):
         self.quantile_estimator_architecture = quantile_estimator_architecture
 
@@ -452,6 +687,42 @@ class QuantileConformalRegression:
         tuning_iterations: Optional[int] = 0,
         random_state: Optional[int] = None,
     ):
+        """
+        Fit quantile estimator with option to tune.
+
+        Quantile estimators are fitted based on a specified confidence
+        level and return two quantile estimates for the symmetrical
+        lower and upper bounds around that level.
+
+        Parameters
+        ----------
+        X_train :
+            Explanatory variables used to train the quantile estimator.
+        y_train :
+            Target variable used to train the quantile estimator.
+        X_val :
+            Explanatory variables used to calibrate conformal intervals.
+        y_val :
+            Target variable used to calibrate conformal intervals.
+        confidence_level :
+            Confidence level determining quantiles to be predicted
+            by the quantile estimator. Quantiles are obtained symmetrically
+            around the confidence level (eg. 0.5 confidence level would
+            result in a quantile estimator for the 25th and 75th percentiles
+            of the target variable).
+        tuning_iterations :
+            Number of tuning searches to perform (eg. 5 means
+            the model will randomly select 5 hyperparameter
+            configurations for the quantile estimator to evaluate).
+            To skip tuning during fitting, set this to 0.
+        random_state :
+            Random generation seed.
+
+        Returns
+        -------
+        estimator :
+            Fitted estimator object.
+        """
         if tuning_iterations > 1:
             initialization_params = self._tune(
                 X=X_train,
@@ -493,6 +764,31 @@ class QuantileConformalRegression:
         self.nonconformity_scores = np.array(nonconformity_scores)
 
     def predict(self, X: np.array, confidence_level: float):
+        """
+        Predict conformal interval bounds for specified X examples.
+
+        Must be called after a relevant quantile estimator has
+        been trained. Intervals will be generated based on a passed
+        confidence level, which should ideally be the same confidence
+        level specified in training, but may differ (though this is
+        less desirable and there should rarely be a valid reason).
+
+        Parameters
+        ----------
+        X :
+            Explanatory variables to return targets for.
+        confidence_level :
+            Confidence level used to generate intervals.
+
+        Returns
+        -------
+        lower_interval_bound :
+            Lower bound(s) of conformal interval for specified
+            X example(s).
+        upper_interval_bound :
+            Upper bound(s) of conformal interval for specified
+            X example(s).
+        """
         score_quantile = np.quantile(self.nonconformity_scores, confidence_level)
         lower_interval_bound = (
             np.array(self.quantile_estimator.predict(X)[:, 0]) - score_quantile
