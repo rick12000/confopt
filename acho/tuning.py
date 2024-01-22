@@ -9,9 +9,9 @@ from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
 from acho.config import (
-    NON_NORMALIZING_MODEL_TYPES,
+    NON_NORMALIZING_ARCHITECTURES,
     METRIC_PROPORTIONALITY_LOOKUP,
-    QUANTILE_MODEL_TYPES,
+    QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
 from acho.estimation import (
     QuantileConformalRegression,
@@ -80,8 +80,8 @@ def process_and_split_estimation_data(
 ):
     X = searched_configurations.copy()
     y = searched_performances.copy()
-    logger.debug(f"Minimum accuracy/loss in searcher's sampled data: {y.min()}")
-    logger.debug(f"Maximum accuracy/loss in searcher's sampled data: {y.max()}")
+    logger.debug(f"Minimum performance in searcher data: {y.min()}")
+    logger.debug(f"Maximum performance in searcher data: {y.max()}")
 
     if filter_outliers:
         X, y = remove_iqr_outliers(X=X, y=y, scope=outlier_scope)
@@ -200,7 +200,7 @@ class ConformalSearcher:
         return custom_loss_function
 
     def _get_tuning_configurations(self):
-        logger.info("Creating hyperparameter space...")
+        logger.debug("Creating hyperparameter space...")
         tuning_configurations = get_tuning_configurations(
             parameter_grid=self.search_space, n_configurations=1000, random_state=1234
         )
@@ -281,9 +281,8 @@ class ConformalSearcher:
                 runtime_per_search + model_training_timer.return_runtime()
             ) / (config_idx - skipped_configuration_counter + 1)
 
-            logger.info(f"RS Iteration: {config_idx}")
-            logger.info(
-                f"RS Iteration's validation performance: {validation_performance}"
+            logger.debug(
+                f"Random search iter {config_idx} performance: {validation_performance}"
             )
 
             if self.search_timer.return_runtime() > max_runtime:
@@ -321,13 +320,7 @@ class ConformalSearcher:
             random_state=random_state,
         )
 
-        search_model_tuning_count = 30
-
-        best_lw_pe_config = None
-        best_lw_de_config = None
-        best_lw_ve_config = None
-
-        best_cqr_config = None
+        search_model_tuning_count = 0
 
         search_idx_range = range(len(self.tuning_configurations) - n_random_searches)
         for config_idx in search_idx_range:
@@ -374,7 +367,7 @@ class ConformalSearcher:
                 random_state=random_state,
             )
 
-            if conformal_search_model.lower() not in NON_NORMALIZING_MODEL_TYPES:
+            if conformal_search_model.lower() not in NON_NORMALIZING_ARCHITECTURES:
                 (
                     X_train_conformal,
                     X_val_conformal,
@@ -387,37 +380,25 @@ class ConformalSearcher:
 
             hit_retraining_interval = config_idx % conformal_retraining_frequency == 0
             if config_idx == 0 or hit_retraining_interval:
-                logger.info("Triggering conformal retraining...")
                 if config_idx == 0:
                     latest_confidence_level = confidence_level
 
-                if conformal_search_model in QUANTILE_MODEL_TYPES:
+                if conformal_search_model in QUANTILE_ESTIMATOR_ARCHITECTURES:
                     conformal_regressor = QuantileConformalRegression(
-                        quantile_estimator_architecture=conformal_search_model,
-                        random_state=random_state,
+                        quantile_estimator_architecture=conformal_search_model
                     )
 
-                    logger.debug(
-                        f"Tune fitting with custom best configuration: {best_cqr_config}"
-                    )
-                    best_cqr_config = conformal_regressor.tune_fit(
+                    conformal_regressor.fit(
                         X_train=X_train_conformal,
                         y_train=y_train_conformal,
                         X_val=X_val_conformal,
                         y_val=y_val_conformal,
                         confidence_level=latest_confidence_level,
-                        tuning_param_combinations=search_model_tuning_count,
-                        custom_best_param_combination=best_cqr_config,
+                        tuning_iterations=search_model_tuning_count,
+                        random_state=random_state,
                     )
-                    if conformal_regressor.tuning_runtime is not None:
-                        hyperreg_model_runtime_per_iter = (
-                            conformal_regressor.tuning_runtime
-                        )
 
                 else:
-                    logger.debug(
-                        "Subsplitting training set into sub training and sub validation sets..."
-                    )
                     (
                         HR_X_pe_fitting,
                         HR_y_pe_fitting,
@@ -435,52 +416,29 @@ class ConformalSearcher:
                         f"and sub validation set of size {HR_X_ve_fitting.shape}"
                     )
 
-                    # TODO: Currently passing the same search model architecture
-                    # into all LWCR estimators, but in future consider allowing
-                    # user to select different estimators for each directly from
-                    # search call:
                     conformal_regressor = LocallyWeightedConformalRegression(
                         point_estimator_architecture=conformal_search_model,
                         demeaning_estimator_architecture=conformal_search_model,
                         variance_estimator_architecture=conformal_search_model,
-                        random_state=random_state,
                     )
 
-                    logger.debug(
-                        f"Tune fitting with custom best configurations: {best_lw_pe_config}"
-                        f"{best_lw_de_config}"
-                        f"{best_lw_ve_config}"
-                    )
-                    (
-                        best_lw_pe_config,
-                        best_lw_de_config,
-                        best_lw_ve_config,
-                    ) = conformal_regressor.tune_fit(
+                    conformal_regressor.fit(
                         X_pe=HR_X_pe_fitting,
                         y_pe=HR_y_pe_fitting,
                         X_ve=HR_X_ve_fitting,
                         y_ve=HR_y_ve_fitting,
                         X_val=X_val_conformal,
                         y_val=y_val_conformal,
-                        confidence_level=latest_confidence_level,
-                        tuning_count=search_model_tuning_count,
-                        custom_best_pe_param_combination=best_lw_pe_config,
-                        custom_best_de_param_combination=best_lw_de_config,
-                        custom_best_ve_param_combination=best_lw_ve_config,
+                        tuning_iterations=search_model_tuning_count,
+                        random_state=random_state,
                     )
-                    if conformal_regressor.tuning_runtime is not None:
-                        hyperreg_model_runtime_per_iter = (
-                            conformal_regressor.tuning_runtime
-                        )
 
+            hyperreg_model_runtime_per_iter = conformal_regressor.training_time
             search_model_tuning_count = derive_optimal_tuning_count(
                 baseline_model_runtime=runtime_per_search,
                 search_model_runtime=hyperreg_model_runtime_per_iter,
                 search_model_retraining_freq=conformal_retraining_frequency,
                 search_to_baseline_runtime_ratio=0.3,
-            )
-            logger.info(
-                f"Optimal number of searcher hyperparameters to search: {search_model_tuning_count}"
             )
 
             (
@@ -505,10 +463,11 @@ class ConformalSearcher:
             validation_performance = self._evaluate_configuration_performance(
                 configuration=maximal_parameter, random_state=random_state
             )
+            logger.debug(
+                f"Conformal search iter {config_idx} performance: {validation_performance}"
+            )
+
             if np.isnan(validation_performance):
-                logger.debug(
-                    "Obtained non-numerical performance, skipping configuration."
-                )
                 continue
 
             is_last_interval_breached = is_interval_breach(
@@ -527,9 +486,6 @@ class ConformalSearcher:
 
             self.searched_configurations.append(maximal_parameter.copy())
             self.searched_performances.append(validation_performance)
-
-            logger.info(f"Iteration: {config_idx}")
-            logger.info(f"Iteration's validation performance: {validation_performance}")
 
             if self.search_timer.return_runtime() > runtime_budget:
                 break

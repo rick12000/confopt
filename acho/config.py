@@ -1,6 +1,6 @@
 from typing import List, Dict
 
-# Model reference names:
+# Reference names of search estimator architectures:
 QGBM_NAME: str = "qgbm"
 QRF_NAME: str = "qrf"
 KR_NAME: str = "kr"
@@ -10,11 +10,11 @@ KNN_NAME: str = "knn"
 RF_NAME: str = "rf"
 DNN_NAME: str = "dnn"
 
-# Reference names of quantile regression models:
-QUANTILE_MODEL_TYPES: List[str] = [QGBM_NAME, QRF_NAME]
+# Reference names of quantile regression estimators:
+QUANTILE_ESTIMATOR_ARCHITECTURES: List[str] = [QGBM_NAME, QRF_NAME]
 
-# Reference names of models that don't need their input data normalized:
-NON_NORMALIZING_MODEL_TYPES: List[str] = [RF_NAME, GBM_NAME, QRF_NAME, QGBM_NAME]
+# Reference names of estimators that don't need their input data normalized:
+NON_NORMALIZING_ARCHITECTURES: List[str] = [RF_NAME, GBM_NAME, QRF_NAME, QGBM_NAME]
 
 # Lookup of metrics to their direction of optimization (direct
 # for performance metrics, inverse for loss or error metrics)

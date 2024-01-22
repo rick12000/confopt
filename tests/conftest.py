@@ -70,9 +70,7 @@ def dummy_performance_bounds():
 
 @pytest.fixture
 def dummy_init_quantile_regression():
-    qcr = QuantileConformalRegression(
-        quantile_estimator_architecture="qgbm", random_state=DEFAULT_SEED
-    )
+    qcr = QuantileConformalRegression(quantile_estimator_architecture="qgbm")
     return qcr
 
 
@@ -82,7 +80,6 @@ def dummy_init_locally_weighted_regression():
         point_estimator_architecture="gbm",
         demeaning_estimator_architecture="gbm",
         variance_estimator_architecture="gbm",
-        random_state=DEFAULT_SEED,
     )
     return lwr
 

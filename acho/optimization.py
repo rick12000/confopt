@@ -70,4 +70,6 @@ def derive_optimal_tuning_count(
         count_ceiling, max(1, int(round(search_model_tuning_count)))
     )
 
+    logger.debug(f"Optimal search model param evaluations: {search_model_tuning_count}")
+
     return search_model_tuning_count

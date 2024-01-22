@@ -1,5 +1,4 @@
 import logging
-import math
 from typing import Dict, Optional, List
 
 import numpy as np
@@ -23,7 +22,7 @@ from acho.config import (
     KNN_NAME,
     KR_NAME,
     RF_NAME,
-    QUANTILE_MODEL_TYPES,
+    QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
 from acho.optimization import RuntimeTracker
 from acho.quantile_wrappers import QuantileGBM
@@ -31,7 +30,7 @@ from acho.utils import get_tuning_configurations, get_perceptron_layers
 
 logger = logging.getLogger(__name__)
 
-CONFORMAL_MODEL_SEARCH_SPACE: Dict = {
+SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
     DNN_NAME: {
         "solver": ["adam", "sgd"],
         "learning_rate_init": [0.0001, 0.001, 0.01, 0.1],
@@ -66,116 +65,186 @@ CONFORMAL_MODEL_SEARCH_SPACE: Dict = {
     },
 }
 
+SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
+    DNN_NAME: {
+        "solver": "adam",
+        "learning_rate_init": 0.001,
+        "alpha": 0.1,
+        "hidden_layer_sizes": (32, 16),
+    },
+    RF_NAME: {
+        "n_estimators": 150,
+        "max_features": 0.8,
+        "min_samples_split": 2,
+        "min_samples_leaf": 2,
+    },
+    KNN_NAME: {"n_neighbors": 2},
+    GBM_NAME: {
+        "learning_rate": 0.2,
+        "n_estimators": 100,
+        "min_samples_split": 2,
+        "min_samples_leaf": 2,
+        "max_depth": 3,
+    },
+    GP_NAME: {"kernel": RBF()},
+    KR_NAME: {"alpha": 0.1},
+    QRF_NAME: {"n_estimators": 100},
+    QGBM_NAME: {
+        "learning_rate": 0.2,
+        "n_estimators": 100,
+        "min_samples_split": 2,
+        "min_samples_leaf": 2,
+        "max_depth": 3,
+    },
+}
+
 
 def initialize_point_estimator(
-    estimator_name: str, initialization_params: Dict, random_state: Optional[int] = None
+    estimator_architecture: str,
+    initialization_params: Dict,
+    random_state: Optional[int] = None,
 ):
-    if estimator_name == DNN_NAME:
+    if estimator_architecture == DNN_NAME:
         initialized_model = MLPRegressor(
             **initialization_params, random_state=random_state
         )
-    elif estimator_name == RF_NAME:
+    elif estimator_architecture == RF_NAME:
         initialized_model = RandomForestRegressor(
             **initialization_params, random_state=random_state
         )
-    elif estimator_name == KNN_NAME:
+    elif estimator_architecture == KNN_NAME:
         initialized_model = KNeighborsRegressor(**initialization_params)
-    elif estimator_name == GBM_NAME:
+    elif estimator_architecture == GBM_NAME:
         initialized_model = GradientBoostingRegressor(
             **initialization_params, random_state=random_state
         )
-    elif estimator_name == GP_NAME:
+    elif estimator_architecture == GP_NAME:
         initialized_model = GaussianProcessRegressor(
             **initialization_params, random_state=random_state
         )
-    elif estimator_name == KR_NAME:
+    elif estimator_architecture == KR_NAME:
         initialized_model = KernelRidge(**initialization_params)
     else:
-        raise ValueError(f"{estimator_name} is not a valid point estimator name.")
+        raise ValueError(
+            f"{estimator_architecture} is not a valid point estimator architecture."
+        )
 
     return initialized_model
 
 
 def initialize_quantile_estimator(
-    estimator_name: str,
+    estimator_architecture: str,
     initialization_params: Dict,
     pinball_loss_alpha: List,
     random_state: Optional[int] = None,
 ):
-    if estimator_name == QRF_NAME:
+    if estimator_architecture == QRF_NAME:
         initialized_model = RandomForestQuantileRegressor(
             **initialization_params,
             default_quantiles=pinball_loss_alpha,
             random_state=random_state,
         )
-    elif estimator_name == QGBM_NAME:
+    elif estimator_architecture == QGBM_NAME:
         initialized_model = QuantileGBM(
             **initialization_params,
             quantiles=pinball_loss_alpha,
             random_state=random_state,
         )
     else:
-        raise ValueError(f"{estimator_name} is not a valid estimator name.")
+        raise ValueError(
+            f"{estimator_architecture} is not a valid estimator architecture."
+        )
 
     return initialized_model
 
 
-def cross_validate_estimator_configurations(
+def average_scores_across_folds(scored_configurations, scores):
+    aggregated_scores = {}
+    fold_counts = {}
+
+    for configuration, score in zip(scored_configurations, scores):
+        tuplified_configuration = tuple(configuration.items())
+        if tuplified_configuration not in aggregated_scores:
+            aggregated_scores[tuplified_configuration] = 0
+            fold_counts[tuplified_configuration] = 0
+        else:
+            aggregated_scores[tuplified_configuration] += score
+            fold_counts[tuplified_configuration] += 1
+
+    for tuplified_configuration in aggregated_scores:
+        aggregated_scores[tuplified_configuration] /= fold_counts[
+            tuplified_configuration
+        ]
+
+    aggregated_configurations = [
+        dict(list(tuplified_configuration))
+        for tuplified_configuration in list(aggregated_scores.keys())
+    ]
+    aggregated_scores = list(aggregated_scores.values())
+
+    return aggregated_configurations, aggregated_scores
+
+
+def cross_validate_configurations(
     configurations: List[Dict],
-    estimator_type: str,
+    estimator_architecture: str,
     X: np.array,
     y: np.array,
-    k_fold_splits: int,
-    scoring_function: str,
+    k_fold_splits: int = 3,
     quantiles: List[float] = None,
     random_state: int = None,
 ):
-    if k_fold_splits is None:
-        k_fold_splits = min(3, len(X))
-    logger.debug(f"Cross validating with {k_fold_splits} splits...")
-
-    kf = KFold(n_splits=k_fold_splits, random_state=random_state, shuffle=True)
-
-    logger.debug(f"Length of X: {X.shape}. " f"Length of y: {y.shape}.")
     scored_configurations, scores = [], []
+    kf = KFold(n_splits=k_fold_splits, random_state=random_state, shuffle=True)
     for train_index, test_index in kf.split(X):
         X_train, X_val = X[train_index, :], X[test_index, :]
         Y_train, Y_val = y[train_index], y[test_index]
 
         for configuration in configurations:
             logger.debug(
-                f"Searching conformal estimator parameter configuration: {configuration}"
+                f"Evaluating search model parameter configuration: {configuration}"
             )
-            if estimator_type in QUANTILE_MODEL_TYPES:
-                fitted_model = initialize_quantile_estimator(
-                    estimator_name=estimator_type,
-                    initialization_params=configuration,
-                    pinball_loss_alpha=quantiles,
-                    random_state=random_state,
-                )
-            else:
-                fitted_model = initialize_point_estimator(
-                    estimator_name=estimator_type,
-                    initialization_params=configuration,
-                    random_state=random_state,
-                )
-            fitted_model.fit(X_train, Y_train)
-            y_pred = fitted_model.predict(X_val)
-            try:
-                if scoring_function == "root_mean_squared_error":
-                    score = math.sqrt(metrics.mean_squared_error(Y_val, y_pred))
-                elif scoring_function == "mean_pinball_loss":
-                    y_pred_lo = fitted_model.predict(X_val)[:, 0]
-                    y_pred_hi = fitted_model.predict(X_val)[:, 1]
-                    score_lo = mean_pinball_loss(Y_val, y_pred_lo, alpha=quantiles[0])
-                    score_hi = mean_pinball_loss(Y_val, y_pred_hi, alpha=quantiles[1])
-                    score = (score_lo + score_hi) / 2
-                elif scoring_function == "mean_squared_error":
-                    score = metrics.mean_squared_error(Y_val, y_pred)
-                else:
+            if estimator_architecture in QUANTILE_ESTIMATOR_ARCHITECTURES:
+                if quantiles is None:
                     raise ValueError(
-                        f"{scoring_function} is not a supported scoring function."
+                        "'quantiles' cannot be None if passing a quantile regression estimator."
                     )
+                else:
+                    model = initialize_quantile_estimator(
+                        estimator_architecture=estimator_architecture,
+                        initialization_params=configuration,
+                        pinball_loss_alpha=quantiles,
+                        random_state=random_state,
+                    )
+            else:
+                model = initialize_point_estimator(
+                    estimator_architecture=estimator_architecture,
+                    initialization_params=configuration,
+                    random_state=random_state,
+                )
+            model.fit(X_train, Y_train)
+            y_pred = model.predict(X_val)
+
+            try:
+                if estimator_architecture in QUANTILE_ESTIMATOR_ARCHITECTURES:
+                    if quantiles is None:
+                        raise ValueError(
+                            "'quantiles' cannot be None if passing a quantile regression estimator."
+                        )
+                    else:
+                        # Then evaluate on pinball loss:
+                        lo_y_pred = model.predict(X_val)[:, 0]
+                        hi_y_pred = model.predict(X_val)[:, 1]
+                        lo_score = mean_pinball_loss(
+                            Y_val, lo_y_pred, alpha=quantiles[0]
+                        )
+                        hi_score = mean_pinball_loss(
+                            Y_val, hi_y_pred, alpha=quantiles[1]
+                        )
+                        score = (lo_score + hi_score) / 2
+                else:
+                    # Then evaluate on MSE:
+                    score = metrics.mean_squared_error(Y_val, y_pred)
 
                 scored_configurations.append(configuration)
                 scores.append(score)
@@ -185,76 +254,13 @@ def cross_validate_estimator_configurations(
                     "Scoring failed and result was not appended."
                     f"Caught exception: {e}"
                 )
+                continue
 
-    cross_fold_scored_configurations, cross_fold_scores = [], []
-    for configuration in configurations:
-        configuration_scores = [
-            score
-            for scored_configuration, score in zip(scored_configurations, scores)
-            if scored_configuration == configuration
-        ]
-        if len(configuration_scores) > 0:
-            configuration_average_score = sum(configuration_scores) / len(
-                configuration_scores
-            )
-            cross_fold_scored_configurations.append(configuration)
-            cross_fold_scores.append(configuration_average_score)
+    cross_fold_scored_configurations, cross_fold_scores = average_scores_across_folds(
+        scored_configurations=scored_configurations, scores=scores
+    )
 
     return cross_fold_scored_configurations, cross_fold_scores
-
-
-def tune_combinations(
-    estimator_type: str,
-    X: np.array,
-    y: np.array,
-    confidence_level: float,
-    scoring_function: str,
-    n_of_param_combinations: int,
-    custom_best_param_combination: Optional[Dict] = None,
-    random_state: Optional[int] = None,
-):
-    tuning_runtime_log = RuntimeTracker()
-
-    parameter_grid = CONFORMAL_MODEL_SEARCH_SPACE[estimator_type]
-
-    hyperparameter_configuration_list = get_tuning_configurations(
-        parameter_grid=parameter_grid,
-        n_configurations=n_of_param_combinations,
-        random_state=random_state,
-    )
-
-    if custom_best_param_combination is not None:
-        hyperparameter_configuration_list.append(custom_best_param_combination)
-
-    logger.info(f"Tuning hyperparameters for {estimator_type} estimator...")
-
-    if estimator_type in QUANTILE_MODEL_TYPES:
-        quantiles = [
-            ((1 - confidence_level) / 2),
-            confidence_level + ((1 - confidence_level) / 2),
-        ]
-    else:
-        quantiles = None
-    scored_configurations, scores = cross_validate_estimator_configurations(
-        configurations=hyperparameter_configuration_list,
-        estimator_type=estimator_type,
-        X=X,
-        y=y,
-        k_fold_splits=3,
-        scoring_function=scoring_function,
-        quantiles=quantiles,
-        random_state=random_state,
-    )
-    logger.info(f"Tuning completed with optimal error of: {min(scores)}")
-
-    optimal_parameters = scored_configurations[scores.index(max(scores))]
-    logger.debug(f"Optimal conformal hyperparameters: {optimal_parameters}")
-
-    tuning_runtime_per_configuration = tuning_runtime_log.return_runtime() / (
-        len(hyperparameter_configuration_list)
-    )
-
-    return optimal_parameters, tuning_runtime_per_configuration
 
 
 class LocallyWeightedConformalRegression:
@@ -263,21 +269,76 @@ class LocallyWeightedConformalRegression:
         point_estimator_architecture: str,
         demeaning_estimator_architecture: str,
         variance_estimator_architecture: str,
-        random_state: int,
     ):
         self.point_estimator_architecture = point_estimator_architecture
         self.demeaning_estimator_architecture = demeaning_estimator_architecture
         self.variance_estimator_architecture = variance_estimator_architecture
-        self.random_state = random_state
 
-        self.nonconformity_scores = None
-        self.trained_pe_estimator = None
-        self.trained_ve_estimator = None
-        self.tuning_runtime = None
+        self.training_time = None
 
-        self.scoring_function = "mean_squared_error"
+    def _tune_component_estimator(
+        self,
+        X: np.array,
+        y: np.array,
+        estimator_architecture: str,
+        n_searches: int,
+        k_fold_splits: int = 3,
+        random_state: Optional[int] = None,
+    ) -> Dict:
+        tuning_configurations = get_tuning_configurations(
+            parameter_grid=SEARCH_MODEL_TUNING_SPACE[estimator_architecture],
+            n_configurations=n_searches,
+            random_state=random_state,
+        )
+        tuning_configurations.append(
+            SEARCH_MODEL_DEFAULT_CONFIGURATIONS[estimator_architecture]
+        )
 
-    def tune_fit(
+        scored_configurations, scores = cross_validate_configurations(
+            configurations=tuning_configurations,
+            estimator_architecture=estimator_architecture,
+            X=X,
+            y=y,
+            k_fold_splits=k_fold_splits,
+            quantiles=None,
+            random_state=random_state,
+        )
+        best_configuration = scored_configurations[scores.index(max(scores))]
+
+        return best_configuration
+
+    def _fit_component_estimator(
+        self,
+        X,
+        y,
+        estimator_architecture,
+        tuning_iterations,
+        random_state: Optional[int] = None,
+    ):
+        if tuning_iterations > 1:
+            initialization_params = self._tune_component_estimator(
+                X=X,
+                y=y,
+                estimator_architecture=estimator_architecture,
+                n_searches=tuning_iterations,
+                random_state=random_state,
+            )
+        else:
+            initialization_params = SEARCH_MODEL_DEFAULT_CONFIGURATIONS[
+                estimator_architecture
+            ].copy()
+        estimator = initialize_point_estimator(
+            estimator_architecture=estimator_architecture,
+            initialization_params=initialization_params,
+            random_state=random_state,
+        )
+        self.training_time_tracker.resume_runtime()
+        estimator.fit(X, y)
+        self.training_time_tracker.pause_runtime()
+
+        return estimator
+
+    def fit(
         self,
         X_pe: np.array,
         y_pe: np.array,
@@ -285,169 +346,159 @@ class LocallyWeightedConformalRegression:
         y_ve: np.array,
         X_val: np.array,
         y_val: np.array,
-        confidence_level: float,
-        tuning_count: Optional[int] = 0,
-        custom_best_pe_param_combination: Optional[Dict] = None,
-        custom_best_de_param_combination: Optional[Dict] = None,
-        custom_best_ve_param_combination: Optional[Dict] = None,
+        tuning_iterations: Optional[int] = 0,
+        random_state: Optional[int] = None,
     ):
-        if tuning_count > 1:
-            optimal_pe_config, pe_tuning_runtime = tune_combinations(
-                estimator_type=self.point_estimator_architecture,
-                X=X_pe,
-                y=y_pe,
-                confidence_level=confidence_level,
-                scoring_function=self.scoring_function,
-                n_of_param_combinations=tuning_count,
-                custom_best_param_combination=custom_best_pe_param_combination,
-                random_state=self.random_state,
-            )
-        else:
-            optimal_pe_config = custom_best_pe_param_combination.copy()
-            pe_tuning_runtime = None
-        optimal_pe_estimator = initialize_point_estimator(
-            estimator_name=self.point_estimator_architecture,
-            initialization_params=optimal_pe_config,
-            random_state=self.random_state,
+        self.training_time_tracker = RuntimeTracker()
+        self.training_time_tracker.pause_runtime()
+
+        self.pe_estimator = self._fit_component_estimator(
+            X=X_pe,
+            y=y_pe,
+            estimator_architecture=self.point_estimator_architecture,
+            tuning_iterations=tuning_iterations,
+            random_state=random_state,
         )
-        optimal_pe_estimator.fit(X_pe, y_pe)
-        pe_residuals = np.array(y_ve) - np.array(optimal_pe_estimator.predict(X_ve))
+        pe_residuals = y_ve - self.pe_estimator.predict(X_ve)
 
-        if tuning_count > 1:
-            optimal_de_config, de_tuning_runtime = tune_combinations(
-                estimator_type=self.demeaning_estimator_architecture,
-                X=X_ve,
-                y=pe_residuals,
-                confidence_level=confidence_level,
-                scoring_function=self.scoring_function,
-                n_of_param_combinations=tuning_count,
-                custom_best_param_combination=custom_best_de_param_combination,
-                random_state=self.random_state,
-            )
-        else:
-            optimal_de_config = custom_best_de_param_combination.copy()
-            de_tuning_runtime = None
-
-        optimal_de_estimator = initialize_point_estimator(
-            estimator_name=self.demeaning_estimator_architecture,
-            initialization_params=optimal_de_config,
-            random_state=self.random_state,
+        de_estimator = self._fit_component_estimator(
+            X=X_ve,
+            y=pe_residuals,
+            estimator_architecture=self.demeaning_estimator_architecture,
+            tuning_iterations=tuning_iterations,
+            random_state=random_state,
         )
-        optimal_de_estimator.fit(X_ve, pe_residuals)
-        demeaned_pe_residuals = abs(pe_residuals - optimal_de_estimator.predict(X_ve))
+        demeaned_pe_residuals = abs(pe_residuals - de_estimator.predict(X_ve))
 
-        if tuning_count > 1:
-            optimal_ve_config, ve_tuning_runtime = tune_combinations(
-                estimator_type=self.variance_estimator_architecture,
-                X=X_ve,
-                y=demeaned_pe_residuals,
-                confidence_level=confidence_level,
-                scoring_function=self.scoring_function,
-                n_of_param_combinations=tuning_count,
-                custom_best_param_combination=custom_best_ve_param_combination,
-                random_state=self.random_state,
-            )
-        else:
-            optimal_ve_config = custom_best_ve_param_combination.copy()
-            ve_tuning_runtime = None
-        optimal_ve_estimator = initialize_point_estimator(
-            estimator_name=self.variance_estimator_architecture,
-            initialization_params=optimal_ve_config,
-            random_state=self.random_state,
+        self.ve_estimator = self._fit_component_estimator(
+            X=X_ve,
+            y=demeaned_pe_residuals,
+            estimator_architecture=self.variance_estimator_architecture,
+            tuning_iterations=tuning_iterations,
+            random_state=random_state,
         )
-        optimal_ve_estimator.fit(X_ve, demeaned_pe_residuals)
 
-        if tuning_count > 1:
-            self.tuning_runtime = (
-                pe_tuning_runtime + de_tuning_runtime + ve_tuning_runtime
-            )
+        var_pred = self.ve_estimator.predict(X_val)
+        var_pred = np.array([1 if x <= 0 else x for x in var_pred])
 
-        var_array = optimal_ve_estimator.predict(X_val)
-        var_array = np.array([1 if x <= 0 else x for x in var_array])
         self.nonconformity_scores = (
-            abs(np.array(y_val) - optimal_pe_estimator.predict(X_val)) / var_array
+            abs(np.array(y_val) - self.pe_estimator.predict(X_val)) / var_pred
         )
-        self.trained_pe_estimator = optimal_pe_estimator
-        self.trained_ve_estimator = optimal_ve_estimator
-
-        return optimal_pe_config, optimal_de_config, optimal_ve_config
+        self.training_time = self.training_time_tracker.return_runtime()
 
     def predict(self, X: np.array, confidence_level: float):
-        conformal_quantile = np.percentile(
-            self.nonconformity_scores, confidence_level * 100
-        )
+        score_quantile = np.quantile(self.nonconformity_scores, confidence_level)
 
-        y_full_pred = np.array(self.trained_pe_estimator.predict(X))
+        y_pred = np.array(self.pe_estimator.predict(X))
 
-        var_array = self.trained_ve_estimator.predict(X)
-        var_array = np.array([max(x, 0) for x in var_array])
-        intervals = conformal_quantile * var_array
+        var_pred = self.ve_estimator.predict(X)
+        var_pred = np.array([max(x, 0) for x in var_pred])
+        scaled_score = score_quantile * var_pred
 
-        max_bound_y = y_full_pred + intervals
-        min_bound_y = y_full_pred - intervals
+        lower_interval_bound = y_pred - scaled_score
+        upper_interval_bound = y_pred + scaled_score
 
-        return min_bound_y, max_bound_y
+        return lower_interval_bound, upper_interval_bound
 
 
 class QuantileConformalRegression:
-    def __init__(self, quantile_estimator_architecture: str, random_state: int):
+    def __init__(self, quantile_estimator_architecture: str):
         self.quantile_estimator_architecture = quantile_estimator_architecture
-        self.random_state = random_state
 
-        self.scoring_function = "mean_pinball_loss"
-        self.tuning_runtime = None
+        self.training_time = None
 
-    def tune_fit(
+    def _tune(
+        self,
+        X: np.array,
+        y: np.array,
+        estimator_architecture: str,
+        n_searches: int,
+        confidence_level: float,
+        k_fold_splits: int = 3,
+        random_state: Optional[int] = None,
+    ) -> Dict:
+        tuning_configurations = get_tuning_configurations(
+            parameter_grid=SEARCH_MODEL_TUNING_SPACE[estimator_architecture],
+            n_configurations=n_searches,
+            random_state=random_state,
+        )
+        tuning_configurations.append(
+            SEARCH_MODEL_DEFAULT_CONFIGURATIONS[estimator_architecture]
+        )
+
+        scored_configurations, scores = cross_validate_configurations(
+            configurations=tuning_configurations,
+            estimator_architecture=estimator_architecture,
+            X=X,
+            y=y,
+            k_fold_splits=k_fold_splits,
+            quantiles=[
+                ((1 - confidence_level) / 2),
+                confidence_level + ((1 - confidence_level) / 2),
+            ],
+            random_state=random_state,
+        )
+        best_configuration = scored_configurations[scores.index(max(scores))]
+
+        return best_configuration
+
+    def fit(
         self,
         X_train: np.array,
         y_train: np.array,
         X_val: np.array,
         y_val: np.array,
         confidence_level: float,
-        tuning_param_combinations: Optional[int] = 0,
-        custom_best_param_combination: Optional[Dict] = None,
+        tuning_iterations: Optional[int] = 0,
+        random_state: Optional[int] = None,
     ):
-        if tuning_param_combinations > 1:
-            optimal_config, tuning_runtime = tune_combinations(
-                estimator_type=self.quantile_estimator_architecture,
+        if tuning_iterations > 1:
+            initialization_params = self._tune(
                 X=X_train,
                 y=y_train,
+                estimator_architecture=self.quantile_estimator_architecture,
+                n_searches=tuning_iterations,
                 confidence_level=confidence_level,
-                scoring_function=self.scoring_function,
-                n_of_param_combinations=tuning_param_combinations,
-                custom_best_param_combination=custom_best_param_combination,
-                random_state=self.random_state,
+                random_state=random_state,
             )
-            self.tuning_runtime = tuning_runtime
         else:
-            optimal_config = custom_best_param_combination.copy()
-        optimal_quantile_estimator = initialize_quantile_estimator(
-            estimator_name=self.quantile_estimator_architecture,
-            initialization_params=optimal_config,
+            initialization_params = SEARCH_MODEL_DEFAULT_CONFIGURATIONS[
+                self.quantile_estimator_architecture
+            ].copy()
+
+        self.quantile_estimator = initialize_quantile_estimator(
+            estimator_architecture=self.quantile_estimator_architecture,
+            initialization_params=initialization_params,
             pinball_loss_alpha=[
                 ((1 - confidence_level) / 2),
                 confidence_level + ((1 - confidence_level) / 2),
             ],
-            random_state=self.random_state,
+            random_state=random_state,
         )
-        optimal_quantile_estimator.fit(X_train, y_train)
+        training_time_tracker = RuntimeTracker()
+        self.quantile_estimator.fit(X_train, y_train)
+        self.training_time = training_time_tracker.return_runtime()
 
-        self.quant_reg = optimal_quantile_estimator
-
-        lo_errors = list(self.quant_reg.predict(X_val)[:, 0] - y_val)
-        hi_errors = list(y_val - self.quant_reg.predict(X_val)[:, 1])
-        errors = []
-        for lo, hi in zip(lo_errors, hi_errors):
-            errors.append(max(lo, hi))
-        errors = np.array(errors)
-
-        self.errors = errors
-
-        return optimal_config
+        lower_conformal_deviations = list(
+            self.quantile_estimator.predict(X_val)[:, 0] - y_val
+        )
+        upper_conformal_deviations = list(
+            y_val - self.quantile_estimator.predict(X_val)[:, 1]
+        )
+        nonconformity_scores = []
+        for lower_deviation, upper_deviation in zip(
+            lower_conformal_deviations, upper_conformal_deviations
+        ):
+            nonconformity_scores.append(max(lower_deviation, upper_deviation))
+        self.nonconformity_scores = np.array(nonconformity_scores)
 
     def predict(self, X: np.array, confidence_level: float):
-        conformal_quantile = np.quantile(self.errors, confidence_level)
-        min_bound_y = np.array(self.quant_reg.predict(X)[:, 0]) - conformal_quantile
-        max_bound_y = np.array(self.quant_reg.predict(X)[:, 1]) + conformal_quantile
+        score_quantile = np.quantile(self.nonconformity_scores, confidence_level)
+        lower_interval_bound = (
+            np.array(self.quantile_estimator.predict(X)[:, 0]) - score_quantile
+        )
+        upper_interval_bound = (
+            np.array(self.quantile_estimator.predict(X)[:, 1]) + score_quantile
+        )
 
-        return min_bound_y, max_bound_y
+        return lower_interval_bound, upper_interval_bound

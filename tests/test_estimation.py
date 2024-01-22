@@ -9,8 +9,7 @@ from acho.estimation import (
     LocallyWeightedConformalRegression,
     initialize_point_estimator,
     initialize_quantile_estimator,
-    cross_validate_estimator_configurations,
-    tune_combinations,
+    cross_validate_configurations,
 )
 
 DEFAULT_SEED = 1234
@@ -33,7 +32,7 @@ def test_initialize_point_estimator():
     dummy_estimator_name = GBM_NAME
 
     initialized_model = initialize_point_estimator(
-        estimator_name=dummy_estimator_name,
+        estimator_architecture=dummy_estimator_name,
         initialization_params={},
         random_state=dummy_seed,
     )
@@ -46,12 +45,12 @@ def test_initialize_point_estimator__reproducibility():
     dummy_estimator_name = GBM_NAME
 
     initialized_model_first_call = initialize_point_estimator(
-        estimator_name=dummy_estimator_name,
+        estimator_architecture=dummy_estimator_name,
         initialization_params={},
         random_state=dummy_seed,
     )
     initialized_model_second_call = initialize_point_estimator(
-        estimator_name=dummy_estimator_name,
+        estimator_architecture=dummy_estimator_name,
         initialization_params={},
         random_state=dummy_seed,
     )
@@ -67,7 +66,7 @@ def test_initialize_quantile_estimator():
     dummy_pinball_loss_alpha = [0.25, 0.75]
 
     initialized_model = initialize_quantile_estimator(
-        estimator_name=dummy_estimator_name,
+        estimator_architecture=dummy_estimator_name,
         initialization_params={},
         pinball_loss_alpha=dummy_pinball_loss_alpha,
         random_state=dummy_seed,
@@ -82,13 +81,13 @@ def test_initialize_quantile_estimator__reproducibility():
     dummy_pinball_loss_alpha = [0.25, 0.75]
 
     initialized_model_first_call = initialize_quantile_estimator(
-        estimator_name=dummy_estimator_name,
+        estimator_architecture=dummy_estimator_name,
         initialization_params={},
         pinball_loss_alpha=dummy_pinball_loss_alpha,
         random_state=dummy_seed,
     )
     initialized_model_second_call = initialize_quantile_estimator(
-        estimator_name=dummy_estimator_name,
+        estimator_architecture=dummy_estimator_name,
         initialization_params={},
         pinball_loss_alpha=dummy_pinball_loss_alpha,
         random_state=dummy_seed,
@@ -108,13 +107,12 @@ def test_cross_validate_estimator_configurations__point_estimator_mse(
         dummy_stationary_gaussian_dataset[:, 0].reshape(-1, 1),
         dummy_stationary_gaussian_dataset[:, 1],
     )
-    scored_configurations, scores = cross_validate_estimator_configurations(
+    scored_configurations, scores = cross_validate_configurations(
         configurations=dummy_gbm_configurations,
-        estimator_type=estimator_type,
+        estimator_architecture=estimator_type,
         X=X,
         y=y,
         k_fold_splits=3,
-        scoring_function="mean_squared_error",
         quantiles=None,
         random_state=dummy_seed,
     )
@@ -148,77 +146,30 @@ def test_cross_validate_estimator_configurations__point_estimator_mse__reproduci
     (
         scored_configurations_first_call,
         scores_first_call,
-    ) = cross_validate_estimator_configurations(
+    ) = cross_validate_configurations(
         configurations=dummy_gbm_configurations,
-        estimator_type=estimator_type,
+        estimator_architecture=estimator_type,
         X=X,
         y=y,
         k_fold_splits=3,
-        scoring_function="mean_squared_error",
         quantiles=None,
         random_state=dummy_seed,
     )
     (
         scored_configurations_second_call,
         scores_second_call,
-    ) = cross_validate_estimator_configurations(
+    ) = cross_validate_configurations(
         configurations=dummy_gbm_configurations,
-        estimator_type=estimator_type,
+        estimator_architecture=estimator_type,
         X=X,
         y=y,
         k_fold_splits=3,
-        scoring_function="mean_squared_error",
         quantiles=None,
         random_state=dummy_seed,
     )
 
     assert scored_configurations_first_call == scored_configurations_second_call
     assert scores_first_call == scores_second_call
-
-
-def test_tune_combinations__point_estimator_mse__reproducibility(
-    dummy_stationary_gaussian_dataset,
-):
-    dummy_seed = DEFAULT_SEED
-    estimator_type = GBM_NAME
-    dummy_confidence_level = 0.8
-    X, y = (
-        dummy_stationary_gaussian_dataset[:, 0].reshape(-1, 1),
-        dummy_stationary_gaussian_dataset[:, 1],
-    )
-
-    (
-        optimal_parameters_first_call,
-        tuning_runtime_per_configuration_first_call,
-    ) = tune_combinations(
-        estimator_type=estimator_type,
-        X=X,
-        y=y,
-        confidence_level=dummy_confidence_level,
-        scoring_function="mean_squared_error",
-        n_of_param_combinations=5,
-        custom_best_param_combination=None,
-        random_state=dummy_seed,
-    )
-    (
-        optimal_parameters_second_call,
-        tuning_runtime_per_configuration_second_call,
-    ) = tune_combinations(
-        estimator_type=estimator_type,
-        X=X,
-        y=y,
-        confidence_level=dummy_confidence_level,
-        scoring_function="mean_squared_error",
-        n_of_param_combinations=5,
-        custom_best_param_combination=None,
-        random_state=dummy_seed,
-    )
-
-    assert optimal_parameters_first_call == optimal_parameters_second_call
-    assert (
-        tuning_runtime_per_configuration_first_call
-        - tuning_runtime_per_configuration_second_call
-    ) < 1
 
 
 @pytest.mark.parametrize("confidence_level", [0.2, 0.8])
@@ -244,20 +195,19 @@ def test_quantile_regression_tune_fit(
 
     qcr = QuantileConformalRegression(
         quantile_estimator_architecture=quantile_estimator_architecture,
-        random_state=random_state,
     )
-    qcr.tune_fit(
+    qcr.fit(
         X_train=X_train,
         y_train=y_train,
         X_val=X_val,
         y_val=y_val,
         confidence_level=confidence_level,
-        tuning_param_combinations=tuning_param_combinations,
-        custom_best_param_combination=None,
+        tuning_iterations=tuning_param_combinations,
+        random_state=random_state,
     )
 
-    assert qcr.errors is not None
-    assert qcr.quant_reg is not None
+    assert qcr.nonconformity_scores is not None
+    assert qcr.quantile_estimator is not None
 
 
 @pytest.mark.parametrize("confidence_level", [0.2, 0.8])
@@ -282,16 +232,15 @@ def test_quantile_regression_predict(
     X_val, y_val = X[round(len(X) * train_split) :, :], y[round(len(y) * train_split) :]
     qcr = QuantileConformalRegression(
         quantile_estimator_architecture=quantile_estimator_architecture,
-        random_state=random_state,
     )
-    qcr.tune_fit(
+    qcr.fit(
         X_train=X_train,
         y_train=y_train,
         X_val=X_val,
         y_val=y_val,
         confidence_level=confidence_level,
-        tuning_param_combinations=tuning_param_combinations,
-        custom_best_param_combination=None,
+        tuning_iterations=tuning_param_combinations,
+        random_state=random_state,
     )
 
     y_low_bounds, y_high_bounds = qcr.predict(X_val, confidence_level=confidence_level)
@@ -389,22 +338,21 @@ def test_locally_weighted_regression_tune_fit(
         point_estimator_architecture=point_estimator_architecture,
         demeaning_estimator_architecture=demeaning_estimator_architecture,
         variance_estimator_architecture=variance_estimator_architecture,
-        random_state=random_state,
     )
-    lwcr.tune_fit(
+    lwcr.fit(
         X_pe=X_pe,
         y_pe=y_pe,
         X_ve=X_ve,
         y_ve=y_ve,
         X_val=X_val,
         y_val=y_val,
-        confidence_level=confidence_level,
-        tuning_count=tuning_param_combinations,
+        tuning_iterations=tuning_param_combinations,
+        random_state=random_state,
     )
 
     assert lwcr.nonconformity_scores is not None
-    assert lwcr.trained_pe_estimator is not None
-    assert lwcr.trained_ve_estimator is not None
+    assert lwcr.pe_estimator is not None
+    assert lwcr.ve_estimator is not None
 
 
 @pytest.mark.parametrize("confidence_level", [0.2, 0.8])
@@ -447,17 +395,16 @@ def test_locally_weighted_regression_predict(
         point_estimator_architecture=point_estimator_architecture,
         demeaning_estimator_architecture=demeaning_estimator_architecture,
         variance_estimator_architecture=variance_estimator_architecture,
-        random_state=random_state,
     )
-    lwcr.tune_fit(
+    lwcr.fit(
         X_pe=X_pe,
         y_pe=y_pe,
         X_ve=X_ve,
         y_ve=y_ve,
         X_val=X_val,
         y_val=y_val,
-        confidence_level=confidence_level,
-        tuning_count=tuning_param_combinations,
+        tuning_iterations=tuning_param_combinations,
+        random_state=random_state,
     )
 
     y_low_bounds, y_high_bounds = lwcr.predict(X_val, confidence_level=confidence_level)
