@@ -8,50 +8,14 @@ import pytest
 from acho.config import GBM_NAME
 from acho.optimization import RuntimeTracker
 from acho.tuning import (
-    is_interval_breach,
     score_predictions,
     get_best_configuration_idx,
     process_and_split_estimation_data,
     normalize_estimation_data,
-    update_adaptive_interval,
+    update_adaptive_confidence_level,
 )
 
 DEFAULT_SEED = 1234
-
-
-def test_interval_breach(dummy_performance_bounds):
-    (
-        dummy_performance_lower_bounds,
-        dummy_performance_higher_bounds,
-    ) = dummy_performance_bounds
-    bound_idx = 5
-    realization = dummy_performance_higher_bounds[bound_idx] + 1
-    is_breach = is_interval_breach(
-        performance_lower_bounds=dummy_performance_lower_bounds,
-        performance_higher_bounds=dummy_performance_higher_bounds,
-        bound_idx=bound_idx,
-        realization=realization,
-    )
-    assert is_breach
-
-
-def test_non_interval_breach(dummy_performance_bounds):
-    (
-        dummy_performance_lower_bounds,
-        dummy_performance_higher_bounds,
-    ) = dummy_performance_bounds
-    bound_idx = 5
-    realization = (
-        dummy_performance_lower_bounds[bound_idx]
-        + dummy_performance_higher_bounds[bound_idx]
-    ) / 2
-    is_breach = is_interval_breach(
-        performance_lower_bounds=dummy_performance_lower_bounds,
-        performance_higher_bounds=dummy_performance_higher_bounds,
-        bound_idx=bound_idx,
-        realization=realization,
-    )
-    assert not is_breach
 
 
 @pytest.mark.parametrize("optimization_direction", ["direct", "inverse"])
@@ -60,7 +24,7 @@ def test_get_best_configuration_idx(optimization_direction):
     higher_bound = lower_bound + 1
     dummy_performance_bounds = (lower_bound, higher_bound)
     best_idx = get_best_configuration_idx(
-        performance_bounds=dummy_performance_bounds,
+        configuration_performance_bounds=dummy_performance_bounds,
         optimization_direction=optimization_direction,
     )
 
@@ -239,7 +203,7 @@ def test_update_adaptive_interval(breach):
     dummy_last_confidence_level = dummy_true_confidence_level
     dummy_learning_rate = 0.01
 
-    updated_confidence_level = update_adaptive_interval(
+    updated_confidence_level = update_adaptive_confidence_level(
         true_confidence_level=dummy_true_confidence_level,
         last_confidence_level=dummy_last_confidence_level,
         breach=breach,
@@ -346,7 +310,7 @@ def test_random_search(dummy_initialized_conformal_searcher__gbm_mse):
         searched_performances,
         runtime_per_search,
     ) = dummy_initialized_conformal_searcher__gbm_mse._random_search(
-        min_training_iterations=n_searches,
+        n_searches=n_searches,
         max_runtime=max_runtime,
         random_state=dummy_seed,
     )
@@ -381,7 +345,7 @@ def test_random_search__reproducibility(
         searched_performances_first_call,
         _,
     ) = searcher_first_call._random_search(
-        min_training_iterations=n_searches,
+        n_searches=n_searches,
         max_runtime=max_runtime,
         random_state=dummy_seed,
     )
@@ -390,7 +354,7 @@ def test_random_search__reproducibility(
         searched_performances_second_call,
         _,
     ) = searcher_second_call._random_search(
-        min_training_iterations=n_searches,
+        n_searches=n_searches,
         max_runtime=max_runtime,
         random_state=dummy_seed,
     )
@@ -414,7 +378,7 @@ def test_search(dummy_initialized_conformal_searcher__gbm_mse):
     )
 
     dummy_initialized_conformal_searcher__gbm_mse.search(
-        conformal_search_model=conformal_model_type,
+        conformal_search_estimator=conformal_model_type,
         confidence_level=confidence_level,
         n_random_searches=min_training_iterations,
         runtime_budget=max_runtime,
@@ -451,7 +415,7 @@ def test_search__reproducibility(dummy_double_initialized_conformal_searcher__gb
     ) = dummy_double_initialized_conformal_searcher__gbm_mse
 
     searcher_first_call.search(
-        conformal_search_model=conformal_model_type,
+        conformal_search_estimator=conformal_model_type,
         confidence_level=confidence_level,
         n_random_searches=min_training_iterations,
         runtime_budget=max_runtime,
@@ -462,7 +426,7 @@ def test_search__reproducibility(dummy_double_initialized_conformal_searcher__gb
         random_state=dummy_seed,
     )
     searcher_second_call.search(
-        conformal_search_model=conformal_model_type,
+        conformal_search_estimator=conformal_model_type,
         confidence_level=confidence_level,
         n_random_searches=min_training_iterations,
         runtime_budget=max_runtime,

@@ -105,7 +105,7 @@ def initialize_point_estimator(
     random_state: Optional[int] = None,
 ):
     """
-    Initialize a point estimator class from an input dictionary.
+    Initialize a point estimator from an input dictionary.
 
     Classes are usually scikit-learn estimators and dictionaries must
     contain all required inputs for the class, in addition to any
@@ -162,7 +162,7 @@ def initialize_quantile_estimator(
     random_state: Optional[int] = None,
 ):
     """
-    Initialize a quantile estimator class from an input dictionary.
+    Initialize a quantile estimator from an input dictionary.
 
     Classes are usually external dependancies or custom wrappers or
     scikit-learn estimator classes. Passed dictionaries must
@@ -253,7 +253,7 @@ def cross_validate_configurations(
     random_state: Optional[int] = None,
 ) -> Tuple[List[Dict], List[float]]:
     """
-    Cross validates a specified estimator on a passed X, y dataset.
+    Cross validate a specified estimator on a passed X, y dataset.
 
     Cross validation loops through a list of passed hyperparameter
     configurations for the previously specified estimator and returns
@@ -360,7 +360,7 @@ def cross_validate_configurations(
 
 class LocallyWeightedConformalRegression:
     """
-    Carry out locally weighted conformal regression.
+    Locally weighted conformal regression.
 
     Fits sequential estimators on X and y data to form point and
     variability predictions for y.
@@ -629,7 +629,7 @@ class LocallyWeightedConformalRegression:
 
 class QuantileConformalRegression:
     """
-    Carry out quantile conformal regression.
+    Quantile conformal regression.
 
     Fits quantile estimators on X and y data and applies non-conformity
     adjustments to validate quantile estimates.

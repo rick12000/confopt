@@ -35,7 +35,7 @@ searcher = ConformalSearcher(
 
 # Carry out hyperparameter search:
 searcher.search(
-    conformal_search_model="qgbm",
+    conformal_search_estimator="qgbm",
     n_random_searches=20,
     runtime_budget=90,
     confidence_level=0.5,
