@@ -16,4 +16,11 @@ setup(
     license="Apache License 2.0",
     install_requires=[line.strip() for line in open("requirements.txt").readlines()],
     # TODO: Replace this with explicits
+    classifiers=[
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+    ],
 )
