@@ -5,12 +5,12 @@ import numpy as np
 import pytest
 from sklearn.ensemble import GradientBoostingRegressor
 
-from acho.estimation import (
+from confopt.estimation import (
     QuantileConformalRegression,
     LocallyWeightedConformalRegression,
 )
-from acho.tuning import ConformalSearcher
-from acho.utils import get_tuning_configurations
+from confopt.tuning import ConformalSearcher
+from confopt.utils import get_tuning_configurations
 
 DEFAULT_SEED = 1234
 

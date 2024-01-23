@@ -5,9 +5,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from acho.config import GBM_NAME
-from acho.optimization import RuntimeTracker
-from acho.tuning import (
+from confopt.config import GBM_NAME
+from confopt.optimization import RuntimeTracker
+from confopt.tuning import (
     score_predictions,
     get_best_configuration_idx,
     process_and_split_estimation_data,

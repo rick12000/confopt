@@ -4,11 +4,11 @@ with open("README.md", "r") as f:
     long_description = f.read()
 
 setup(
-    name="acho",
+    name="confopt",
     description="Conformal hyperparameter optimization tool",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/rick12000/acho",
+    url="https://github.com/rick12000/confopt",
     author="Riccardo Doyle",
     author_email="r.doyle.edu@gmail.com",
     packages=find_packages(),

@@ -3,8 +3,8 @@ from typing import Dict
 import numpy as np
 import pytest
 
-from acho.config import GBM_NAME, RF_NAME, QGBM_NAME, QRF_NAME
-from acho.estimation import (
+from confopt.config import GBM_NAME, RF_NAME, QGBM_NAME, QRF_NAME
+from confopt.estimation import (
     QuantileConformalRegression,
     LocallyWeightedConformalRegression,
     initialize_point_estimator,

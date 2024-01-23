@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from acho.preprocessing import train_val_split
+from confopt.preprocessing import train_val_split
 
 DEFAULT_SEED = 1234
 

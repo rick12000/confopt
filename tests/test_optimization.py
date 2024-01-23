@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from acho.optimization import derive_optimal_tuning_count, RuntimeTracker
+from confopt.optimization import derive_optimal_tuning_count, RuntimeTracker
 
 
 def test_runtime_tracker__return_runtime():

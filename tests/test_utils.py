@@ -1,4 +1,4 @@
-from acho.utils import (
+from confopt.utils import (
     get_tuning_configurations,
     get_perceptron_layers,
 )

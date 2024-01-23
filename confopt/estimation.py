@@ -13,7 +13,7 @@ from sklearn.model_selection import KFold
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.neural_network import MLPRegressor
 
-from acho.config import (
+from confopt.config import (
     GBM_NAME,
     QRF_NAME,
     QGBM_NAME,
@@ -24,9 +24,9 @@ from acho.config import (
     RF_NAME,
     QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
-from acho.optimization import RuntimeTracker
-from acho.quantile_wrappers import QuantileGBM
-from acho.utils import get_tuning_configurations, get_perceptron_layers
+from confopt.optimization import RuntimeTracker
+from confopt.quantile_wrappers import QuantileGBM
+from confopt.utils import get_tuning_configurations, get_perceptron_layers
 
 logger = logging.getLogger(__name__)
 

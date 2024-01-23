@@ -8,18 +8,18 @@ from sklearn.metrics import mean_squared_error, accuracy_score, log_loss
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
-from acho.config import (
+from confopt.config import (
     NON_NORMALIZING_ARCHITECTURES,
     METRIC_PROPORTIONALITY_LOOKUP,
     QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
-from acho.estimation import (
+from confopt.estimation import (
     QuantileConformalRegression,
     LocallyWeightedConformalRegression,
 )
-from acho.optimization import derive_optimal_tuning_count, RuntimeTracker
-from acho.preprocessing import train_val_split, remove_iqr_outliers
-from acho.utils import get_tuning_configurations, tabularize_configurations
+from confopt.optimization import derive_optimal_tuning_count, RuntimeTracker
+from confopt.preprocessing import train_val_split, remove_iqr_outliers
+from confopt.utils import get_tuning_configurations, tabularize_configurations
 
 logger = logging.getLogger(__name__)
 
@@ -478,7 +478,7 @@ class ConformalSearcher:
 
             if self.search_timer.return_runtime() > max_runtime:
                 raise RuntimeError(
-                    "ACHO preliminary random search exceeded total runtime budget. "
+                    "confopt preliminary random search exceeded total runtime budget. "
                     "Retry with larger runtime budget or set iteration-capped budget instead."
                 )
 
