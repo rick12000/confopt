@@ -447,7 +447,7 @@ class ConformalSearcher:
         model_training_timer.pause_runtime()
         if verbose:
             randomly_sampled_configurations = tqdm(
-                randomly_sampled_configurations, desc="Random searches: "
+                randomly_sampled_configurations, desc="Random search: "
             )
         for config_idx, hyperparameter_configuration in enumerate(
             randomly_sampled_configurations
@@ -582,13 +582,11 @@ class ConformalSearcher:
         search_model_tuning_count = 0
 
         search_idx_range = range(len(self.tuning_configurations) - n_random_searches)
+        search_progress_bar = tqdm(total=runtime_budget, desc="Conformal search: ")
         for config_idx in search_idx_range:
             if verbose:
-                print(
-                    f"Conformal searches: {config_idx + 1}"
-                    + " | "
-                    + f"Budget consumed: {int(self.search_timer.return_runtime())}s/{runtime_budget}s",
-                    end="\r",
+                search_progress_bar.update(
+                    int(self.search_timer.return_runtime()) - search_progress_bar.n
                 )
             searchable_configurations = [
                 configuration
@@ -751,6 +749,9 @@ class ConformalSearcher:
             self.searched_performances.append(validation_performance)
 
             if self.search_timer.return_runtime() > runtime_budget:
+                if verbose:
+                    search_progress_bar.update(runtime_budget - search_progress_bar.n)
+                    search_progress_bar.close()
                 break
 
     def get_best_params(self) -> Dict:
