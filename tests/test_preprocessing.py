@@ -35,7 +35,6 @@ def test_train_val_split(train_split, ordinal, normalize):
 @pytest.mark.parametrize("ordinal", [True, False])
 @pytest.mark.parametrize("normalize", [True, False])
 def test_train_val_split__reproducibility(train_split, ordinal, normalize):
-    dummy_seed = DEFAULT_SEED
     dummy_array = np.zeros((100, 3))
     X = dummy_array[:, :2]
     y = dummy_array[:, 2]
@@ -50,7 +49,7 @@ def test_train_val_split__reproducibility(train_split, ordinal, normalize):
         train_split=train_split,
         ordinal=ordinal,
         normalize=normalize,
-        random_state=dummy_seed,
+        random_state=DEFAULT_SEED,
     )
     (
         X_train_second_call,
@@ -63,7 +62,7 @@ def test_train_val_split__reproducibility(train_split, ordinal, normalize):
         train_split=train_split,
         ordinal=ordinal,
         normalize=normalize,
-        random_state=dummy_seed,
+        random_state=DEFAULT_SEED,
     )
     assert np.array_equal(X_train_first_call, X_train_second_call)
     assert np.array_equal(y_train_first_call, y_train_second_call)

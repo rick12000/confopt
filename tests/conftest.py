@@ -14,21 +14,17 @@ from confopt.utils import get_tuning_configurations
 
 DEFAULT_SEED = 1234
 
-# Only use numerical values for the grid fixtures, so their outputs don't need further postprocessing:
+# Dummy made up search space:
 DUMMY_PARAMETER_GRID: Dict = {
     "int_parameter": [1, 2, 3, 4, 5],
     "float_parameter": [1.1, 2.2, 3.3, 4.4],
 }
 
+# Dummy search space for a GBM model:
 DUMMY_GBM_PARAMETER_GRID: Dict = {
     "n_estimators": [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
     "learning_rate": [0.1, 0.2, 0.3, 0.4, 0.5],
 }
-
-
-# DUMMY_PARAMETER_GRID_COMPLEX_TYPES: Dict = {"tuple_": [1,2,3,4,5],
-#                               "string_parameter":["value1", "value2"],
-#                               "float_parameter":[1.1, 2.2, 3.3, 4.4]}
 
 
 @pytest.fixture
@@ -62,13 +58,6 @@ def dummy_fixed_quantile_dataset():
 
 
 @pytest.fixture
-def dummy_performance_bounds():
-    performance_lower_bounds = np.arange(0, 100, 0.5)
-    performance_higher_bounds = performance_lower_bounds + 10
-    return performance_lower_bounds, performance_higher_bounds
-
-
-@pytest.fixture
 def dummy_init_quantile_regression():
     qcr = QuantileConformalRegression(quantile_estimator_architecture="qgbm")
     return qcr
@@ -85,12 +74,29 @@ def dummy_init_locally_weighted_regression():
 
 
 @pytest.fixture
+def dummy_configuration_performance_bounds():
+    """
+    Dummy performance bounds, where each set of
+    bounds is meant to represent upper and lower
+    expectations of a certain parameter configuration's
+    performance.
+    """
+    performance_lower_bounds = np.arange(0, 100, 0.5)
+    performance_upper_bounds = performance_lower_bounds + 10
+    return performance_lower_bounds, performance_upper_bounds
+
+
+@pytest.fixture
 def dummy_parameter_grid():
     return DUMMY_PARAMETER_GRID
 
 
 @pytest.fixture
 def dummy_configurations(dummy_parameter_grid):
+    """
+    Samples unique configurations from broader
+    possible values in dummy hyperparameter search space.
+    """
     max_configurations = 100
     tuning_configurations = get_tuning_configurations(
         parameter_grid=dummy_parameter_grid,
@@ -120,6 +126,15 @@ def dummy_gbm_configurations(dummy_gbm_parameter_grid):
 def dummy_initialized_conformal_searcher__gbm_mse(
     dummy_stationary_gaussian_dataset, dummy_gbm_parameter_grid
 ):
+    """
+    Creates a conformal searcher instance from dummy raw X, y data
+    and a dummy parameter grid.
+
+    This particular fixture is set to optimize a GBM base model on
+    regression data, using an MSE objective. The model architecture
+    and type of data are arbitrarily pinned; more fixtures could
+    be created to test other model or data types.
+    """
     custom_loss_function = "mean_squared_error"
     prediction_type = "regression"
     model = GradientBoostingRegressor()
@@ -147,39 +162,3 @@ def dummy_initialized_conformal_searcher__gbm_mse(
     )
 
     return searcher
-
-
-@pytest.fixture
-def dummy_double_initialized_conformal_searcher__gbm_mse(
-    dummy_stationary_gaussian_dataset, dummy_gbm_parameter_grid
-):
-    custom_loss_function = "mean_squared_error"
-    prediction_type = "regression"
-    model = GradientBoostingRegressor()
-
-    X, y = (
-        dummy_stationary_gaussian_dataset[:, 0].reshape(-1, 1),
-        dummy_stationary_gaussian_dataset[:, 1],
-    )
-    train_split = 0.5
-    X_train, y_train = (
-        X[: round(len(X) * train_split), :],
-        y[: round(len(y) * train_split)],
-    )
-    X_val, y_val = X[round(len(X) * train_split) :, :], y[round(len(y) * train_split) :]
-
-    searcher_tuple = ()
-    for _ in range(2):
-        searcher = ConformalSearcher(
-            model=model,
-            X_train=X_train,
-            y_train=y_train,
-            X_val=X_val,
-            y_val=y_val,
-            search_space=dummy_gbm_parameter_grid,
-            prediction_type=prediction_type,
-            custom_loss_function=custom_loss_function,
-        )
-        searcher_tuple = searcher_tuple + (searcher,)
-
-    return searcher_tuple
