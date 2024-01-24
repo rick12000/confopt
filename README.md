@@ -9,8 +9,7 @@ speed up model hyperparameter tuning.
 The package currently implements Adaptive Conformal Hyperparameter Optimization (ACHO), as detailed
 in [the original paper](https://doi.org/10.48550/arXiv.2207.03017).
 
-Installation
------------
+## Installation
 
 You can install ConfOpt from [PyPI](https://pypi.org/project/confopt) using `pip`:
 
@@ -18,8 +17,8 @@ You can install ConfOpt from [PyPI](https://pypi.org/project/confopt) using `pip
 pip install confopt
 ```
 
-Getting Started
------
+## Getting Started
+
 As an example, let's tune a Random Forest model on a regression task.
 
 Start by setting up your training and validation data:
@@ -85,4 +84,4 @@ searcher.get_best_model()
 ```
 
 More information on use cases can be found in the full
-documentation or in the `examples` folder of this repository.
+documentation or in the `examples` folder of the main repository.
