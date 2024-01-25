@@ -10,9 +10,9 @@ X_val, y_val = X[split_idx:, :], y[split_idx:]
 
 # Define parameter search space:
 parameter_search_space = {
-    "n_estimators": [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 150, 200, 300, 400],
-    "min_samples_split": [0.005, 0.01, 0.05, 0.1, 0.2, 0.3],
-    "min_samples_leaf": [0.005, 0.01, 0.05, 0.1, 0.2, 0.3],
+    "n_estimators": [10, 30, 50, 100, 150, 200, 300, 400],
+    "min_samples_split": [0.005, 0.01, 0.1, 0.2, 0.3],
+    "min_samples_leaf": [0.005, 0.01, 0.1, 0.2, 0.3],
     "max_features": [None, 0.8, 0.9, 1],
 }
 
@@ -29,9 +29,7 @@ searcher = ConformalSearcher(
 
 # Carry out hyperparameter search:
 searcher.search(
-    n_random_searches=20,
-    runtime_budget=90,
-    confidence_level=0.5,
+    runtime_budget=120,
 )
 
 # Extract results, in the form of either:
