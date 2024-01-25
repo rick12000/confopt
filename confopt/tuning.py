@@ -309,6 +309,39 @@ class ConformalSearcher:
         prediction_type: str,
         custom_loss_function: Optional[str] = None,
     ):
+        """
+        Create a conformal searcher instance.
+
+        Parameters
+        ----------
+        model :
+            Model object to tune through conformal search. Must
+            be an instance with a .fit() and .predict() method.
+        X_train :
+            Training portion of explanatory variable examples.
+        y_train :
+            Training portion of target variable examples.
+        X_val :
+            Validation portion of explanatory variable examples.
+        y_val :
+            Validation portion of target variable examples.
+        search_space :
+            Dictionary mapping parameter names to possible parameter
+            values they can take.
+        prediction_type :
+            The type of prediction to perform on the X and y data.
+            Can be one of either:
+                - 'regression'
+                - 'classification'
+        custom_loss_function :
+            Loss functions are inferred based on the type of prediction
+            to perform (regression or classification), but if it's
+            desirable to use a specific loss function one may be
+            specified here. Current support is limited to:
+                - 'mean_squared_error'
+                - 'accuracy_score'
+                - 'log_loss'
+        """
 
         if (
             hasattr(model, "fit")
@@ -494,13 +527,13 @@ class ConformalSearcher:
 
     def search(
         self,
-        confidence_level: float,
+        runtime_budget: int,
+        confidence_level: float = 0.8,
         conformal_search_estimator: str = "qgbm",
         n_random_searches: int = 20,
         conformal_retraining_frequency: int = 1,
         enable_adaptive_intervals: bool = True,
         conformal_learning_rate: float = 0.1,
-        runtime_budget: int = 600,
         verbose: bool = True,
         random_state: Optional[int] = None,
     ):
@@ -520,11 +553,17 @@ class ConformalSearcher:
 
         Parameters
         ----------
+        runtime_budget :
+            Maximum time budget to allocate to hyperparameter search in seconds.
+            After the budget is exceeded, search stops and results are stored in
+            the instance for later access.
+            An error will be raised if the budget is not sufficient to carry out
+            conformal search, in which case it should be raised.
         confidence_level :
             Confidence level used during construction of conformal searchers'
-            intervals. A larger confidence will result in larger intervals,
-            and greater variance based search. A smaller confidence will
-            result in smaller intervals, and greater point/greedy based search.
+            intervals. The confidence level controls the exploration/exploitation
+            tradeoff, with smaller values making search greedier.
+            Confidence level must be bound between [0, 1].
         conformal_search_estimator :
             String identifier specifying which type of estimator should be
             used to infer model hyperparameter performance.
@@ -540,25 +579,24 @@ class ConformalSearcher:
         n_random_searches :
             Number of initial random searches to perform before switching
             to inferential search. A larger number delays the beginning of
-            optimal hyperparameter sampling, but a small number may result
-            in a limited initial configuration set on which to train search
-            estimators, resulting in suboptimal sampling decisions.
+            conformal search, but provides the search estimator with more
+            data and more robust patterns. The more parameters are being
+            optimized during search, the more random search observations
+            are needed before the conformal searcher can extrapolate
+            effectively. This value defaults to 20, which is the minimum
+            advisable number before the estimator will struggle to train.
         conformal_retraining_frequency :
             Sampling interval after which conformal search estimators should be
             retrained. Eg. an interval of 5, would mean conformal estimators
             are retrained after every 5th sampled/searched parameter configuration.
             A lower retraining frequency is always desirable, but may be increased
-            if the model to optimize trains on a small dataset and the conformal
-            search retraining is producing excessive runtime overhead.
+            to reduce runtime.
         enable_adaptive_intervals :
             Whether to allow conformal intervals used for configuration sampling
             to change after each sampling event. This allows for better interval
-            coverage under covariate shift.
+            coverage under covariate shift and is enabled by default.
         conformal_learning_rate :
             Learning rate dictating how rapidly adaptive intervals are updated.
-        runtime_budget :
-            Maximum time budget allocated to search in seconds. After the budget
-            is exceeded, search stops and results are stored in the instance.
         verbose :
             Whether to print updates during code execution.
         random_state :
