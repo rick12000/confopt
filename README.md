@@ -78,13 +78,13 @@ searcher.search(
 Once done, you can retrieve the best parameters obtained during tuning using:
 
 ```python
-searcher.get_best_params()
+best_params = searcher.get_best_params()
 ```
 
-Or obtain an already initialized model with:
+Or automatically retrain your model on full data and optimal parameters with:
 
 ```python
-searcher.get_best_model()
+best_model = searcher.fit_best_model()
 ```
 
 More information on specific parameters and overrides not mentioned

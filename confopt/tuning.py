@@ -21,6 +21,9 @@ from confopt.optimization import derive_optimal_tuning_count, RuntimeTracker
 from confopt.preprocessing import train_val_split, remove_iqr_outliers
 from confopt.utils import get_tuning_configurations, tabularize_configurations
 
+from confopt.wrapping import TunableModel
+from sklearn.base import BaseEstimator
+
 logger = logging.getLogger(__name__)
 
 
@@ -313,7 +316,7 @@ class ConformalSearcher:
 
     def __init__(
         self,
-        model: Any,
+        model: BaseEstimator | TunableModel,
         X_train: np.array,
         y_train: np.array,
         X_val: np.array,
@@ -356,16 +359,11 @@ class ConformalSearcher:
                 - 'log_loss'
         """
 
-        if (
-            hasattr(model, "fit")
-            and hasattr(model, "predict")
-            and callable(model.fit)
-            and callable(model.predict)
-        ):
+        if isinstance(model, BaseEstimator) or isinstance(model, TunableModel):
             self.model = model
         else:
             raise ValueError(
-                "Model to tune must be wrapped in class with 'fit' and 'predict' methods."
+                "Model to tune must be a sklearn BaseEstimator model or wrapped as subclass of TunableModel abstract class."
             )
 
         self.X_train = X_train
@@ -426,7 +424,7 @@ class ConformalSearcher:
             configuration=configuration,
             random_state=random_state,
         )
-        updated_model.fit(self.X_train, self.y_train)
+        updated_model.fit(X=self.X_train, y=self.y_train)
 
         if self.custom_loss_function in ["log_loss"]:
             y_pred = updated_model.predict_proba(self.X_val)
@@ -871,6 +869,6 @@ class ConformalSearcher:
         X_full = np.vstack((self.X_train, self.X_val))
         y_full = np.hstack((self.y_train, self.y_val))
 
-        best_fitted_model.fit(X_full, y_full)
+        best_fitted_model.fit(X=X_full, y=y_full)
 
         return best_fitted_model
