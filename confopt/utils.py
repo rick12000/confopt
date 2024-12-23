@@ -179,14 +179,18 @@ def tabularize_configurations(configurations: List[Dict]) -> pd.DataFrame:
                 if type(element) not in types:
                     types.append(type(element))
             if str in types:
-                tabularized_configurations[column_name] = tabularized_configurations[
-                    column_name
-                ].fillna("None")
+                tabularized_configurations[column_name] = (
+                    tabularized_configurations[column_name]
+                    .infer_objects(copy=False)
+                    .fillna("None")
+                )
                 categorical_columns.append(column_name)
             elif float in types or int in types:
-                tabularized_configurations[column_name] = tabularized_configurations[
-                    column_name
-                ].fillna(0)
+                tabularized_configurations[column_name] = (
+                    tabularized_configurations[column_name]
+                    .infer_objects(copy=False)
+                    .fillna(0)
+                )
             else:
                 raise ValueError(
                     "Type other than 'str', 'int', 'float' was detected in 'None' handling."

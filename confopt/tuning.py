@@ -249,6 +249,19 @@ def get_best_configuration_idx(
     return best_idx
 
 
+def get_best_performance_idx(
+    custom_loss_function: str, searched_performances: List[float]
+) -> int:
+    if METRIC_PROPORTIONALITY_LOOKUP[custom_loss_function] == "direct":
+        best_performance_idx = searched_performances.index(max(searched_performances))
+    elif METRIC_PROPORTIONALITY_LOOKUP[custom_loss_function] == "inverse":
+        best_performance_idx = searched_performances.index(min(searched_performances))
+    else:
+        raise ValueError()
+
+    return best_performance_idx
+
+
 def update_adaptive_confidence_level(
     true_confidence_level: float,
     last_confidence_level: float,
@@ -802,14 +815,33 @@ class ConformalSearcher:
         best_params :
             Best performing model hyperparameters.
         """
-        best_performance_idx = self.searched_performances.index(
-            max(self.searched_performances)
+        best_performance_idx = get_best_performance_idx(
+            custom_loss_function=self.custom_loss_function,
+            searched_performances=self.searched_performances,
         )
         best_params = self.searched_configurations[best_performance_idx]
 
         return best_params
 
-    def get_best_model(self):
+    def get_best_value(self) -> float:
+        """
+        Extract validation performance of best performing parameter
+        configuration identified during conformal search.
+
+        Returns
+        -------
+        best_performance :
+            Best predictive performance achieved.
+        """
+        best_performance_idx = get_best_performance_idx(
+            custom_loss_function=self.custom_loss_function,
+            searched_performances=self.searched_performances,
+        )
+        best_performance = self.searched_performances[best_performance_idx]
+
+        return best_performance
+
+    def configure_best_model(self):
         """
         Extract best initialized (but unfitted) model identified
         during conformal search.
@@ -826,17 +858,16 @@ class ConformalSearcher:
         )
         return best_model
 
-    def get_best_fitted_model(self):
+    def fit_best_model(self):
         """
-        Extract best initialized (but unfitted) model identified
-        during conformal search.
+        Fit best model identified during conformal search.
 
         Returns
         -------
         best_fitted_model :
             Best model from search, fit on all available data.
         """
-        best_fitted_model = self.get_best_model()
+        best_fitted_model = self.configure_best_model()
         X_full = np.vstack((self.X_train, self.X_val))
         y_full = np.hstack((self.y_train, self.y_val))
 

@@ -39,8 +39,8 @@ best_params = searcher.get_best_params()
 
 # 2. An initialized (but not trained) model object with the
 #    best hyperparameter configuration found during search
-model_init = searcher.get_best_model()
+model_init = searcher.configure_best_model()
 
 # 3. A trained model with the best hyperparameter configuration
 #    found during search
-model = searcher.get_best_fitted_model()
+model = searcher.fit_best_model()
