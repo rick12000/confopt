@@ -285,6 +285,7 @@ def test_random_search(dummy_initialized_conformal_searcher__gbm_mse):
     (
         searched_configurations,
         searched_performances,
+        searched_timestamps,
         runtime_per_search,
     ) = dummy_initialized_conformal_searcher__gbm_mse._random_search(
         n_searches=n_searches,
@@ -296,7 +297,12 @@ def test_random_search(dummy_initialized_conformal_searcher__gbm_mse):
         assert performance > 0
     assert len(searched_configurations) > 0
     assert len(searched_performances) > 0
-    assert len(searched_configurations) == len(searched_performances)
+    assert len(searched_timestamps) > 0
+    assert (
+        len(searched_configurations)
+        == len(searched_performances)
+        == len(searched_timestamps)
+    )
     assert len(searched_configurations) == n_searches
     assert 0 < runtime_per_search < max_runtime
 
@@ -312,6 +318,7 @@ def test_random_search__reproducibility(
         searched_configurations_first_call,
         searched_performances_first_call,
         _,
+        _,
     ) = dummy_initialized_conformal_searcher__gbm_mse._random_search(
         n_searches=n_searches,
         max_runtime=max_runtime,
@@ -320,6 +327,7 @@ def test_random_search__reproducibility(
     (
         searched_configurations_second_call,
         searched_performances_second_call,
+        _,
         _,
     ) = dummy_initialized_conformal_searcher__gbm_mse._random_search(
         n_searches=n_searches,
