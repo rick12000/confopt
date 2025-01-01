@@ -12,7 +12,7 @@ setup(
     author="Riccardo Doyle",
     author_email="r.doyle.edu@gmail.com",
     packages=find_packages(),
-    version="1.0.1",
+    version="1.0.2",
     license="Apache License 2.0",
     install_requires=[line.strip() for line in open("requirements.txt").readlines()],
     # TODO: Replace this with explicits

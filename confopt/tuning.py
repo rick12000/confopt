@@ -7,6 +7,7 @@ import numpy as np
 from sklearn.metrics import mean_squared_error, accuracy_score, log_loss
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
+from datetime import datetime
 
 from confopt.config import (
     NON_NORMALIZING_ARCHITECTURES,
@@ -443,7 +444,7 @@ class ConformalSearcher:
         max_runtime: int,
         verbose: bool = True,
         random_state: Optional[int] = None,
-    ) -> Tuple[List, List, float]:
+    ) -> Tuple[List, List, List, float]:
         """
         Randomly search a portion of the model's hyperparameter space.
 
@@ -467,6 +468,9 @@ class ConformalSearcher:
             Search performance of each searched configuration,
             consisting of out of sample, validation performance
             of a model trained using the searched configuration.
+        searched_timestamps :
+            List of timestamps corresponding to each searched
+            hyperparameter configuration.
         runtime_per_search :
             Average time taken to train the model being tuned
             across configurations, in seconds.
@@ -476,6 +480,7 @@ class ConformalSearcher:
 
         searched_configurations = []
         searched_performances = []
+        searched_timestamps = []
 
         skipped_configuration_counter = 0
         runtime_per_search = 0
@@ -511,6 +516,7 @@ class ConformalSearcher:
 
             searched_configurations.append(hyperparameter_configuration.copy())
             searched_performances.append(validation_performance)
+            searched_timestamps.append(datetime.now())
 
             runtime_per_search = (
                 runtime_per_search + model_training_timer.return_runtime()
@@ -526,7 +532,12 @@ class ConformalSearcher:
                     "Retry with larger runtime budget or set iteration-capped budget instead."
                 )
 
-        return searched_configurations, searched_performances, runtime_per_search
+        return (
+            searched_configurations,
+            searched_performances,
+            searched_timestamps,
+            runtime_per_search,
+        )
 
     @staticmethod
     def _set_conformal_validation_split(X: np.array) -> float:
@@ -620,6 +631,7 @@ class ConformalSearcher:
         (
             self.searched_configurations,
             self.searched_performances,
+            self.searched_timestamps,
             runtime_per_search,
         ) = self._random_search(
             n_searches=n_random_searches,
@@ -796,6 +808,7 @@ class ConformalSearcher:
 
             self.searched_configurations.append(maximal_parameter.copy())
             self.searched_performances.append(validation_performance)
+            self.searched_timestamps.append(datetime.now())
 
             if self.search_timer.return_runtime() > runtime_budget:
                 if verbose:
