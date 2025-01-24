@@ -4,12 +4,17 @@ from typing import Dict
 import numpy as np
 import pytest
 from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.metrics import mean_squared_error
 
 from confopt.estimation import (
     QuantileConformalRegression,
     LocallyWeightedConformalRegression,
 )
-from confopt.tuning import ConformalSearcher
+from confopt.tuning import (
+    ConformalSearcher,
+    ObjectiveConformalSearcher,
+    update_model_parameters,
+)
 from confopt.utils import get_tuning_configurations
 
 DEFAULT_SEED = 1234
@@ -159,6 +164,60 @@ def dummy_initialized_conformal_searcher__gbm_mse(
         search_space=dummy_gbm_parameter_grid,
         prediction_type=prediction_type,
         custom_loss_function=custom_loss_function,
+    )
+
+    return searcher
+
+
+@pytest.fixture
+def dummy_initialized_objective_conformal_searcher__gbm_mse(
+    dummy_stationary_gaussian_dataset, dummy_gbm_parameter_grid
+):
+    """
+    Creates a conformal searcher instance from dummy raw X, y data
+    and a dummy parameter grid.
+
+    This particular fixture is set to optimize a GBM base model on
+    regression data, using an MSE objective. The model architecture
+    and type of data are arbitrarily pinned; more fixtures could
+    be created to test other model or data types.
+    """
+
+    def create_objective_function(dummy_stationary_gaussian_dataset, model):
+        def objective_function(configuration):
+            X, y = (
+                dummy_stationary_gaussian_dataset[:, 0].reshape(-1, 1),
+                dummy_stationary_gaussian_dataset[:, 1],
+            )
+            train_split = 0.5
+            X_train, y_train = (
+                X[: round(len(X) * train_split), :],
+                y[: round(len(y) * train_split)],
+            )
+            X_val, y_val = (
+                X[round(len(X) * train_split) :, :],
+                y[round(len(y) * train_split) :],
+            )
+            updated_model = update_model_parameters(
+                model_instance=model, configuration=configuration, random_state=None
+            )
+            updated_model.fit(X=X_train, y=y_train)
+
+            return mean_squared_error(
+                y_true=y_val, y_pred=updated_model.predict(X=X_val)
+            )
+
+        return objective_function
+
+    objective_function = create_objective_function(
+        dummy_stationary_gaussian_dataset=dummy_stationary_gaussian_dataset,
+        model=GradientBoostingRegressor(random_state=DEFAULT_SEED),
+    )
+
+    searcher = ObjectiveConformalSearcher(
+        objective_function=objective_function,
+        search_space=dummy_gbm_parameter_grid,
+        metric_optimization="inverse",
     )
 
     return searcher

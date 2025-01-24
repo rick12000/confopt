@@ -428,3 +428,112 @@ def test_search__reproducibility(dummy_initialized_conformal_searcher__gbm_mse):
         searcher_first_call.searched_performances
         == searcher_second_call.searched_performances
     )
+
+
+def test_objective_search(dummy_initialized_objective_conformal_searcher__gbm_mse):
+    # TODO: Below I hard coded a slice of possible inputs, but consider
+    #  pytest parametrizing these (though test will be very heavy,
+    #  so tag as slow and only run when necessary)
+    confidence_level = 0.2
+    conformal_model_type = GBM_NAME
+    conformal_retraining_frequency = 1
+    conformal_learning_rate = 0.01
+    enable_adaptive_intervals = True
+    max_runtime = 120
+    min_training_iterations = 20
+
+    stored_search_space = (
+        dummy_initialized_objective_conformal_searcher__gbm_mse.search_space
+    )
+    stored_tuning_configurations = (
+        dummy_initialized_objective_conformal_searcher__gbm_mse.tuning_configurations
+    )
+
+    dummy_initialized_objective_conformal_searcher__gbm_mse.search(
+        conformal_search_estimator=conformal_model_type,
+        confidence_level=confidence_level,
+        n_random_searches=min_training_iterations,
+        runtime_budget=max_runtime,
+        conformal_retraining_frequency=conformal_retraining_frequency,
+        conformal_learning_rate=conformal_learning_rate,
+        enable_adaptive_intervals=enable_adaptive_intervals,
+        verbose=0,
+    )
+
+    assert (
+        len(
+            dummy_initialized_objective_conformal_searcher__gbm_mse.searched_configurations
+        )
+        > 0
+    )
+    assert (
+        len(
+            dummy_initialized_objective_conformal_searcher__gbm_mse.searched_performances
+        )
+        > 0
+    )
+    assert len(
+        dummy_initialized_objective_conformal_searcher__gbm_mse.searched_configurations
+    ) == len(
+        dummy_initialized_objective_conformal_searcher__gbm_mse.searched_performances
+    )
+    # Test for mutability:
+    assert (
+        stored_search_space
+        == dummy_initialized_objective_conformal_searcher__gbm_mse.search_space
+    )
+    assert (
+        stored_tuning_configurations
+        == dummy_initialized_objective_conformal_searcher__gbm_mse.tuning_configurations
+    )
+
+
+def test_objective_search__reproducibility(
+    dummy_initialized_objective_conformal_searcher__gbm_mse,
+):
+    confidence_level = 0.2
+    conformal_model_type = GBM_NAME
+    conformal_retraining_frequency = 1
+    conformal_learning_rate = 0.01
+    enable_adaptive_intervals = True
+    max_runtime = 120
+    min_training_iterations = 20
+
+    searcher_first_call = deepcopy(
+        dummy_initialized_objective_conformal_searcher__gbm_mse
+    )
+    searcher_second_call = deepcopy(
+        dummy_initialized_objective_conformal_searcher__gbm_mse
+    )
+
+    searcher_first_call.search(
+        conformal_search_estimator=conformal_model_type,
+        confidence_level=confidence_level,
+        n_random_searches=min_training_iterations,
+        runtime_budget=max_runtime,
+        conformal_retraining_frequency=conformal_retraining_frequency,
+        conformal_learning_rate=conformal_learning_rate,
+        enable_adaptive_intervals=enable_adaptive_intervals,
+        verbose=0,
+        random_state=DEFAULT_SEED,
+    )
+    searcher_second_call.search(
+        conformal_search_estimator=conformal_model_type,
+        confidence_level=confidence_level,
+        n_random_searches=min_training_iterations,
+        runtime_budget=max_runtime,
+        conformal_retraining_frequency=conformal_retraining_frequency,
+        conformal_learning_rate=conformal_learning_rate,
+        enable_adaptive_intervals=enable_adaptive_intervals,
+        verbose=0,
+        random_state=DEFAULT_SEED,
+    )
+
+    assert (
+        searcher_first_call.searched_configurations
+        == searcher_second_call.searched_configurations
+    )
+    assert (
+        searcher_first_call.searched_performances
+        == searcher_second_call.searched_performances
+    )
