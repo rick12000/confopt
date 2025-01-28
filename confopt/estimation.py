@@ -2,7 +2,6 @@ import logging
 from typing import Dict, Optional, List, Tuple
 
 import numpy as np
-from quantile_forest import RandomForestQuantileRegressor
 from sklearn import metrics
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.gaussian_process import GaussianProcessRegressor
@@ -191,13 +190,7 @@ def initialize_quantile_estimator(
     initialized_model :
         An initialized estimator class instance.
     """
-    if estimator_architecture == QRF_NAME:
-        initialized_model = RandomForestQuantileRegressor(
-            **initialization_params,
-            default_quantiles=pinball_loss_alpha,
-            random_state=random_state,
-        )
-    elif estimator_architecture == QGBM_NAME:
+    if estimator_architecture == QGBM_NAME:
         initialized_model = QuantileGBM(
             **initialization_params,
             quantiles=pinball_loss_alpha,
