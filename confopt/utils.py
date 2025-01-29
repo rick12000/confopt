@@ -93,7 +93,9 @@ def get_tuning_configurations(
     return configurations
 
 
-def tabularize_configurations(configurations: List[Dict]) -> pd.DataFrame:
+def tabularize_configurations(
+    searchable_configurations: List[Dict], searched_configurations: List[Dict]
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Transform list of configuration dictionaries into tabular training data.
 
@@ -102,7 +104,9 @@ def tabularize_configurations(configurations: List[Dict]) -> pd.DataFrame:
 
     Parameters
     ----------
-    configurations :
+    searchable_configurations :
+        List of hyperparameter configurations to tabularize.
+    searched_configurations :
         List of hyperparameter configurations to tabularize.
 
     Returns
@@ -111,6 +115,8 @@ def tabularize_configurations(configurations: List[Dict]) -> pd.DataFrame:
         Tabularized hyperparameter configurations (hyperparameter names
         as columns and hyperparameter values as rows).
     """
+    configurations = searchable_configurations + searched_configurations
+
     logger.debug(f"Received {len(configurations)} configurations to tabularize.")
 
     # Get maximum length of any list or tuple parameter in configuration (this is
@@ -155,6 +161,8 @@ def tabularize_configurations(configurations: List[Dict]) -> pd.DataFrame:
     )
 
     # NOTE: None values are converted to np.nan during pandas ingestion.
+    # NOTE: Order of list of dicts must be preserved during pandas ingestion, if
+    # this ever changes in future versions, return to this:
     tabularized_configurations = pd.DataFrame(expanded_configurations).replace(
         {np.nan: None}
     )
@@ -213,4 +221,11 @@ def tabularize_configurations(configurations: List[Dict]) -> pd.DataFrame:
         f"Tabularized configuration dataframe shape: {tabularized_configurations.shape}"
     )
 
-    return tabularized_configurations
+    tabularized_searchable_configurations = tabularized_configurations.iloc[
+        : len(searchable_configurations), :
+    ]
+    tabularized_searched_configurations = tabularized_configurations.iloc[
+        len(searchable_configurations) :, :
+    ]
+
+    return tabularized_searchable_configurations, tabularized_searched_configurations

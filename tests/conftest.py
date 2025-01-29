@@ -23,6 +23,9 @@ DEFAULT_SEED = 1234
 DUMMY_PARAMETER_GRID: Dict = {
     "int_parameter": [1, 2, 3, 4, 5],
     "float_parameter": [1.1, 2.2, 3.3, 4.4],
+    "bool_parameter": [True, False],
+    "mixed_str_parameter": [None, "SGD"],
+    "str_parmeter": ["1", "check"],
 }
 
 # Dummy search space for a GBM model:

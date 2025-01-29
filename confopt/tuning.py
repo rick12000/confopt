@@ -615,12 +615,20 @@ class ObjectiveConformalSearcher:
                 for configuration in self.tuning_configurations
                 if configuration not in self.searched_configurations
             ]
-            tabularized_searchable_configurations = tabularize_configurations(
-                configurations=searchable_configurations
-            ).to_numpy()
-            tabularized_searched_configurations = tabularize_configurations(
-                configurations=self.searched_configurations.copy()
-            ).to_numpy()
+            (
+                tabularized_searchable_configurations,
+                tabularized_searched_configurations,
+            ) = tabularize_configurations(
+                searchable_configurations=searchable_configurations,
+                searched_configurations=self.searched_configurations.copy(),
+            )
+            (
+                tabularized_searchable_configurations,
+                tabularized_searched_configurations,
+            ) = (
+                tabularized_searchable_configurations.to_numpy(),
+                tabularized_searched_configurations.to_numpy(),
+            )
 
             validation_split = ConformalSearcher._set_conformal_validation_split(
                 tabularized_searched_configurations
@@ -1188,12 +1196,20 @@ class ConformalSearcher:
                 for configuration in self.tuning_configurations
                 if configuration not in self.searched_configurations
             ]
-            tabularized_searchable_configurations = tabularize_configurations(
-                configurations=searchable_configurations
-            ).to_numpy()
-            tabularized_searched_configurations = tabularize_configurations(
-                configurations=self.searched_configurations.copy()
-            ).to_numpy()
+            (
+                tabularized_searchable_configurations,
+                tabularized_searched_configurations,
+            ) = tabularize_configurations(
+                searchable_configurations=searchable_configurations,
+                searched_configurations=self.searched_configurations.copy(),
+            )
+            (
+                tabularized_searchable_configurations,
+                tabularized_searched_configurations,
+            ) = (
+                tabularized_searchable_configurations.to_numpy(),
+                tabularized_searched_configurations.to_numpy(),
+            )
 
             validation_split = ConformalSearcher._set_conformal_validation_split(
                 tabularized_searched_configurations
