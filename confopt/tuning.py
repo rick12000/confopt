@@ -374,7 +374,7 @@ class ObjectiveConformalSearcher:
     def _get_tuning_configurations(self):
         logger.debug("Creating hyperparameter space...")
         tuning_configurations = get_tuning_configurations(
-            parameter_grid=self.search_space, n_configurations=1000, random_state=1234
+            parameter_grid=self.search_space, n_configurations=10000, random_state=1234
         )
         return tuning_configurations
 
@@ -949,7 +949,7 @@ class ConformalSearcher:
     def _get_tuning_configurations(self):
         logger.debug("Creating hyperparameter space...")
         tuning_configurations = get_tuning_configurations(
-            parameter_grid=self.search_space, n_configurations=1000, random_state=1234
+            parameter_grid=self.search_space, n_configurations=10000, random_state=1234
         )
         return tuning_configurations
 

@@ -81,13 +81,20 @@ def get_tuning_configurations(
     """
     random.seed(random_state)
 
+    configurations_set = set()
     configurations = []
+
     for _ in range(n_configurations):
         configuration = {}
         for parameter_name in parameter_grid:
             parameter_value = random.choice(parameter_grid[parameter_name])
             configuration[parameter_name] = parameter_value
-        if configuration not in configurations:
+
+        # Convert the configuration dictionary to a tuple of sorted items
+        configuration_tuple = tuple(sorted(configuration.items()))
+
+        if configuration_tuple not in configurations_set:
+            configurations_set.add(configuration_tuple)
             configurations.append(configuration)
 
     return configurations
@@ -189,14 +196,14 @@ def tabularize_configurations(
             if str in types:
                 tabularized_configurations[column_name] = (
                     tabularized_configurations[column_name]
-                    .infer_objects(copy=False)
+                    # .infer_objects(copy=False)
                     .fillna("None")
                 )
                 categorical_columns.append(column_name)
             elif float in types or int in types:
                 tabularized_configurations[column_name] = (
                     tabularized_configurations[column_name]
-                    .infer_objects(copy=False)
+                    # .infer_objects(copy=False)
                     .fillna(0)
                 )
             else:
