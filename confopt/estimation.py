@@ -205,33 +205,27 @@ def initialize_quantile_estimator(
 
 
 def average_scores_across_folds(
-    scored_configurations: List[Dict], scores: List[float]
-) -> Tuple[List[Dict], List[float]]:
-    # TODO: Refactor so it's more efficient or contained.
-    #  This is a very convoluted function that does something
-    #  very simple.
-    aggregated_scores = {}
-    fold_counts = {}
+    scored_configurations: List[List[Tuple[str, float]]], scores: List[float]
+) -> Tuple[List[List[Tuple[str, float]]], List[float]]:
+    # Use a list to store aggregated scores and fold counts
+    aggregated_scores = []
+    fold_counts = []
+    aggregated_configurations = []
 
     for configuration, score in zip(scored_configurations, scores):
-        tuplified_configuration = tuple(configuration.items())
-        if tuplified_configuration not in aggregated_scores:
-            aggregated_scores[tuplified_configuration] = score
-            fold_counts[tuplified_configuration] = 1
+        # Check if the configuration already exists in the aggregated_configurations list
+        if configuration in aggregated_configurations:
+            index = aggregated_configurations.index(configuration)
+            aggregated_scores[index] += score
+            fold_counts[index] += 1
         else:
-            aggregated_scores[tuplified_configuration] += score
-            fold_counts[tuplified_configuration] += 1
+            aggregated_configurations.append(configuration)
+            aggregated_scores.append(score)
+            fold_counts.append(1)
 
-    for tuplified_configuration in aggregated_scores:
-        aggregated_scores[tuplified_configuration] /= fold_counts[
-            tuplified_configuration
-        ]
-
-    aggregated_configurations = [
-        dict(list(tuplified_configuration))
-        for tuplified_configuration in list(aggregated_scores.keys())
-    ]
-    aggregated_scores = list(aggregated_scores.values())
+    # Calculate the average scores
+    for i in range(len(aggregated_scores)):
+        aggregated_scores[i] /= fold_counts[i]
 
     return aggregated_configurations, aggregated_scores
 

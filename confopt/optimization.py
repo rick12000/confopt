@@ -60,6 +60,9 @@ def derive_optimal_tuning_count(
         Optimal number of search model tuning evaluations, given runtime
         ratio constraint.
     """
+    margin_of_error_runtime = 0.0001
+    baseline_model_runtime = max(baseline_model_runtime, margin_of_error_runtime)
+    search_model_runtime = max(search_model_runtime, margin_of_error_runtime)
     search_model_tuning_count = (
         baseline_model_runtime * search_model_retraining_freq
     ) / (search_model_runtime * (1 / search_to_baseline_runtime_ratio) ** 2)
