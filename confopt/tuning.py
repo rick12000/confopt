@@ -340,6 +340,10 @@ class ObjectiveConformalSearcher:
 
         self.tuning_configurations = self._get_tuning_configurations()
 
+        self.searched_configurations = []
+        self.searched_performances = []
+        self.searched_timestamps = []
+
     def _check_objective_function(self):
         signature = inspect.signature(self.objective_function)
         args = list(signature.parameters.values())
@@ -590,9 +594,9 @@ class ObjectiveConformalSearcher:
         self.search_timer = RuntimeTracker()
 
         (
-            self.searched_configurations,
-            self.searched_performances,
-            self.searched_timestamps,
+            searched_configurations,
+            searched_performances,
+            searched_timestamps,
             runtime_per_search,
         ) = self._random_search(
             n_searches=n_random_searches,
@@ -600,6 +604,10 @@ class ObjectiveConformalSearcher:
             verbose=verbose,
             random_state=random_state,
         )
+
+        self.searched_configurations.extend(searched_configurations)
+        self.searched_performances.extend(searched_performances)
+        self.searched_timestamps.extend(searched_timestamps)
 
         search_model_tuning_count = 0
 
@@ -923,6 +931,10 @@ class ConformalSearcher:
         )
         self.tuning_configurations = self._get_tuning_configurations()
 
+        self.searched_configurations = []
+        self.searched_performances = []
+        self.searched_timestamps = []
+
     def _set_default_evaluation_metric(self) -> str:
         if self.prediction_type == "regression":
             custom_loss_function = "mean_squared_error"
@@ -1171,9 +1183,9 @@ class ConformalSearcher:
         self.search_timer = RuntimeTracker()
 
         (
-            self.searched_configurations,
-            self.searched_performances,
-            self.searched_timestamps,
+            searched_configurations,
+            searched_performances,
+            searched_timestamps,
             runtime_per_search,
         ) = self._random_search(
             n_searches=n_random_searches,
@@ -1181,6 +1193,10 @@ class ConformalSearcher:
             verbose=verbose,
             random_state=random_state,
         )
+
+        self.searched_configurations.extend(searched_configurations)
+        self.searched_performances.extend(searched_performances)
+        self.searched_timestamps.extend(searched_timestamps)
 
         search_model_tuning_count = 0
 
