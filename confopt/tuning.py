@@ -405,8 +405,8 @@ class ObjectiveConformalSearcher:
     def _random_search(
         self,
         n_searches: int,
-        max_runtime: int,
         verbose: bool = True,
+        max_runtime: Optional[int] = None,
         random_state: Optional[int] = None,
     ) -> Tuple[List, List, List, float]:
         """
@@ -490,11 +490,12 @@ class ObjectiveConformalSearcher:
                 f"Random search iter {config_idx} performance: {validation_performance}"
             )
 
-            if self.search_timer.return_runtime() > max_runtime:
-                raise RuntimeError(
-                    "confopt preliminary random search exceeded total runtime budget. "
-                    "Retry with larger runtime budget or set iteration-capped budget instead."
-                )
+            if max_runtime is not None:
+                if self.search_timer.return_runtime() > max_runtime:
+                    raise RuntimeError(
+                        "confopt preliminary random search exceeded total runtime budget. "
+                        "Retry with larger runtime budget or set iteration-capped budget instead."
+                    )
 
         return (
             searched_configurations,
@@ -513,7 +514,6 @@ class ObjectiveConformalSearcher:
 
     def search(
         self,
-        runtime_budget: int = 100,
         confidence_level: float = 0.8,
         conformal_search_estimator: str = "qgbm",
         n_random_searches: int = 20,
@@ -523,6 +523,7 @@ class ObjectiveConformalSearcher:
         verbose: bool = True,
         random_state: Optional[int] = None,
         max_iter: Optional[int] = None,
+        runtime_budget: Optional[int] = None,
     ):
         """
         Search model hyperparameter space using conformal estimators.
@@ -612,12 +613,18 @@ class ObjectiveConformalSearcher:
         search_model_tuning_count = 0
 
         search_idx_range = range(len(self.tuning_configurations) - n_random_searches)
-        search_progress_bar = tqdm(total=runtime_budget, desc="Conformal search: ")
+        if runtime_budget is not None:
+            search_progress_bar = tqdm(total=runtime_budget, desc="Conformal search: ")
+        elif max_iter is not None:
+            search_progress_bar = tqdm(total=max_iter, desc="Conformal search: ")
         for config_idx in search_idx_range:
             if verbose:
-                search_progress_bar.update(
-                    int(self.search_timer.return_runtime()) - search_progress_bar.n
-                )
+                if runtime_budget is not None:
+                    search_progress_bar.update(
+                        int(self.search_timer.return_runtime()) - search_progress_bar.n
+                    )
+                elif max_iter is not None:
+                    search_progress_bar.update(1)
             searchable_configurations = [
                 configuration
                 for configuration in self.tuning_configurations
@@ -777,14 +784,28 @@ class ObjectiveConformalSearcher:
             self.searched_performances.append(validation_performance)
             self.searched_timestamps.append(datetime.now())
 
-            if (
-                self.search_timer.return_runtime() > runtime_budget
-                or n_random_searches + config_idx + 1 >= max_iter
-            ):
-                if verbose:
-                    search_progress_bar.update(runtime_budget - search_progress_bar.n)
-                    search_progress_bar.close()
-                break
+            if runtime_budget is not None:
+                if self.search_timer.return_runtime() > runtime_budget:
+                    if verbose:
+                        if runtime_budget is not None:
+                            search_progress_bar.update(
+                                runtime_budget - search_progress_bar.n
+                            )
+                        elif max_iter is not None:
+                            search_progress_bar.update(1)
+                        search_progress_bar.close()
+                    break
+            elif max_iter is not None:
+                if n_random_searches + config_idx + 1 >= max_iter:
+                    if verbose:
+                        if runtime_budget is not None:
+                            search_progress_bar.update(
+                                runtime_budget - search_progress_bar.n
+                            )
+                        elif max_iter is not None:
+                            search_progress_bar.update(1)
+                        search_progress_bar.close()
+                    break
 
     def get_best_params(self) -> Dict:
         """
@@ -995,9 +1016,9 @@ class ConformalSearcher:
     def _random_search(
         self,
         n_searches: int,
-        max_runtime: int,
         verbose: bool = True,
         random_state: Optional[int] = None,
+        max_runtime: Optional[int] = None,
     ) -> Tuple[List, List, List, float]:
         """
         Randomly search a portion of the model's hyperparameter space.
@@ -1080,11 +1101,12 @@ class ConformalSearcher:
                 f"Random search iter {config_idx} performance: {validation_performance}"
             )
 
-            if self.search_timer.return_runtime() > max_runtime:
-                raise RuntimeError(
-                    "confopt preliminary random search exceeded total runtime budget. "
-                    "Retry with larger runtime budget or set iteration-capped budget instead."
-                )
+            if max_runtime is not None:
+                if self.search_timer.return_runtime() > max_runtime:
+                    raise RuntimeError(
+                        "confopt preliminary random search exceeded total runtime budget. "
+                        "Retry with larger runtime budget or set iteration-capped budget instead."
+                    )
 
         return (
             searched_configurations,
@@ -1103,7 +1125,6 @@ class ConformalSearcher:
 
     def search(
         self,
-        runtime_budget: int,
         confidence_level: float = 0.8,
         conformal_search_estimator: str = "qgbm",
         n_random_searches: int = 20,
@@ -1112,6 +1133,8 @@ class ConformalSearcher:
         conformal_learning_rate: float = 0.1,
         verbose: bool = True,
         random_state: Optional[int] = None,
+        max_iter: Optional[int] = None,
+        runtime_budget: Optional[int] = None,
     ):
         """
         Search model hyperparameter space using conformal estimators.
@@ -1201,12 +1224,23 @@ class ConformalSearcher:
         search_model_tuning_count = 0
 
         search_idx_range = range(len(self.tuning_configurations) - n_random_searches)
-        search_progress_bar = tqdm(total=runtime_budget, desc="Conformal search: ")
+
+        if runtime_budget is not None and max_iter is None:
+            search_progress_bar = tqdm(total=runtime_budget, desc="Conformal search: ")
+        elif (runtime_budget is not None and max_iter is not None) or (
+            runtime_budget is None and max_iter is not None
+        ):
+            search_progress_bar = tqdm(total=max_iter, desc="Conformal search: ")
         for config_idx in search_idx_range:
             if verbose:
-                search_progress_bar.update(
-                    int(self.search_timer.return_runtime()) - search_progress_bar.n
-                )
+                if runtime_budget is not None and max_iter is None:
+                    search_progress_bar.update(
+                        int(self.search_timer.return_runtime()) - search_progress_bar.n
+                    )
+                elif (runtime_budget is not None and max_iter is not None) or (
+                    runtime_budget is None and max_iter is not None
+                ):
+                    search_progress_bar.update(1)
             searchable_configurations = [
                 configuration
                 for configuration in self.tuning_configurations
@@ -1376,11 +1410,28 @@ class ConformalSearcher:
             self.searched_performances.append(validation_performance)
             self.searched_timestamps.append(datetime.now())
 
-            if self.search_timer.return_runtime() > runtime_budget:
-                if verbose:
-                    search_progress_bar.update(runtime_budget - search_progress_bar.n)
-                    search_progress_bar.close()
-                break
+            if runtime_budget is not None:
+                if self.search_timer.return_runtime() > runtime_budget:
+                    if verbose:
+                        if runtime_budget is not None:
+                            search_progress_bar.update(
+                                runtime_budget - search_progress_bar.n
+                            )
+                        elif max_iter is not None:
+                            search_progress_bar.update(1)
+                        search_progress_bar.close()
+                    break
+            if max_iter is not None:
+                if n_random_searches + config_idx + 1 >= max_iter:
+                    if verbose:
+                        if runtime_budget is not None:
+                            search_progress_bar.update(
+                                runtime_budget - search_progress_bar.n
+                            )
+                        elif max_iter is not None:
+                            search_progress_bar.update(1)
+                        search_progress_bar.close()
+                    break
 
     def get_best_params(self) -> Dict:
         """

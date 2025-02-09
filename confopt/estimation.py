@@ -16,15 +16,17 @@ from confopt.config import (
     GBM_NAME,
     QRF_NAME,
     QGBM_NAME,
+    QKNN_NAME,
     DNN_NAME,
     GP_NAME,
     KNN_NAME,
     KR_NAME,
     RF_NAME,
+    QL_NAME,
     QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
 from confopt.optimization import RuntimeTracker
-from confopt.quantile_wrappers import QuantileGBM
+from confopt.quantile_wrappers import QuantileGBM, QuantileKNN, QuantileLasso
 from confopt.utils import get_tuning_configurations, get_perceptron_layers
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,11 @@ SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
     GP_NAME: {"kernel": [RBF(), RationalQuadratic()]},
     KR_NAME: {"alpha": [0.001, 0.1, 1, 10]},
     QRF_NAME: {"n_estimators": [25, 50, 100, 150, 200]},
+    QKNN_NAME: {"n_neighbors": [5]},
+    QL_NAME: {
+        "alpha": [0.01, 0.1, 1.0],
+        "max_iter": [500, 1000],
+    },
     QGBM_NAME: {
         "learning_rate": [0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.8],
         "n_estimators": [25, 50, 100, 200],
@@ -72,27 +79,32 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
         "hidden_layer_sizes": (32, 16),
     },
     RF_NAME: {
-        "n_estimators": 150,
+        "n_estimators": 50,
         "max_features": 0.8,
-        "min_samples_split": 2,
-        "min_samples_leaf": 2,
+        "min_samples_split": 5,
+        "min_samples_leaf": 5,
     },
     KNN_NAME: {"n_neighbors": 2},
     GBM_NAME: {
-        "learning_rate": 0.2,
-        "n_estimators": 100,
-        "min_samples_split": 2,
-        "min_samples_leaf": 2,
+        "learning_rate": 0.1,
+        "n_estimators": 50,
+        "min_samples_split": 5,
+        "min_samples_leaf": 3,
         "max_depth": 3,
     },
     GP_NAME: {"kernel": RBF()},
     KR_NAME: {"alpha": 0.1},
-    QRF_NAME: {"n_estimators": 100},
+    QRF_NAME: {"n_estimators": 50},
+    QKNN_NAME: {"n_neighbors": 5},
+    QL_NAME: {
+        "alpha": 0.1,
+        "max_iter": 1000,
+    },
     QGBM_NAME: {
-        "learning_rate": 0.2,
-        "n_estimators": 100,
-        "min_samples_split": 2,
-        "min_samples_leaf": 2,
+        "learning_rate": 0.1,
+        "n_estimators": 50,
+        "min_samples_split": 5,
+        "min_samples_leaf": 3,
         "max_depth": 3,
     },
 }
@@ -192,6 +204,18 @@ def initialize_quantile_estimator(
     """
     if estimator_architecture == QGBM_NAME:
         initialized_model = QuantileGBM(
+            **initialization_params,
+            quantiles=pinball_loss_alpha,
+            random_state=random_state,
+        )
+    elif estimator_architecture == QKNN_NAME:
+        initialized_model = QuantileKNN(
+            **initialization_params,
+            quantiles=pinball_loss_alpha,
+            random_state=random_state,
+        )
+    elif estimator_architecture == QL_NAME:
+        initialized_model = QuantileLasso(
             **initialization_params,
             quantiles=pinball_loss_alpha,
             random_state=random_state,

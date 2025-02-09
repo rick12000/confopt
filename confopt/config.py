@@ -9,9 +9,11 @@ GBM_NAME: str = "gbm"
 KNN_NAME: str = "knn"
 RF_NAME: str = "rf"
 DNN_NAME: str = "dnn"
+QKNN_NAME: str = "qknn"
+QL_NAME: str = "ql"
 
 # Reference names of quantile regression estimators:
-QUANTILE_ESTIMATOR_ARCHITECTURES: List[str] = [QGBM_NAME, QRF_NAME]
+QUANTILE_ESTIMATOR_ARCHITECTURES: List[str] = [QGBM_NAME, QRF_NAME, QKNN_NAME, QL_NAME]
 
 # Reference names of estimators that don't need their input data normalized:
 NON_NORMALIZING_ARCHITECTURES: List[str] = [RF_NAME, GBM_NAME, QRF_NAME, QGBM_NAME]
