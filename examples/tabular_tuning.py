@@ -1,6 +1,17 @@
 from sklearn.datasets import fetch_california_housing
-from sklearn.ensemble import RandomForestRegressor
-from confopt.tuning import ConformalSearcher
+from confopt.tuning import ObjectiveConformalSearcher
+from confopt.estimation import (
+    # LocallyWeightedConformalRegression,
+    QuantileConformalRegression,
+    BayesUCBSampler,
+    # UCBSampler,
+    # ThompsonSampler,
+)
+
+import numpy as np
+from hashlib import sha256
+import random
+
 
 # Set up toy data:
 X, y = fetch_california_housing(return_X_y=True)
@@ -10,37 +21,108 @@ X_val, y_val = X[split_idx:, :], y[split_idx:]
 
 # Define parameter search space:
 parameter_search_space = {
-    "n_estimators": [10, 30, 50, 100, 150, 200, 300, 400],
-    "min_samples_split": [0.005, 0.01, 0.1, 0.2, 0.3],
-    "min_samples_leaf": [0.005, 0.01, 0.1, 0.2, 0.3],
-    "max_features": [None, 0.8, 0.9, 1],
+    "param1__range_float": [0, 100],
+    "param2__range_float": [0, 100],
+    "param3__range_float": [0, 100],
+    "param4__range_float": [0, 100],
+    "param5__range_float": [0, 100],
+    "param6__range_float": [0, 100],
+    "param7__range_float": [0, 100],
 }
 
-# Set up conformal searcher instance:
-searcher = ConformalSearcher(
-    model=RandomForestRegressor(),
-    X_train=X_train,
-    y_train=y_train,
-    X_val=X_val,
-    y_val=y_val,
-    search_space=parameter_search_space,
-    prediction_type="regression",
+confopt_params = {}
+for param_name, param_values in parameter_search_space.items():
+    if "__range_int" in param_name:
+        confopt_params[param_name.replace("__range_int", "")] = list(
+            range(param_values[0], param_values[1] + 1)
+        )
+    elif "__range_float" in param_name:
+        confopt_params[param_name.replace("__range_float", "")] = [
+            random.uniform(param_values[0], param_values[1]) for _ in range(10000)
+        ]
+    else:
+        confopt_params[param_name] = param_values
+
+
+def noisy_rastrigin(x, A=20, noise_seed=42, noise_scale=10):
+    n = len(x)
+    x_bytes = x.tobytes()
+    combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
+    hash_value = int.from_bytes(sha256(combined_bytes).digest()[:4], "big")
+    rng = np.random.default_rng(hash_value)
+
+    rastrigin_value = A * n + np.sum(x**2 - A * np.cos(2 * np.pi * x))
+
+    # Heteroskedastic noise: scale increases with |x|
+    noise_std = noise_scale * (1 + np.abs(x))
+    noise = rng.normal(loc=0.0, scale=noise_std)
+
+    return rastrigin_value + np.sum(noise)
+
+
+class ObjectiveSurfaceGenerator:
+    def __init__(self, generator: str):
+        self.generator = generator
+
+    def predict(self, params):
+        # x = np.array(list(params.values()))
+        x = np.array(list(params.values()), dtype=float)
+
+        if self.generator == "rastrigin":
+            y = noisy_rastrigin(x=x)
+
+        return y
+
+
+def confopt_artificial_objective_function(
+    performance_generator: ObjectiveSurfaceGenerator,
+):
+    def objective_function(configuration):
+        # TODO: check that values always unravels in right order, don't think it does for dicts
+        return performance_generator.predict(params=configuration)
+
+    return objective_function
+
+
+objective_function_in_scope = confopt_artificial_objective_function(
+    performance_generator=ObjectiveSurfaceGenerator(
+        generator="rastrigin",
+    )
 )
 
+conformal_searcher = ObjectiveConformalSearcher(
+    objective_function=objective_function_in_scope,
+    search_space=confopt_params,
+    metric_optimization="inverse",
+)
+
+
 # Carry out hyperparameter search:
-searcher.search(
-    runtime_budget=120,
+# sampler = UCBSampler(c=2)
+# sampler = ThompsonSampler(n_quantiles=50)
+sampler = BayesUCBSampler(c=5, n=50, quantile=0.2)
+# searcher = LocallyWeightedConformalRegression(
+#     point_estimator_architecture="kr",
+#     variance_estimator_architecture="kr",
+#     demeaning_estimator_architecture="kr",
+#     sampler=sampler,
+# )
+searcher = QuantileConformalRegression(
+    quantile_estimator_architecture="qgbm",
+    sampler=sampler,
+)
+conformal_searcher.search(
+    searcher=searcher,
+    n_random_searches=15,
+    max_iter=30,
+    confidence_level=0.9,
+    conformal_retraining_frequency=1,
 )
 
 # Extract results, in the form of either:
 
 # 1. The best hyperparamter configuration found during search
-best_params = searcher.get_best_params()
+best_params = conformal_searcher.get_best_params()
 
-# 2. An initialized (but not trained) model object with the
-#    best hyperparameter configuration found during search
-model_init = searcher.configure_best_model()
-
-# 3. A trained model with the best hyperparameter configuration
-#    found during search
-model = searcher.fit_best_model()
+best_value = conformal_searcher.get_best_value()
+print(f"Best value: {best_value}")

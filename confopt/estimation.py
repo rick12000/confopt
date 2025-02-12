@@ -1,6 +1,7 @@
 import logging
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Literal
 
+import random
 import numpy as np
 from sklearn import metrics
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
@@ -11,7 +12,7 @@ from sklearn.metrics import mean_pinball_loss
 from sklearn.model_selection import KFold
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.neural_network import MLPRegressor
-
+from confopt.preprocessing import train_val_split
 from confopt.config import (
     GBM_NAME,
     QRF_NAME,
@@ -26,7 +27,7 @@ from confopt.config import (
     QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
 from confopt.optimization import RuntimeTracker
-from confopt.quantile_wrappers import QuantileGBM, QuantileKNN, QuantileLasso
+from confopt.quantile_wrappers import QuantileGBM  # , QuantileKNN, QuantileLasso
 from confopt.utils import get_tuning_configurations, get_perceptron_layers
 
 logger = logging.getLogger(__name__)
@@ -81,15 +82,15 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
     RF_NAME: {
         "n_estimators": 50,
         "max_features": 0.8,
-        "min_samples_split": 5,
-        "min_samples_leaf": 5,
+        "min_samples_split": 2,
+        "min_samples_leaf": 2,
     },
     KNN_NAME: {"n_neighbors": 2},
     GBM_NAME: {
         "learning_rate": 0.1,
         "n_estimators": 50,
-        "min_samples_split": 5,
-        "min_samples_leaf": 3,
+        "min_samples_split": 2,
+        "min_samples_leaf": 2,
         "max_depth": 3,
     },
     GP_NAME: {"kernel": RBF()},
@@ -103,8 +104,8 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
     QGBM_NAME: {
         "learning_rate": 0.1,
         "n_estimators": 50,
-        "min_samples_split": 5,
-        "min_samples_leaf": 3,
+        "min_samples_split": 2,
+        "min_samples_leaf": 2,
         "max_depth": 3,
     },
 }
@@ -208,18 +209,18 @@ def initialize_quantile_estimator(
             quantiles=pinball_loss_alpha,
             random_state=random_state,
         )
-    elif estimator_architecture == QKNN_NAME:
-        initialized_model = QuantileKNN(
-            **initialization_params,
-            quantiles=pinball_loss_alpha,
-            random_state=random_state,
-        )
-    elif estimator_architecture == QL_NAME:
-        initialized_model = QuantileLasso(
-            **initialization_params,
-            quantiles=pinball_loss_alpha,
-            random_state=random_state,
-        )
+    # elif estimator_architecture == QKNN_NAME:
+    #     initialized_model = QuantileKNN(
+    #         **initialization_params,
+    #         quantiles=pinball_loss_alpha,
+    #         random_state=random_state,
+    #     )
+    # elif estimator_architecture == QL_NAME:
+    #     initialized_model = QuantileLasso(
+    #         **initialization_params,
+    #         quantiles=pinball_loss_alpha,
+    #         random_state=random_state,
+    #     )
     else:
         raise ValueError(
             f"{estimator_architecture} is not a valid estimator architecture."
@@ -369,6 +370,48 @@ def cross_validate_configurations(
     return cross_fold_scored_configurations, cross_fold_scores
 
 
+class BayesUCBSampler:
+    def __init__(self, c: float = 1, n: float = 50, quantile: float = 0.2):
+        self.c = c
+        self.n = n
+        self.t = 1
+        self.quantile = quantile
+
+    def update_quantile(self):
+        self.quantile = 1 / (self.t * (np.log(self.n) ** self.c))
+        self.t = self.t + 1
+
+
+class UCBSampler:
+    def __init__(
+        self,
+        beta_decay: Literal[
+            "logarithmic_growth", "logarithmic_decay"
+        ] = "logarithmic_decay",
+        beta: float = 1,
+        c: float = 1,
+        quantile: float = 0.2,
+    ):
+        self.beta_decay = beta_decay
+        self.beta = beta
+        self.c = c
+        self.quantile = quantile
+
+        self.t = 1
+
+    def update_beta(self):
+        if self.beta_decay == "logarithmic_decay":
+            self.beta = self.c * np.log(self.t) / self.t
+        elif self.beta_decay == "logarithmic_growth":
+            self.beta = 2 * np.log(self.t + 1)
+        self.t = self.t + 1
+
+
+class ThompsonSampler:
+    def __init__(self, n_quantiles: int = 5):
+        self.n_quantiles = n_quantiles
+
+
 class LocallyWeightedConformalRegression:
     """
     Locally weighted conformal regression.
@@ -382,12 +425,14 @@ class LocallyWeightedConformalRegression:
     def __init__(
         self,
         point_estimator_architecture: str,
-        demeaning_estimator_architecture: str,
         variance_estimator_architecture: str,
+        sampler: Literal[UCBSampler, ThompsonSampler, BayesUCBSampler],
+        demeaning_estimator_architecture: Optional[str] = None,
     ):
         self.point_estimator_architecture = point_estimator_architecture
         self.demeaning_estimator_architecture = demeaning_estimator_architecture
         self.variance_estimator_architecture = variance_estimator_architecture
+        self.sampler = sampler
 
         self.training_time = None
 
@@ -514,10 +559,8 @@ class LocallyWeightedConformalRegression:
 
     def fit(
         self,
-        X_pe: np.array,
-        y_pe: np.array,
-        X_ve: np.array,
-        y_ve: np.array,
+        X_train: np.array,
+        y_train: np.array,
         X_val: np.array,
         y_val: np.array,
         tuning_iterations: Optional[int] = 0,
@@ -564,6 +607,18 @@ class LocallyWeightedConformalRegression:
         random_state :
             Random generation seed.
         """
+        (X_pe, y_pe, X_ve, y_ve,) = train_val_split(
+            X_train,
+            y_train,
+            train_split=0.75,
+            normalize=False,
+            random_state=random_state,
+        )
+        logger.debug(
+            f"Obtained sub training set of size {X_pe.shape} "
+            f"and sub validation set of size {X_ve.shape}"
+        )
+
         self.training_time_tracker = RuntimeTracker()
         self.training_time_tracker.pause_runtime()
 
@@ -576,22 +631,28 @@ class LocallyWeightedConformalRegression:
         )
         pe_residuals = y_ve - self.pe_estimator.predict(X_ve)
 
-        de_estimator = self._fit_component_estimator(
-            X=X_ve,
-            y=pe_residuals,
-            estimator_architecture=self.demeaning_estimator_architecture,
-            tuning_iterations=tuning_iterations,
-            random_state=random_state,
-        )
-        demeaned_pe_residuals = abs(pe_residuals - de_estimator.predict(X_ve))
+        if self.demeaning_estimator_architecture is not None:
+            de_estimator = self._fit_component_estimator(
+                X=X_ve,
+                y=pe_residuals,
+                estimator_architecture=self.demeaning_estimator_architecture,
+                tuning_iterations=tuning_iterations,
+                random_state=random_state,
+            )
+            abs_pe_residuals = abs(pe_residuals - de_estimator.predict(X_ve))
+        else:
+            abs_pe_residuals = abs(pe_residuals)
 
         self.ve_estimator = self._fit_component_estimator(
             X=X_ve,
-            y=demeaned_pe_residuals,
+            y=abs_pe_residuals,
             estimator_architecture=self.variance_estimator_architecture,
             tuning_iterations=tuning_iterations,
             random_state=random_state,
         )
+        # print(f"X_ve {X_ve}")
+        # print("demeaned")
+        # print(demeaned_pe_residuals)
 
         var_pred = self.ve_estimator.predict(X_val)
         var_pred = np.array([1 if x <= 0 else x for x in var_pred])
@@ -601,7 +662,7 @@ class LocallyWeightedConformalRegression:
         )
         self.training_time = self.training_time_tracker.return_runtime()
 
-    def predict(self, X: np.array, confidence_level: float):
+    def predict(self, X: np.array):
         """
         Predict conformal interval bounds for specified X examples.
 
@@ -624,18 +685,52 @@ class LocallyWeightedConformalRegression:
             Upper bound(s) of conformal interval for specified
             X example(s).
         """
-        score_quantile = np.quantile(self.nonconformity_scores, confidence_level)
-
+        # print(f"X: {X}")
         y_pred = np.array(self.pe_estimator.predict(X))
 
         var_pred = self.ve_estimator.predict(X)
         var_pred = np.array([max(x, 0) for x in var_pred])
-        scaled_score = score_quantile * var_pred
 
-        lower_interval_bound = y_pred - scaled_score
-        upper_interval_bound = y_pred + scaled_score
+        if isinstance(self.sampler, UCBSampler):
+            score_quantile = np.quantile(
+                self.nonconformity_scores, self.sampler.quantile
+            )
+            scaled_score = score_quantile * var_pred
 
-        return lower_interval_bound, upper_interval_bound
+            bound = y_pred - self.sampler.beta * scaled_score
+            self.sampler.update_beta()
+        elif isinstance(self.sampler, ThompsonSampler):
+            score_quantiles = np.array(
+                [
+                    np.quantile(
+                        self.nonconformity_scores,
+                        random.choice(
+                            [
+                                (i * (100 // (self.sampler.n_quantiles + 1))) / 100
+                                for i in range(1, self.sampler.n_quantiles + 1)
+                            ]
+                        ),
+                    )
+                    for _ in range(len(var_pred))
+                ]
+            )
+            scaled_score = score_quantiles * var_pred
+
+            # print(f"Score quantiles {score_quantiles}")
+            # print(f"Var pred {var_pred}")
+            # print(np.mean(var_pred))
+            bound = y_pred - scaled_score
+
+        elif isinstance(self.sampler, BayesUCBSampler):
+            score_quantile = np.quantile(
+                self.nonconformity_scores, self.sampler.quantile
+            )
+            scaled_score = score_quantile * var_pred
+
+            bound = y_pred - scaled_score
+            self.sampler.update_quantile()
+
+        return bound
 
 
 class QuantileConformalRegression:
@@ -648,8 +743,13 @@ class QuantileConformalRegression:
     The class contains tuning, fitting and prediction methods.
     """
 
-    def __init__(self, quantile_estimator_architecture: str):
+    def __init__(
+        self,
+        quantile_estimator_architecture: str,
+        sampler: Literal[UCBSampler, ThompsonSampler, BayesUCBSampler],
+    ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
+        self.sampler = sampler
 
         self.training_time = None
 
@@ -659,7 +759,7 @@ class QuantileConformalRegression:
         y: np.array,
         estimator_architecture: str,
         n_searches: int,
-        confidence_level: float,
+        quantiles: List[float],
         k_fold_splits: int = 3,
         random_state: Optional[int] = None,
     ) -> Dict:
@@ -678,10 +778,7 @@ class QuantileConformalRegression:
             X=X,
             y=y,
             k_fold_splits=k_fold_splits,
-            quantiles=[
-                ((1 - confidence_level) / 2),
-                confidence_level + ((1 - confidence_level) / 2),
-            ],
+            quantiles=quantiles,
             random_state=random_state,
         )
         best_configuration = scored_configurations[scores.index(max(scores))]
@@ -694,7 +791,6 @@ class QuantileConformalRegression:
         y_train: np.array,
         X_val: np.array,
         y_val: np.array,
-        confidence_level: float,
         tuning_iterations: Optional[int] = 0,
         random_state: Optional[int] = None,
     ):
@@ -734,13 +830,24 @@ class QuantileConformalRegression:
         estimator :
             Fitted estimator object.
         """
+        if isinstance(self.sampler, UCBSampler):
+            quantiles = [self.sampler.quantile, 1 - self.sampler.quantile]
+        elif isinstance(self.sampler, ThompsonSampler):
+            quantiles = [
+                (i * (self.sampler.n_quantiles // (self.sampler.n_quantiles + 1)))
+                / self.sampler.n_quantiles
+                for i in range(1, self.sampler.n_quantiles + 1)
+            ]
+        elif isinstance(self.sampler, BayesUCBSampler):
+            quantiles = [self.sampler.quantile, 1 - self.sampler.quantile]
+
         if tuning_iterations > 1:
             initialization_params = self._tune(
                 X=X_train,
                 y=y_train,
                 estimator_architecture=self.quantile_estimator_architecture,
                 n_searches=tuning_iterations,
-                confidence_level=confidence_level,
+                quantiles=quantiles,
                 random_state=random_state,
             )
         else:
@@ -751,30 +858,34 @@ class QuantileConformalRegression:
         self.quantile_estimator = initialize_quantile_estimator(
             estimator_architecture=self.quantile_estimator_architecture,
             initialization_params=initialization_params,
-            pinball_loss_alpha=[
-                ((1 - confidence_level) / 2),
-                confidence_level + ((1 - confidence_level) / 2),
-            ],
+            pinball_loss_alpha=quantiles,
             random_state=random_state,
         )
         training_time_tracker = RuntimeTracker()
         self.quantile_estimator.fit(X_train, y_train)
         self.training_time = training_time_tracker.return_runtime()
 
-        lower_conformal_deviations = list(
-            self.quantile_estimator.predict(X_val)[:, 0] - y_val
-        )
-        upper_conformal_deviations = list(
-            y_val - self.quantile_estimator.predict(X_val)[:, 1]
-        )
-        nonconformity_scores = []
-        for lower_deviation, upper_deviation in zip(
-            lower_conformal_deviations, upper_conformal_deviations
+        if isinstance(self.sampler, UCBSampler) or isinstance(
+            self.sampler, BayesUCBSampler
         ):
-            nonconformity_scores.append(max(lower_deviation, upper_deviation))
-        self.nonconformity_scores = np.array(nonconformity_scores)
+            lower_conformal_deviations = list(
+                self.quantile_estimator.predict(X_val)[:, 0] - y_val
+            )
+            upper_conformal_deviations = list(
+                y_val - self.quantile_estimator.predict(X_val)[:, 1]
+            )
+            nonconformity_scores = []
+            for lower_deviation, upper_deviation in zip(
+                lower_conformal_deviations, upper_conformal_deviations
+            ):
+                nonconformity_scores.append(max(lower_deviation, upper_deviation))
+            self.nonconformity_scores = np.array(nonconformity_scores)
 
-    def predict(self, X: np.array, confidence_level: float):
+        elif isinstance(self.sampler, ThompsonSampler):
+            pass
+            # TODO
+
+    def predict(self, X: np.array):
         """
         Predict conformal interval bounds for specified X examples.
 
@@ -800,12 +911,22 @@ class QuantileConformalRegression:
             Upper bound(s) of conformal interval for specified
             X example(s).
         """
-        score_quantile = np.quantile(self.nonconformity_scores, confidence_level)
-        lower_interval_bound = (
-            np.array(self.quantile_estimator.predict(X)[:, 0]) - score_quantile
-        )
-        upper_interval_bound = (
-            np.array(self.quantile_estimator.predict(X)[:, 1]) + score_quantile
-        )
+        if isinstance(self.sampler, UCBSampler):
+            # TODO
+            self.sampler.update_beta()
+        elif isinstance(self.sampler, ThompsonSampler):
+            pass
+            # TODO
+        elif isinstance(self.sampler, BayesUCBSampler):
+            score_quantile = np.quantile(
+                self.nonconformity_scores, self.sampler.quantile
+            )
+            lower_interval_bound = (
+                np.array(self.quantile_estimator.predict(X)[:, 0]) - score_quantile
+            )
+            # upper_interval_bound = (
+            #     np.array(self.quantile_estimator.predict(X)[:, 1]) + score_quantile
+            # )
+            self.sampler.update_quantile()
 
-        return lower_interval_bound, upper_interval_bound
+        return lower_interval_bound
