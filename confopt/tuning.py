@@ -17,6 +17,117 @@ from confopt.utils import get_tuning_configurations, tabularize_configurations
 logger = logging.getLogger(__name__)
 
 
+class BaseACI:
+    def __init__(self, alpha=0.1, gamma=0.01):
+        """
+        Base class for Adaptive Conformal Inference (ACI).
+
+        Parameters:
+        - alpha: Target coverage level (1 - alpha is the desired coverage).
+        - gamma: Step-size parameter for updating alpha_t.
+        """
+        self.alpha = alpha
+        self.gamma = gamma
+        self.alpha_t = alpha  # Initial confidence level
+
+    def update(self, breach_indicator):
+        """
+        Update the confidence level alpha_t based on the breach indicator.
+
+        Parameters:
+        - breach_indicator: 1 if the previous prediction breached its interval, 0 otherwise.
+
+        Returns:
+        - alpha_t: Updated confidence level.
+        """
+        raise NotImplementedError("Subclasses must implement the `update` method.")
+
+
+class ACI(BaseACI):
+    def __init__(self, alpha=0.1, gamma=0.01):
+        """
+        Standard Adaptive Conformal Inference (ACI).
+
+        Parameters:
+        - alpha: Target coverage level (1 - alpha is the desired coverage).
+        - gamma: Step-size parameter for updating alpha_t.
+        """
+        super().__init__(alpha, gamma)
+
+    def update(self, breach_indicator):
+        """
+        Update the confidence level alpha_t using the standard ACI update rule.
+
+        Parameters:
+        - breach_indicator: 1 if the previous prediction breached its interval, 0 otherwise.
+
+        Returns:
+        - alpha_t: Updated confidence level.
+        """
+        # Update alpha_t using the standard ACI rule
+        self.alpha_t += self.gamma * (self.alpha - breach_indicator)
+        return self.alpha_t
+
+
+class DtACI(BaseACI):
+    def __init__(self, alpha=0.1, gamma_candidates=None, eta=0.1, sigma=0.01):
+        """
+        Dynamically-Tuned Adaptive Conformal Inference (DtACI).
+
+        Parameters:
+        - alpha: Target coverage level (1 - alpha is the desired coverage).
+        - gamma_candidates: List of candidate step-sizes for the experts.
+        - eta: Learning rate for expert weights.
+        - sigma: Exploration rate for expert weights.
+        """
+        super().__init__(alpha, gamma=None)  # gamma is not used in DtACI
+        self.gamma_candidates = (
+            gamma_candidates
+            if gamma_candidates is not None
+            else [0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064, 0.128]
+        )
+        self.eta = eta
+        self.sigma = sigma
+
+        # Initialize experts
+        self.num_experts = len(self.gamma_candidates)
+        self.alpha_t = (
+            np.ones(self.num_experts) * alpha
+        )  # Initial quantile estimates for each expert
+        self.weights = (
+            np.ones(self.num_experts) / self.num_experts
+        )  # Uniform initial weights
+
+    def update(self, breach_indicator):
+        """
+        Update the confidence level alpha_t using the DtACI update rule.
+
+        Parameters:
+        - breach_indicator: 1 if the previous prediction breached its interval, 0 otherwise.
+
+        Returns:
+        - alpha_t: Updated confidence level.
+        """
+        # Update each expert
+        for i in range(self.num_experts):
+            # Update alpha_t for this expert
+            self.alpha_t[i] += self.gamma_candidates[i] * (
+                self.alpha - breach_indicator
+            )
+
+        # Update expert weights using exponential weighting
+        losses = breach_indicator  # Pinball loss simplifies to the breach indicator
+        self.weights *= np.exp(-self.eta * losses)
+        self.weights = (1 - self.sigma) * self.weights / np.sum(
+            self.weights
+        ) + self.sigma / self.num_experts
+
+        # Compute the final alpha_t as a weighted average of experts' alpha_t
+        final_alpha_t = np.sum(self.weights * self.alpha_t)
+
+        return final_alpha_t
+
+
 def update_model_parameters(
     model_instance: Any, configuration: Dict, random_state: int = None
 ):

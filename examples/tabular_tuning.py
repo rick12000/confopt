@@ -76,7 +76,6 @@ class ObjectiveSurfaceGenerator:
         self.generator = generator
 
     def predict(self, params):
-        # x = np.array(list(params.values()))
         x = np.array(list(params.values()), dtype=float)
 
         if self.generator == "rastrigin":
@@ -109,11 +108,11 @@ conformal_searcher = ObjectiveConformalSearcher(
 
 
 # Carry out hyperparameter search:
-sampler = UCBSampler(c=2, quantile=0.1)
-# sampler = ThompsonSampler(n_quantiles=20)
-# sampler = BayesUCBSampler(c=5, n=30, quantile=0.2)
+sampler = UCBSampler(c=5, interval_width=0.9)
+# sampler = ThompsonSampler(n_quantiles=4)
+# sampler = BayesUCBSampler(c=2, n=20)
 # searcher = LocallyWeightedConformalRegression(
-#     point_estimator_architecture="knn",
+#     point_estimator_architecture="gbm",
 #     variance_estimator_architecture="gbm",
 #     demeaning_estimator_architecture=None,
 #     sampler=sampler,
@@ -124,12 +123,11 @@ searcher = QuantileConformalRegression(
 )
 
 best_values = []
-for i in range(3):
+for i in range(20):
     conformal_searcher.search(
         searcher=searcher,
         n_random_searches=10,
-        max_iter=20,
-        confidence_level=0.9,
+        max_iter=30,
         conformal_retraining_frequency=1,
         random_state=i,
     )

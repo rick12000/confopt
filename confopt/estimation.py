@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Optional, List, Tuple, Literal
+from typing import Dict, Optional, List, Tuple, Literal, Union
 
 import random
 import numpy as np
@@ -371,14 +371,17 @@ def cross_validate_configurations(
 
 
 class BayesUCBSampler:
-    def __init__(self, c: float = 1, n: float = 50, quantile: float = 0.2):
+    def __init__(self, c: float = 1, n: float = 50):
         self.c = c
         self.n = n
         self.t = 1
-        self.quantile = quantile
 
-    def update_quantile(self):
-        self.quantile = 1 / (self.t * (np.log(self.n) ** self.c))
+    def fetch_quantiles(self):
+        lower_bound_quantile = 1 / (self.t * (np.log(self.n) ** self.c))
+        quantiles = [lower_bound_quantile, 1 - lower_bound_quantile]
+        return quantiles
+
+    def update_exploration_step(self):
         self.t = self.t + 1
 
 
@@ -390,16 +393,21 @@ class UCBSampler:
         ] = "logarithmic_decay",
         beta: float = 1,
         c: float = 1,
-        quantile: float = 0.2,
+        interval_width: float = 0.2,
     ):
         self.beta_decay = beta_decay
         self.beta = beta
         self.c = c
-        self.quantile = quantile
+        self.interval_width = interval_width
 
         self.t = 1
 
-    def update_beta(self):
+    def fetch_quantiles(self):
+        lower_bound_quantile = (1 - self.interval_width) / 2
+        upper_bound_quantile = 1 - lower_bound_quantile
+        return [lower_bound_quantile, upper_bound_quantile]
+
+    def update_exploration_step(self):
         if self.beta_decay == "logarithmic_decay":
             self.beta = self.c * np.log(self.t) / self.t
         elif self.beta_decay == "logarithmic_growth":
@@ -408,8 +416,16 @@ class UCBSampler:
 
 
 class ThompsonSampler:
-    def __init__(self, n_quantiles: int = 5):
+    def __init__(self, n_quantiles: int = 4):
+        if n_quantiles % 2 != 0:
+            raise ValueError("Number of Thompson quantiles must be even.")
         self.n_quantiles = n_quantiles
+
+    def fetch_quantiles(self):
+        return [
+            round(i * 1 / (self.n_quantiles + 1), 2)
+            for i in range(1, self.n_quantiles + 1)
+        ]  # Generate list excluding 0 and 1
 
 
 class LocallyWeightedConformalRegression:
@@ -426,7 +442,7 @@ class LocallyWeightedConformalRegression:
         self,
         point_estimator_architecture: str,
         variance_estimator_architecture: str,
-        sampler: Literal[UCBSampler, ThompsonSampler, BayesUCBSampler],
+        sampler: Union[UCBSampler, ThompsonSampler, BayesUCBSampler],
         demeaning_estimator_architecture: Optional[str] = None,
     ):
         self.point_estimator_architecture = point_estimator_architecture
@@ -689,23 +705,18 @@ class LocallyWeightedConformalRegression:
 
         if isinstance(self.sampler, UCBSampler):
             score_quantile = np.quantile(
-                self.nonconformity_scores, self.sampler.quantile
+                self.nonconformity_scores, self.sampler.fetch_quantiles()[0]
             )
             scaled_score = score_quantile * var_pred
 
             bound = y_pred - self.sampler.beta * scaled_score
-            self.sampler.update_beta()
+            self.sampler.update_exploration_step()
         elif isinstance(self.sampler, ThompsonSampler):
             score_quantiles = np.array(
                 [
                     np.quantile(
                         self.nonconformity_scores,
-                        random.choice(
-                            [
-                                (i * (100 // (self.sampler.n_quantiles + 1))) / 100
-                                for i in range(1, self.sampler.n_quantiles + 1)
-                            ]
-                        ),
+                        random.choice(self.sampler.fetch_quantiles()),
                     )
                     for _ in range(len(var_pred))
                 ]
@@ -716,12 +727,12 @@ class LocallyWeightedConformalRegression:
 
         elif isinstance(self.sampler, BayesUCBSampler):
             score_quantile = np.quantile(
-                self.nonconformity_scores, self.sampler.quantile
+                self.nonconformity_scores, self.sampler.fetch_quantiles()[0]
             )
             scaled_score = score_quantile * var_pred
 
             bound = y_pred - scaled_score
-            self.sampler.update_quantile()
+            self.sampler.update_exploration_step()
 
         return bound
 
@@ -739,7 +750,7 @@ class QuantileConformalRegression:
     def __init__(
         self,
         quantile_estimator_architecture: str,
-        sampler: Literal[UCBSampler, ThompsonSampler, BayesUCBSampler],
+        sampler: Union[UCBSampler, ThompsonSampler, BayesUCBSampler],
         n_pre_conformal_trials: int = 20,
     ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
@@ -826,21 +837,12 @@ class QuantileConformalRegression:
             Fitted estimator object.
         """
         if isinstance(self.sampler, UCBSampler):
-            quantiles = [self.sampler.quantile, 0.5, 1 - self.sampler.quantile]
+            quantiles = self.sampler.fetch_quantiles()
+            quantiles.insert(1, 0.5)
         elif isinstance(self.sampler, ThompsonSampler):
-            quantiles = [
-                (i * (self.sampler.n_quantiles // (self.sampler.n_quantiles + 1)))
-                / self.sampler.n_quantiles
-                for i in range(1, self.sampler.n_quantiles + 1)
-            ]
-            for i in range(len(quantiles)):
-                if quantiles[i] == 100:
-                    quantiles[i] = 0.99
-                elif quantiles[i] == 0:
-                    quantiles[i] = 0.01
-
+            quantiles = self.sampler.fetch_quantiles()
         elif isinstance(self.sampler, BayesUCBSampler):
-            quantiles = [self.sampler.quantile, 1 - self.sampler.quantile]
+            quantiles = self.sampler.fetch_quantiles()
 
         if tuning_iterations > 1:
             initialization_params = self._tune(
@@ -863,12 +865,13 @@ class QuantileConformalRegression:
             random_state=random_state,
         )
         training_time_tracker = RuntimeTracker()
-        if len(X_train) > self.n_pre_conformal_trials:
+        if len(X_train) + len(X_val) > self.n_pre_conformal_trials:
             self.quantile_estimator.fit(X_train, y_train)
             self.training_time = training_time_tracker.return_runtime()
             if isinstance(self.sampler, UCBSampler) or isinstance(
                 self.sampler, BayesUCBSampler
             ):
+                self.indexed_nonconformity_scores = {}
                 lower_conformal_deviations = list(
                     self.quantile_estimator.predict(X_val)[:, 0] - y_val
                 )
@@ -880,17 +883,43 @@ class QuantileConformalRegression:
                     lower_conformal_deviations, upper_conformal_deviations
                 ):
                     nonconformity_scores.append(max(lower_deviation, upper_deviation))
-                self.nonconformity_scores = np.array(nonconformity_scores)
+                self.indexed_nonconformity_scores[0] = np.array(nonconformity_scores)
+                self.indexed_nonconformity_scores[-1] = np.array(nonconformity_scores)
 
             elif isinstance(self.sampler, ThompsonSampler):
-                pass
-                # TODO
+                self.indexed_nonconformity_scores = {}
+                for i in range(int(self.sampler.n_quantiles / 2)):
+                    lower_conformal_deviations = list(
+                        self.quantile_estimator.predict(X_val)[:, 0 + i] - y_val
+                    )
+                    upper_conformal_deviations = list(
+                        y_val
+                        - self.quantile_estimator.predict(X_val)[
+                            :, self.sampler.n_quantiles - 1 - i
+                        ]
+                    )
+                    nonconformity_scores = []
+                    for lower_deviation, upper_deviation in zip(
+                        lower_conformal_deviations, upper_conformal_deviations
+                    ):
+                        nonconformity_scores.append(
+                            max(lower_deviation, upper_deviation)
+                        )
+                    self.indexed_nonconformity_scores[0 + i] = np.array(
+                        nonconformity_scores
+                    )
+                    self.indexed_nonconformity_scores[
+                        self.sampler.n_quantiles - 1 - i
+                    ] = np.array(nonconformity_scores)
+            self.conformalize_predictions = True
+
         else:
             self.quantile_estimator.fit(
                 np.vstack((X_train, X_val)), np.concatenate((y_train, y_val))
             )
             self.training_time = training_time_tracker.return_runtime()
-            self.nonconformity_scores = np.zeros((X_val.shape))
+
+            self.conformalize_predictions = False
 
     def predict(self, X: np.array):
         """
@@ -919,9 +948,13 @@ class QuantileConformalRegression:
             X example(s).
         """
         if isinstance(self.sampler, UCBSampler):
-            score_quantile = np.quantile(
-                self.nonconformity_scores, self.sampler.quantile
-            )
+            if self.conformalize_predictions:
+                score_quantile = np.quantile(
+                    self.indexed_nonconformity_scores[0],
+                    self.sampler.fetch_quantiles()[0],
+                )
+            else:
+                score_quantile = 0
             lower_interval_bound = (
                 np.array(self.quantile_estimator.predict(X)[:, 0]) - score_quantile
             )
@@ -934,22 +967,45 @@ class QuantileConformalRegression:
                 + self.sampler.beta * interval
             )
 
-            self.sampler.update_beta()
+            self.sampler.update_exploration_step()
         elif isinstance(self.sampler, ThompsonSampler):
+            if self.conformalize_predictions:
+                score_quantiles = [
+                    (
+                        -np.quantile(
+                            self.indexed_nonconformity_scores[i],
+                            self.sampler.fetch_quantiles()[0],
+                        )
+                        if i < self.sampler.n_quantiles / 2
+                        else np.quantile(
+                            self.indexed_nonconformity_scores[i],
+                            self.sampler.fetch_quantiles()[0],
+                        )
+                    )
+                    for i in range(self.sampler.n_quantiles)
+                ]
+            else:
+                score_quantiles = [0] * self.sampler.n_quantiles
+
             predictions = self.quantile_estimator.predict(X)
             bound = []
             for i in range(predictions.shape[0]):
-                bound.append(predictions[i, random.choice(range(predictions.shape[1]))])
+                ts_idx = random.choice(range(self.sampler.n_quantiles))
+                bound.append(predictions[i, ts_idx] + score_quantiles[ts_idx])
             bound = np.array(bound)
 
         elif isinstance(self.sampler, BayesUCBSampler):
-            score_quantile = np.quantile(
-                self.nonconformity_scores, self.sampler.quantile
-            )
+            if self.conformalize_predictions:
+                score_quantile = np.quantile(
+                    self.indexed_nonconformity_scores[0],
+                    self.sampler.fetch_quantiles()[0],
+                )
+            else:
+                score_quantile = 0
             bound = np.array(self.quantile_estimator.predict(X)[:, 0]) - score_quantile
             # upper_interval_bound = (
             #     np.array(self.quantile_estimator.predict(X)[:, 1]) + score_quantile
             # )
-            self.sampler.update_quantile()
+            self.sampler.update_exploration_step()
 
         return bound

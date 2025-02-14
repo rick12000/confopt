@@ -209,7 +209,7 @@ def test_quantile_conformal_regression__fit(
         random_state=DEFAULT_SEED,
     )
 
-    assert qcr.nonconformity_scores is not None
+    assert qcr.indexed_nonconformity_scores is not None
     assert qcr.quantile_estimator is not None
 
 
