@@ -3,8 +3,8 @@ from confopt.tuning import ObjectiveConformalSearcher
 from confopt.estimation import (
     # LocallyWeightedConformalRegression,
     QuantileConformalRegression,
-    BayesUCBSampler,
-    # UCBSampler,
+    # BayesUCBSampler,
+    UCBSampler,
     # ThompsonSampler,
 )
 
@@ -44,20 +44,31 @@ for param_name, param_values in parameter_search_space.items():
         confopt_params[param_name] = param_values
 
 
-def noisy_rastrigin(x, A=20, noise_seed=42, noise_scale=10):
+# def noisy_rastrigin(x, A=20, noise_seed=42, noise_scale=10):
+#     n = len(x)
+#     x_bytes = x.tobytes()
+#     combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
+#     hash_value = int.from_bytes(sha256(combined_bytes).digest()[:4], "big")
+#     rng = np.random.default_rng(hash_value)
+
+#     rastrigin_value = A * n + np.sum(x**2 - A * np.cos(2 * np.pi * x))
+
+#     # Heteroskedastic noise: scale increases with |x|
+#     noise_std = noise_scale * (1 + np.abs(x))
+#     noise = rng.normal(loc=0.0, scale=noise_std)
+
+#     return rastrigin_value + np.sum(noise)
+
+
+def noisy_rastrigin(x, A=20, noise_seed=42, noise=0):
     n = len(x)
     x_bytes = x.tobytes()
     combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
     hash_value = int.from_bytes(sha256(combined_bytes).digest()[:4], "big")
     rng = np.random.default_rng(hash_value)
-
     rastrigin_value = A * n + np.sum(x**2 - A * np.cos(2 * np.pi * x))
-
-    # Heteroskedastic noise: scale increases with |x|
-    noise_std = noise_scale * (1 + np.abs(x))
-    noise = rng.normal(loc=0.0, scale=noise_std)
-
-    return rastrigin_value + np.sum(noise)
+    noise = rng.normal(loc=0.0, scale=noise)
+    return rastrigin_value + noise
 
 
 class ObjectiveSurfaceGenerator:
@@ -98,26 +109,35 @@ conformal_searcher = ObjectiveConformalSearcher(
 
 
 # Carry out hyperparameter search:
-# sampler = UCBSampler(c=2)
-# sampler = ThompsonSampler(n_quantiles=50)
-sampler = BayesUCBSampler(c=5, n=50, quantile=0.2)
+sampler = UCBSampler(c=2, quantile=0.1)
+# sampler = ThompsonSampler(n_quantiles=20)
+# sampler = BayesUCBSampler(c=5, n=30, quantile=0.2)
 # searcher = LocallyWeightedConformalRegression(
-#     point_estimator_architecture="kr",
-#     variance_estimator_architecture="kr",
-#     demeaning_estimator_architecture="kr",
+#     point_estimator_architecture="knn",
+#     variance_estimator_architecture="gbm",
+#     demeaning_estimator_architecture=None,
 #     sampler=sampler,
 # )
 searcher = QuantileConformalRegression(
     quantile_estimator_architecture="qgbm",
     sampler=sampler,
 )
-conformal_searcher.search(
-    searcher=searcher,
-    n_random_searches=15,
-    max_iter=30,
-    confidence_level=0.9,
-    conformal_retraining_frequency=1,
-)
+
+best_values = []
+for i in range(3):
+    conformal_searcher.search(
+        searcher=searcher,
+        n_random_searches=10,
+        max_iter=20,
+        confidence_level=0.9,
+        conformal_retraining_frequency=1,
+        random_state=i,
+    )
+    best_value = conformal_searcher.get_best_value()
+    best_values.append(best_value)
+
+print(np.mean(np.array(best_values)))
+print(np.std(np.array(best_values)))
 
 # Extract results, in the form of either:
 

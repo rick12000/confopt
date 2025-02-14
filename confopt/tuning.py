@@ -463,11 +463,8 @@ class ObjectiveConformalSearcher:
     def search(
         self,
         searcher,
-        confidence_level: float = 0.8,
         n_random_searches: int = 20,
         conformal_retraining_frequency: int = 1,
-        enable_adaptive_intervals: bool = True,
-        conformal_learning_rate: float = 0.1,
         verbose: bool = True,
         random_state: Optional[int] = None,
         max_iter: Optional[int] = None,
@@ -564,7 +561,9 @@ class ObjectiveConformalSearcher:
         if runtime_budget is not None:
             search_progress_bar = tqdm(total=runtime_budget, desc="Conformal search: ")
         elif max_iter is not None:
-            search_progress_bar = tqdm(total=max_iter, desc="Conformal search: ")
+            search_progress_bar = tqdm(
+                total=max_iter - n_random_searches, desc="Conformal search: "
+            )
         for config_idx in search_idx_range:
             if verbose:
                 if runtime_budget is not None:
@@ -642,6 +641,9 @@ class ObjectiveConformalSearcher:
                 search_model_retraining_freq=conformal_retraining_frequency,
                 search_to_baseline_runtime_ratio=0.3,
             )
+
+            # search_model_tuning_count = max(5, search_model_tuning_count)
+            # search_model_tuning_count = 5
 
             parameter_performance_bounds = searcher.predict(
                 X=tabularized_searchable_configurations
