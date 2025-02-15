@@ -8,7 +8,7 @@ from sklearn.metrics import mean_squared_error
 
 from confopt.estimation import (
     QuantileConformalRegression,
-    LocallyWeightedConformalRegression,
+    LocallyWeightedConformalSearcher,
 )
 from confopt.tuning import (
     ConformalSearcher,
@@ -73,7 +73,7 @@ def dummy_init_quantile_regression():
 
 @pytest.fixture
 def dummy_init_locally_weighted_regression():
-    lwr = LocallyWeightedConformalRegression(
+    lwr = LocallyWeightedConformalSearcher(
         point_estimator_architecture="gbm",
         demeaning_estimator_architecture="gbm",
         variance_estimator_architecture="gbm",

@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from confopt.config import GBM_NAME
-from confopt.optimization import RuntimeTracker
+from confopt.tracking import RuntimeTracker
 from confopt.tuning import (
     score_predictions,
     get_best_configuration_idx,

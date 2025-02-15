@@ -6,7 +6,7 @@ import pytest
 from confopt.config import GBM_NAME, RF_NAME, QGBM_NAME, QRF_NAME
 from confopt.estimation import (
     QuantileConformalRegression,
-    LocallyWeightedConformalRegression,
+    LocallyWeightedConformalSearcher,
     initialize_point_estimator,
     initialize_quantile_estimator,
     cross_validate_configurations,
@@ -339,7 +339,7 @@ def test_locally_weighted_conformal_regression__fit(
     )
     X_val, y_val = X[round(len(X) * train_split) :, :], y[round(len(y) * train_split) :]
 
-    lwcr = LocallyWeightedConformalRegression(
+    lwcr = LocallyWeightedConformalSearcher(
         point_estimator_architecture=point_estimator_architecture,
         demeaning_estimator_architecture=demeaning_estimator_architecture,
         variance_estimator_architecture=variance_estimator_architecture,
@@ -393,7 +393,7 @@ def test_locally_weighted_conformal_regression__predict(
     )
     X_val, y_val = X[round(len(X) * train_split) :, :], y[round(len(y) * train_split) :]
 
-    lwcr = LocallyWeightedConformalRegression(
+    lwcr = LocallyWeightedConformalSearcher(
         point_estimator_architecture=point_estimator_architecture,
         demeaning_estimator_architecture=demeaning_estimator_architecture,
         variance_estimator_architecture=variance_estimator_architecture,

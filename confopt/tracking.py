@@ -1,5 +1,8 @@
 import logging
 import time
+from pydantic import BaseModel
+from datetime import datetime
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,51 @@ class RuntimeTracker:
         taken_runtime = self.runtime
         self.resume_runtime()
         return taken_runtime
+
+
+class Trial(BaseModel):
+    iteration: int
+    timestamp: datetime
+    configuration: dict
+    performance: float
+    breached_interval: Optional[bool] = None
+    search_model_runtime: Optional[float] = None
+
+
+class Study:
+    def __init__(self):
+        self.trials: list[Trial] = []
+
+    def append_trial(self, trial: Trial):
+        self.trials.append(trial)
+
+    def batch_append_trials(self, trials: list[Trial]):
+        self.trials.extend(trials)
+
+    def get_searched_configurations(self) -> list[dict]:
+        searched_configurations = []
+        for trial in self.trials:
+            searched_configurations.append(trial.configuration)
+        return searched_configurations
+
+    def get_searched_performances(self) -> list[dict]:
+        searched_performances = []
+        for trial in self.trials:
+            searched_performances.append(trial.performance)
+        return searched_performances
+
+    def get_best_configuration(self) -> dict:
+        searched_configurations = []
+        for trial in self.trials:
+            searched_configurations.append((trial.configuration, trial.performance))
+        best_config, _ = min(searched_configurations, key=lambda x: x[1])
+        return best_config
+
+    def get_best_performance(self) -> float:
+        searched_performances = []
+        for trial in self.trials:
+            searched_performances.append(trial.performance)
+        return min(searched_performances)
 
 
 def derive_optimal_tuning_count(

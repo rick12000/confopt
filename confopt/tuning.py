@@ -1,131 +1,24 @@
 import logging
 import random
 from copy import deepcopy
-from typing import Optional, Dict, Any, Tuple, List, get_type_hints, Literal
+from typing import Optional, Dict, Any, Tuple, get_type_hints, Literal, Union
 
 import numpy as np
-from sklearn.metrics import mean_squared_error, accuracy_score, log_loss
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 from datetime import datetime
 import inspect
 
-from confopt.optimization import derive_optimal_tuning_count, RuntimeTracker
+# from confopt.tracking import derive_optimal_tuning_count, RuntimeTracker
 from confopt.preprocessing import train_val_split, remove_iqr_outliers
 from confopt.utils import get_tuning_configurations, tabularize_configurations
+from confopt.tracking import Trial, Study, RuntimeTracker
+from confopt.estimation import (
+    LocallyWeightedConformalSearcher,
+    QuantileConformalRegression,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class BaseACI:
-    def __init__(self, alpha=0.1, gamma=0.01):
-        """
-        Base class for Adaptive Conformal Inference (ACI).
-
-        Parameters:
-        - alpha: Target coverage level (1 - alpha is the desired coverage).
-        - gamma: Step-size parameter for updating alpha_t.
-        """
-        self.alpha = alpha
-        self.gamma = gamma
-        self.alpha_t = alpha  # Initial confidence level
-
-    def update(self, breach_indicator):
-        """
-        Update the confidence level alpha_t based on the breach indicator.
-
-        Parameters:
-        - breach_indicator: 1 if the previous prediction breached its interval, 0 otherwise.
-
-        Returns:
-        - alpha_t: Updated confidence level.
-        """
-        raise NotImplementedError("Subclasses must implement the `update` method.")
-
-
-class ACI(BaseACI):
-    def __init__(self, alpha=0.1, gamma=0.01):
-        """
-        Standard Adaptive Conformal Inference (ACI).
-
-        Parameters:
-        - alpha: Target coverage level (1 - alpha is the desired coverage).
-        - gamma: Step-size parameter for updating alpha_t.
-        """
-        super().__init__(alpha, gamma)
-
-    def update(self, breach_indicator):
-        """
-        Update the confidence level alpha_t using the standard ACI update rule.
-
-        Parameters:
-        - breach_indicator: 1 if the previous prediction breached its interval, 0 otherwise.
-
-        Returns:
-        - alpha_t: Updated confidence level.
-        """
-        # Update alpha_t using the standard ACI rule
-        self.alpha_t += self.gamma * (self.alpha - breach_indicator)
-        return self.alpha_t
-
-
-class DtACI(BaseACI):
-    def __init__(self, alpha=0.1, gamma_candidates=None, eta=0.1, sigma=0.01):
-        """
-        Dynamically-Tuned Adaptive Conformal Inference (DtACI).
-
-        Parameters:
-        - alpha: Target coverage level (1 - alpha is the desired coverage).
-        - gamma_candidates: List of candidate step-sizes for the experts.
-        - eta: Learning rate for expert weights.
-        - sigma: Exploration rate for expert weights.
-        """
-        super().__init__(alpha, gamma=None)  # gamma is not used in DtACI
-        self.gamma_candidates = (
-            gamma_candidates
-            if gamma_candidates is not None
-            else [0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064, 0.128]
-        )
-        self.eta = eta
-        self.sigma = sigma
-
-        # Initialize experts
-        self.num_experts = len(self.gamma_candidates)
-        self.alpha_t = (
-            np.ones(self.num_experts) * alpha
-        )  # Initial quantile estimates for each expert
-        self.weights = (
-            np.ones(self.num_experts) / self.num_experts
-        )  # Uniform initial weights
-
-    def update(self, breach_indicator):
-        """
-        Update the confidence level alpha_t using the DtACI update rule.
-
-        Parameters:
-        - breach_indicator: 1 if the previous prediction breached its interval, 0 otherwise.
-
-        Returns:
-        - alpha_t: Updated confidence level.
-        """
-        # Update each expert
-        for i in range(self.num_experts):
-            # Update alpha_t for this expert
-            self.alpha_t[i] += self.gamma_candidates[i] * (
-                self.alpha - breach_indicator
-            )
-
-        # Update expert weights using exponential weighting
-        losses = breach_indicator  # Pinball loss simplifies to the breach indicator
-        self.weights *= np.exp(-self.eta * losses)
-        self.weights = (1 - self.sigma) * self.weights / np.sum(
-            self.weights
-        ) + self.sigma / self.num_experts
-
-        # Compute the final alpha_t as a weighted average of experts' alpha_t
-        final_alpha_t = np.sum(self.weights * self.alpha_t)
-
-        return final_alpha_t
 
 
 def update_model_parameters(
@@ -160,42 +53,6 @@ def update_model_parameters(
     if hasattr(updated_model_instance, "random_state"):
         setattr(updated_model_instance, "random_state", random_state)
     return updated_model_instance
-
-
-def score_predictions(
-    y_obs: np.array, y_pred: np.array, scoring_function: str
-) -> float:
-    """
-    Score a model's predictions against observed realizations.
-
-    Parameters
-    ----------
-    y_obs :
-        Observed target variable realizations.
-    y_pred :
-        Model predicted target variable values.
-    scoring_function :
-        Type of scoring function to use. Can be one of
-        either:
-            - 'accuracy_score'
-            - 'log_loss'
-            - 'mean_squared_error'
-
-    Returns
-    -------
-    score :
-        Scored model predictions.
-    """
-    if scoring_function == "accuracy_score":
-        score = accuracy_score(y_true=y_obs, y_pred=y_pred)
-    elif scoring_function == "log_loss":
-        score = log_loss(y_true=y_obs, y_pred=y_pred)
-    elif scoring_function == "mean_squared_error":
-        score = mean_squared_error(y_true=y_obs, y_pred=y_pred)
-    else:
-        raise ValueError(f"{scoring_function} is not a recognized scoring function.")
-
-    return score
 
 
 def process_and_split_estimation_data(
@@ -313,60 +170,6 @@ def normalize_estimation_data(
     )
 
 
-def get_best_performance_idx(
-    metric_optimization: str, searched_performances: List[float]
-) -> int:
-    if metric_optimization == "direct":
-        best_performance_idx = searched_performances.index(max(searched_performances))
-    elif metric_optimization == "inverse":
-        best_performance_idx = searched_performances.index(min(searched_performances))
-    else:
-        raise ValueError()
-
-    return best_performance_idx
-
-
-def update_adaptive_confidence_level(
-    true_confidence_level: float,
-    last_confidence_level: float,
-    breach: bool,
-    learning_rate: float,
-) -> float:
-    """
-    Update adaptive confidence level based on breach events.
-
-    The confidence level is increased or decreased based on
-    a specified learning rate and whether the last used interval
-    was breached or not.
-
-    Parameters
-    ----------
-    true_confidence_level :
-        Global confidence level specified at the beginning of
-        conformal hyperparameter search.
-    last_confidence_level :
-        Confidence level as of the last used interval.
-    learning_rate :
-        Learning rate dictating the magnitude of the confidence
-        level update.
-
-    Returns
-    -------
-    updated_confidence_level :
-        Updated confidence level.
-    """
-    updated_confidence_level = 1 - (
-        (1 - last_confidence_level)
-        + learning_rate * ((1 - true_confidence_level) - breach)
-    )
-    updated_confidence_level = min(max(0.01, updated_confidence_level), 0.99)
-    logger.debug(
-        f"Updated confidence level of {last_confidence_level} to {updated_confidence_level}."
-    )
-
-    return updated_confidence_level
-
-
 class ObjectiveConformalSearcher:
     """
     Conformal hyperparameter searcher.
@@ -399,9 +202,7 @@ class ObjectiveConformalSearcher:
 
         self.tuning_configurations = self._get_tuning_configurations()
 
-        self.searched_configurations = []
-        self.searched_performances = []
-        self.searched_timestamps = []
+        self.study = Study()
 
     def _check_objective_function(self):
         signature = inspect.signature(self.objective_function)
@@ -437,37 +238,13 @@ class ObjectiveConformalSearcher:
         )
         return tuning_configurations
 
-    def _evaluate_configuration_performance(
-        self,
-        configuration: Dict,
-    ) -> float:
-        """
-        Evaluate the performance of a specified parameter configuration.
-
-        Parameters
-        ----------
-        configuration :
-            Parameter configuration for the base model being tuned using
-            conformal search.
-
-        Returns
-        -------
-        performance :
-            Specified configuration's validation performance.
-        """
-        logger.debug(f"Evaluating model with configuration: {configuration}")
-
-        performance = self.objective_function(configuration=configuration)
-
-        return performance
-
     def _random_search(
         self,
         n_searches: int,
         verbose: bool = True,
         max_runtime: Optional[int] = None,
         random_state: Optional[int] = None,
-    ) -> Tuple[List, List, List, float]:
+    ) -> list[Trial]:
         """
         Randomly search a portion of the model's hyperparameter space.
 
@@ -501,9 +278,7 @@ class ObjectiveConformalSearcher:
         random.seed(random_state)
         np.random.seed(random_state)
 
-        searched_configurations = []
-        searched_performances = []
-        searched_timestamps = []
+        rs_trials = []
 
         skipped_configuration_counter = 0
         runtime_per_search = 0
@@ -525,7 +300,7 @@ class ObjectiveConformalSearcher:
             randomly_sampled_configurations
         ):
             model_training_timer.resume_runtime()
-            validation_performance = self._evaluate_configuration_performance(
+            validation_performance = self.objective_function(
                 configuration=hyperparameter_configuration
             )
             model_training_timer.pause_runtime()
@@ -537,9 +312,15 @@ class ObjectiveConformalSearcher:
                 )
                 continue
 
-            searched_configurations.append(hyperparameter_configuration.copy())
-            searched_performances.append(validation_performance)
-            searched_timestamps.append(datetime.now())
+            rs_trials.append(
+                Trial(
+                    iteration=config_idx,
+                    timestamp=datetime.now(),
+                    configuration=hyperparameter_configuration.copy(),
+                    performance=validation_performance,
+                    breached_interval=None,
+                )
+            )
 
             runtime_per_search = (
                 runtime_per_search + model_training_timer.return_runtime()
@@ -556,12 +337,7 @@ class ObjectiveConformalSearcher:
                         "Retry with larger runtime budget or set iteration-capped budget instead."
                     )
 
-        return (
-            searched_configurations,
-            searched_performances,
-            searched_timestamps,
-            runtime_per_search,
-        )
+        return rs_trials
 
     @staticmethod
     def _set_conformal_validation_split(X: np.array) -> float:
@@ -573,7 +349,7 @@ class ObjectiveConformalSearcher:
 
     def search(
         self,
-        searcher,
+        searcher: Union[LocallyWeightedConformalSearcher, QuantileConformalRegression],
         n_random_searches: int = 20,
         conformal_retraining_frequency: int = 1,
         verbose: bool = True,
@@ -650,21 +426,14 @@ class ObjectiveConformalSearcher:
         self.random_state = random_state
         self.search_timer = RuntimeTracker()
 
-        (
-            searched_configurations,
-            searched_performances,
-            searched_timestamps,
-            runtime_per_search,
-        ) = self._random_search(
+        rs_trials = self._random_search(
             n_searches=n_random_searches,
             max_runtime=runtime_budget,
             verbose=verbose,
             random_state=random_state,
         )
 
-        self.searched_configurations.extend(searched_configurations)
-        self.searched_performances.extend(searched_performances)
-        self.searched_timestamps.extend(searched_timestamps)
+        self.study.batch_append_trials(trials=rs_trials)
 
         search_model_tuning_count = 0
 
@@ -686,14 +455,14 @@ class ObjectiveConformalSearcher:
             searchable_configurations = [
                 configuration
                 for configuration in self.tuning_configurations
-                if configuration not in self.searched_configurations
+                if configuration not in self.study.get_searched_configurations()
             ]
             (
                 tabularized_searchable_configurations,
                 tabularized_searched_configurations,
             ) = tabularize_configurations(
                 searchable_configurations=searchable_configurations,
-                searched_configurations=self.searched_configurations.copy(),
+                searched_configurations=self.study.get_searched_configurations().copy(),
             )
             (
                 tabularized_searchable_configurations,
@@ -715,7 +484,7 @@ class ObjectiveConformalSearcher:
                 y_val_conformal,
             ) = process_and_split_estimation_data(
                 searched_configurations=tabularized_searched_configurations,
-                searched_performances=np.array(self.searched_performances),
+                searched_performances=np.array(self.study.get_searched_performances()),
                 train_split=(1 - validation_split),
                 filter_outliers=False,
                 random_state=random_state,
@@ -733,9 +502,6 @@ class ObjectiveConformalSearcher:
 
             hit_retraining_interval = config_idx % conformal_retraining_frequency == 0
             if config_idx == 0 or hit_retraining_interval:
-                # if config_idx == 0:
-                #     latest_confidence_level = confidence_level
-
                 searcher.fit(
                     X_train=X_train_conformal,
                     y_train=y_train_conformal,
@@ -745,13 +511,14 @@ class ObjectiveConformalSearcher:
                     random_state=random_state,
                 )
 
-            hyperreg_model_runtime_per_iter = searcher.training_time
-            search_model_tuning_count = derive_optimal_tuning_count(
-                baseline_model_runtime=runtime_per_search,
-                search_model_runtime=hyperreg_model_runtime_per_iter,
-                search_model_retraining_freq=conformal_retraining_frequency,
-                search_to_baseline_runtime_ratio=0.3,
-            )
+            # hyperreg_model_runtime_per_iter = searcher.training_time
+            # search_model_tuning_count = derive_optimal_tuning_count(
+            #     baseline_model_runtime=runtime_per_search,
+            #     search_model_runtime=hyperreg_model_runtime_per_iter,
+            #     search_model_retraining_freq=conformal_retraining_frequency,
+            #     search_to_baseline_runtime_ratio=0.3,
+            # )
+            search_model_tuning_count = 0
 
             # search_model_tuning_count = max(5, search_model_tuning_count)
             # search_model_tuning_count = 5
@@ -763,9 +530,13 @@ class ObjectiveConformalSearcher:
             minimal_idx = np.argmin(parameter_performance_bounds)
 
             minimal_parameter = searchable_configurations[minimal_idx].copy()
-            validation_performance = self._evaluate_configuration_performance(
+            validation_performance = self.objective_function(
                 configuration=minimal_parameter
             )
+            if hasattr(searcher.sampler, "adapter"):
+                searcher.update_interval_width(
+                    sampled_idx=minimal_idx, sampled_performance=validation_performance
+                )
             logger.debug(
                 f"Conformal search iter {config_idx} performance: {validation_performance}"
             )
@@ -773,27 +544,15 @@ class ObjectiveConformalSearcher:
             if np.isnan(validation_performance):
                 continue
 
-            # if (
-            #     validation_performance
-            #     > parameter_performance_higher_bounds[maximal_idx]
-            # ) or (
-            #     validation_performance < parameter_performance_lower_bounds[maximal_idx]
-            # ):
-            #     is_last_interval_breached = True
-            # else:
-            #     is_last_interval_breached = False
-
-            # if enable_adaptive_intervals:
-            #     latest_confidence_level = update_adaptive_confidence_level(
-            #         true_confidence_level=confidence_level,
-            #         last_confidence_level=latest_confidence_level,
-            #         breach=is_last_interval_breached,
-            #         learning_rate=conformal_learning_rate,
-            #     )
-
-            self.searched_configurations.append(minimal_parameter.copy())
-            self.searched_performances.append(validation_performance)
-            self.searched_timestamps.append(datetime.now())
+            self.study.append_trial(
+                Trial(
+                    iteration=config_idx,
+                    timestamp=datetime.now(),
+                    configuration=minimal_parameter.copy(),
+                    performance=validation_performance,
+                    breached_interval=None,
+                )
+            )
 
             if runtime_budget is not None:
                 if self.search_timer.return_runtime() > runtime_budget:
@@ -828,13 +587,7 @@ class ObjectiveConformalSearcher:
         best_params :
             Best performing model hyperparameters.
         """
-        best_performance_idx = get_best_performance_idx(
-            metric_optimization=self.metric_optimization,
-            searched_performances=self.searched_performances,
-        )
-        best_params = self.searched_configurations[best_performance_idx]
-
-        return best_params
+        return self.study.get_best_configuration()
 
     def get_best_value(self) -> float:
         """
@@ -846,13 +599,7 @@ class ObjectiveConformalSearcher:
         best_performance :
             Best predictive performance achieved.
         """
-        best_performance_idx = get_best_performance_idx(
-            metric_optimization=self.metric_optimization,
-            searched_performances=self.searched_performances,
-        )
-        best_performance = self.searched_performances[best_performance_idx]
-
-        return best_performance
+        return self.study.get_best_performance()
 
     def configure_best_model(self):
         """
