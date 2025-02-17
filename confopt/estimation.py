@@ -1,5 +1,6 @@
 import logging
 from typing import Dict, Optional, List, Tuple, Literal, Union
+from pydantic import BaseModel
 
 import random
 import numpy as np
@@ -234,7 +235,7 @@ class DtACI(BaseACI):
         final_alpha_t = np.dot(self.weights, self.alpha_t)
 
         # Ensure final_alpha_t stays within valid bounds [0, 1]
-        final_alpha_t = np.clip(final_alpha_t, 0, 1)
+        final_alpha_t = np.clip(final_alpha_t, 0.01, 0.99)
 
         return final_alpha_t
 
@@ -513,50 +514,9 @@ def cross_validate_configurations(
 #         self.t = self.t + 1
 
 
-class QuantileInterval:
-    def __init__(self, lower_quantile_level: float, upper_quantile_level: float):
-        self.lower_quantile_level = lower_quantile_level
-        self.upper_quantile_level = upper_quantile_level
-
-    def to_list(self):
-        return [self.lower_quantile_level, self.upper_quantile_level]
-
-
-class QuantileIntervalSequence:
-    def __init__(
-        self, quantile_interval_sequence: Optional[list[QuantileInterval]] = None
-    ):
-        self.quantile_interval_sequence = quantile_interval_sequence
-
-    def append(self, quantile_interval: QuantileInterval):
-        self.quantile_interval_sequence.append(quantile_interval)
-
-    def extend(self, quantile_intervals: list[QuantileInterval]):
-        self.quantile_interval_sequence.extend(quantile_intervals)
-
-    def to_flattened_list(self):
-        flattened_list = []
-        for quantile_interval in self.quantile_interval_sequence:
-            flattened_list.extend(quantile_interval.to_list())
-
-        flattened_list.sort()
-
-        return flattened_list
-
-    def from_flattened_list(self, flattened_list: list[float]):
-        flattened_list.sort()
-        quantile_interval_sequence = []
-        for i in range(int(len(flattened_list) / 2)):
-            quantile_interval_sequence.append(
-                QuantileInterval(
-                    lower_quantile_level=flattened_list[0 + i],
-                    upper_quantile_level=flattened_list[-1 - i],
-                )
-            )
-
-        return QuantileIntervalSequence(
-            quantile_interval_sequence=quantile_interval_sequence
-        )
+class QuantileInterval(BaseModel):
+    lower_quantile: float
+    upper_quantile: float
 
 
 class UCBSampler:
@@ -581,14 +541,17 @@ class UCBSampler:
                 self.adapter = ACI(alpha=self.alpha)
             elif adapter_framework == "DtACI":
                 self.adapter = DtACI(alpha=self.alpha)
-        self.quantiles = [self.alpha / 2, 1 - (self.alpha / 2)]
+        self.quantiles = QuantileInterval(
+            lower_quantile=0.5, upper_quantile=1 - (self.alpha / 2)
+        )
+
         self.t = 1
 
     def fetch_alpha(self):
         return self.alpha
 
-    def fetch_quantiles(self):
-        return QuantileInterval(self.quantiles[0], self.quantiles[1])
+    def fetch_interval(self):
+        return self.quantiles
 
     def update_exploration_step(self):
         if self.beta_decay == "logarithmic_decay":
@@ -599,7 +562,9 @@ class UCBSampler:
 
     def update_interval_width(self, breach: int):
         self.alpha = self.adapter.update(breach_indicator=breach)
-        self.quantiles = [self.alpha / 2, 1 - (self.alpha / 2)]
+        self.quantiles = QuantileInterval(
+            lower_quantile=self.alpha / 2, upper_quantile=1 - (self.alpha / 2)
+        )
 
 
 class ThompsonSampler:
@@ -612,15 +577,21 @@ class ThompsonSampler:
             raise ValueError("Number of Thompson quantiles must be even.")
         self.n_quantiles = n_quantiles
 
-        self.quantiles = [
+        starting_quantiles = [
             round(i * 1 / (self.n_quantiles + 1), 2)
             for i in range(1, self.n_quantiles + 1)
         ]
-
+        self.quantiles = []
         self.alphas = []
-        for i in range(int(len(self.quantiles) / 2)):
-            interval = self.quantiles[-1 - i] - self.quantiles[0 + i]
-            alpha = 1 - interval
+        for i in range(int(len(starting_quantiles) / 2)):
+            self.quantiles.append(
+                QuantileInterval(
+                    lower_quantile=starting_quantiles[0 + i],
+                    upper_quantile=starting_quantiles[-1 - i],
+                )
+            )
+            interval_width = starting_quantiles[-1 - i] - starting_quantiles[0 + i]
+            alpha = 1 - interval_width
             self.alphas.append(alpha)
 
         if adapter_framework is not None:
@@ -636,11 +607,8 @@ class ThompsonSampler:
     def fetch_alphas(self):
         return self.alphas
 
-    def fetch_quantiles(self) -> QuantileIntervalSequence:
-        quantile_intervals_sequence = QuantileIntervalSequence().from_flattened_list(
-            flattened_list=self.quantiles
-        )
-        return quantile_intervals_sequence
+    def fetch_intervals(self) -> list[QuantileInterval]:
+        return self.quantiles
 
     def update_interval_width(self, breaches: list[int]):
         alphas = []
@@ -648,9 +616,12 @@ class ThompsonSampler:
         for adapter, breach_indicator in zip(self.adapters, breaches):
             alpha = adapter.update(breach_indicator=breach_indicator)
             alphas.append(alpha)
-            quantiles.extend([alpha / 2, 1 - (alpha / 2)])
+            quantiles.append(
+                QuantileInterval(
+                    lower_quantile=alpha / 2, upper_quantile=1 - (alpha / 2)
+                )
+            )
         self.alphas = alphas
-        quantiles.sort()
         self.quantiles = quantiles
 
 
@@ -924,71 +895,72 @@ class LocallyWeightedConformalSearcher:
             Upper bound(s) of conformal interval for specified
             X example(s).
         """
-        y_pred = np.array(self.pe_estimator.predict(X))
+        y_pred = np.array(self.pe_estimator.predict(X)).reshape(-1, 1)
 
         var_pred = self.ve_estimator.predict(X)
-        var_pred = np.array([max(x, 0) for x in var_pred])
+        var_pred = np.array([max(x, 0) for x in var_pred]).reshape(-1, 1)
 
         if isinstance(self.sampler, UCBSampler):
             score_quantile = np.quantile(
                 self.nonconformity_scores, self.sampler.fetch_alpha()
             )
             scaled_score = score_quantile * var_pred
-            self.adjusted_predictions = np.empty((0, 0))
-            self.adjusted_predictions = np.hstack(
-                (self.adjusted_predictions, y_pred - self.sampler.beta * scaled_score)
-            )
-            self.adjusted_predictions = np.hstack(
-                (self.adjusted_predictions, y_pred + self.sampler.beta * scaled_score)
-            )
-            lower_bound = self.adjusted_predictions[:, 0]
+            self.predictions_per_interval = [
+                np.hstack(
+                    [
+                        y_pred - self.sampler.beta * scaled_score,
+                        y_pred + self.sampler.beta * scaled_score,
+                    ]
+                )
+            ]
+            lower_bound = self.predictions_per_interval[0][:, 0]
 
             self.sampler.update_exploration_step()
 
         elif isinstance(self.sampler, ThompsonSampler):
-            self.adjusted_predictions = np.empty((0, 0))
+            self.predictions_per_interval = []
             for alpha in self.sampler.fetch_alphas():
                 score_quantile = np.quantile(self.nonconformity_scores, alpha)
                 scaled_score = score_quantile * var_pred
-                self.adjusted_predictions = np.hstack(
-                    (self.adjusted_predictions, y_pred - scaled_score)
-                )
-                self.adjusted_predictions = np.hstack(
-                    (self.adjusted_predictions, y_pred + scaled_score)
+                self.predictions_per_interval.append(
+                    np.hstack([y_pred - scaled_score, y_pred + scaled_score])
                 )
 
+            predictions_per_quantile = np.hstack(self.predictions_per_interval)
             lower_bound = []
-            for i in range(self.adjusted_predictions.shape[0]):
+            for i in range(predictions_per_quantile.shape[1]):
                 ts_idx = random.choice(range(self.sampler.n_quantiles))
-                lower_bound.append(self.adjusted_predictions[i, ts_idx])
+                lower_bound.append(predictions_per_quantile[i, ts_idx])
             lower_bound = np.array(lower_bound)
 
         return lower_bound
 
     def update_interval_width(self, sampled_idx: int, sampled_performance: float):
         if isinstance(self.sampler, UCBSampler):
-            sample_quantiles = [
-                self.adjusted_predictions[sampled_idx, 0],
-                self.adjusted_predictions[sampled_idx, 1],
-            ]
-            if sample_quantiles[0] <= sampled_performance <= sample_quantiles[1]:
+            if (
+                self.predictions_per_interval[0][sampled_idx]
+                <= sampled_performance
+                <= self.predictions_per_interval[1][sampled_idx]
+            ):
                 breach = 0
             else:
                 breach = 1
             self.sampler.update_interval_width(breach=breach)
 
         elif isinstance(self.sampler, ThompsonSampler):
-            sample_quantiles = list(self.adjusted_predictions[sampled_idx, :])
-            # TODO
-            # quantile_sequence = QuantileIntervalSequence.from_flattened_list(sample_quantiles)
-            # breaches = []
-            # for quantile_interval in quantile_sequence:
-            #     if quantile_interval.lower_quantile_level <= sampled_performance <= quantile_interval.upper_quantile_level:
-            #         breach = 0
-            #     else:
-            #         breach = 1
-            #     breaches.append(breach)
-            # self.sampler.update_interval_width(breaches=breaches)
+            breaches = []
+            for predictions in self.predictions_per_interval:
+                sampled_predictions = predictions[sampled_idx, :]
+                lower_quantile, upper_quantile = (
+                    sampled_predictions[0],
+                    sampled_predictions[1],
+                )
+                if lower_quantile <= sampled_performance <= upper_quantile:
+                    breach = 0
+                else:
+                    breach = 1
+                breaches.append(breach)
+            self.sampler.update_interval_width(breaches=breaches)
 
 
 class QuantileConformalRegression:
@@ -1091,65 +1063,64 @@ class QuantileConformalRegression:
             Fitted estimator object.
         """
         if isinstance(self.sampler, UCBSampler):
-            quantile_interval = self.sampler.fetch_quantiles()
-            self.quantiles = quantile_interval.to_list()
-            self.quantiles.insert(1, 0.5)
+            quantile_intervals = [self.sampler.fetch_interval()]
         elif isinstance(self.sampler, ThompsonSampler):
-            quantile_intervals = self.sampler.fetch_quantiles()
-            self.quantiles = quantile_intervals.to_flattened_list()
+            quantile_intervals = self.sampler.fetch_intervals()
 
         if tuning_iterations > 1:
-            initialization_params = self._tune(
-                X=X_train,
-                y=y_train,
-                estimator_architecture=self.quantile_estimator_architecture,
-                n_searches=tuning_iterations,
-                quantiles=self.quantiles,
-                random_state=random_state,
-            )
+            params_per_interval = []
+            for interval in quantile_intervals:
+                initialization_params = self._tune(
+                    X=X_train,
+                    y=y_train,
+                    estimator_architecture=self.quantile_estimator_architecture,
+                    n_searches=tuning_iterations,
+                    quantiles=[interval.lower_quantile, interval.upper_quantile],
+                    random_state=random_state,
+                )
+                params_per_interval.append(initialization_params)
         else:
             initialization_params = SEARCH_MODEL_DEFAULT_CONFIGURATIONS[
                 self.quantile_estimator_architecture
             ].copy()
+            params_per_interval = [initialization_params] * len(quantile_intervals)
 
-        self.quantile_estimator = initialize_quantile_estimator(
-            estimator_architecture=self.quantile_estimator_architecture,
-            initialization_params=initialization_params,
-            pinball_loss_alpha=self.quantiles,
-            random_state=random_state,
-        )
+        self.estimators_per_interval = []
+        for interval in quantile_intervals:
+            quantile_estimator = initialize_quantile_estimator(
+                estimator_architecture=self.quantile_estimator_architecture,
+                initialization_params=initialization_params,
+                pinball_loss_alpha=[interval.lower_quantile, interval.upper_quantile],
+                random_state=random_state,
+            )
+            self.estimators_per_interval.append(quantile_estimator)
+
         training_time_tracker = RuntimeTracker()
         if len(X_train) + len(X_val) > self.n_pre_conformal_trials:
-            self.quantile_estimator.fit(X_train, y_train)
+            for estimator in self.estimators_per_interval:
+                estimator.fit(X_train, y_train)
+
             self.training_time = training_time_tracker.return_runtime()
             if isinstance(self.sampler, UCBSampler):
-                self.indexed_nonconformity_scores = {}
-                lower_conformal_deviations = list(
-                    self.quantile_estimator.predict(X_val)[:, 0] - y_val
-                )
-                upper_conformal_deviations = list(
-                    y_val - self.quantile_estimator.predict(X_val)[:, -1]
-                )
+                self.nonconformity_scores_per_interval = []
+                val_prediction = self.estimators_per_interval[0].predict(X_val)
+                lower_conformal_deviations = list(val_prediction[:, 0] - y_val)
+                upper_conformal_deviations = list(y_val - val_prediction[:, -1])
                 nonconformity_scores = []
                 for lower_deviation, upper_deviation in zip(
                     lower_conformal_deviations, upper_conformal_deviations
                 ):
                     nonconformity_scores.append(max(lower_deviation, upper_deviation))
-                self.indexed_nonconformity_scores[0] = np.array(nonconformity_scores)
-                self.indexed_nonconformity_scores[-1] = np.array(nonconformity_scores)
+                self.nonconformity_scores_per_interval.append(
+                    np.array(nonconformity_scores)
+                )
 
             elif isinstance(self.sampler, ThompsonSampler):
-                self.indexed_nonconformity_scores = {}
-                for i in range(int(len(self.quantiles) / 2)):
-                    lower_conformal_deviations = list(
-                        self.quantile_estimator.predict(X_val)[:, 0 + i] - y_val
-                    )
-                    upper_conformal_deviations = list(
-                        y_val
-                        - self.quantile_estimator.predict(X_val)[
-                            :, self.sampler.n_quantiles - 1 - i
-                        ]
-                    )
+                self.nonconformity_scores_per_interval = []
+                for estimator in self.estimators_per_interval:
+                    val_prediction = estimator.predict(X_val)
+                    lower_conformal_deviations = list(val_prediction[:, 0] - y_val)
+                    upper_conformal_deviations = list(y_val - val_prediction[:, 1])
                     nonconformity_scores = []
                     for lower_deviation, upper_deviation in zip(
                         lower_conformal_deviations, upper_conformal_deviations
@@ -1157,18 +1128,17 @@ class QuantileConformalRegression:
                         nonconformity_scores.append(
                             max(lower_deviation, upper_deviation)
                         )
-                    self.indexed_nonconformity_scores[0 + i] = np.array(
-                        nonconformity_scores
+                    self.nonconformity_scores_per_interval.append(
+                        np.array(nonconformity_scores)
                     )
-                    self.indexed_nonconformity_scores[
-                        self.sampler.n_quantiles - 1 - i
-                    ] = np.array(nonconformity_scores)
+
             self.conformalize_predictions = True
 
         else:
-            self.quantile_estimator.fit(
-                np.vstack((X_train, X_val)), np.concatenate((y_train, y_val))
-            )
+            for estimator in self.estimators_per_interval:
+                estimator.fit(
+                    np.vstack((X_train, X_val)), np.concatenate((y_train, y_val))
+                )
             self.training_time = training_time_tracker.return_runtime()
 
             self.conformalize_predictions = False
@@ -1201,49 +1171,50 @@ class QuantileConformalRegression:
         """
         if isinstance(self.sampler, UCBSampler):
             if self.conformalize_predictions:
-                score_quantile = np.quantile(
-                    self.indexed_nonconformity_scores[0],
-                    self.sampler.fetch_quantiles().lower_quantile_level,
+                interval = self.sampler.fetch_interval()
+                score = np.quantile(
+                    self.nonconformity_scores_per_interval[0],
+                    interval.upper_quantile - interval.lower_quantile,
                 )
             else:
-                score_quantile = 0
-            self.lower_interval_bound = (
-                np.array(self.quantile_estimator.predict(X)[:, 0]) - score_quantile
-            )
-            self.upper_interval_bound = (
-                np.array(self.quantile_estimator.predict(X)[:, -1]) + score_quantile
-            )
-            lower_bound = np.array(
-                self.quantile_estimator.predict(X)[:, 1]
-            ) + self.sampler.beta * (
-                np.array(self.quantile_estimator.predict(X)[:, 1])
-                - self.lower_interval_bound
+                score = 0
+            prediction = self.estimators_per_interval[0].predict(X)
+            lower_interval_bound = np.array(prediction[:, 0]) - score
+            upper_interval_bound = np.array(prediction[:, -1]) + score
+
+            self.predictions_per_interval = [lower_interval_bound, upper_interval_bound]
+
+            lower_bound = lower_interval_bound + self.sampler.beta * (
+                upper_interval_bound - lower_interval_bound
             )
 
             self.sampler.update_exploration_step()
         elif isinstance(self.sampler, ThompsonSampler):
+            self.predictions_per_interval = []
             if self.conformalize_predictions:
-                score_quantiles = []
-                for i in range(self.sampler.n_quantiles):
+                for nonconformity_scores, estimator in zip(
+                    self.nonconformity_scores_per_interval, self.estimators_per_interval
+                ):
                     score = np.quantile(
-                        self.indexed_nonconformity_scores[i],
-                        self.sampler.fetch_quantiles().to_flattened_list()[i],
+                        nonconformity_scores,
+                        estimator.quantiles[1] - estimator.quantiles[0],
                     )
-                    if i < self.sampler.n_quantiles / 2:
-                        score_quantiles.append(-score)
-                    else:
-                        score_quantiles.append(score)
+                    scores = [-score, score]
+                    predictions = estimator.predict(X)
+                    adjusted_predictions = (
+                        predictions + np.array(scores).reshape(-1, 1).T
+                    )
+                    self.predictions_per_interval.append(adjusted_predictions)
             else:
-                score_quantiles = [0] * self.sampler.n_quantiles
+                for estimator in self.estimators_per_interval:
+                    predictions = estimator.predict(X)
+                    self.predictions_per_interval.append(predictions)
 
-            predictions = self.quantile_estimator.predict(X)
-            self.adjusted_predictions = (
-                predictions + np.array(score_quantiles).reshape(-1, 1).T
-            )
+            predictions_per_quantile = np.hstack(self.predictions_per_interval)
             lower_bound = []
-            for i in range(self.adjusted_predictions.shape[0]):
+            for i in range(predictions_per_quantile.shape[1]):
                 ts_idx = random.choice(range(self.sampler.n_quantiles))
-                lower_bound.append(self.adjusted_predictions[i, ts_idx])
+                lower_bound.append(predictions_per_quantile[i, ts_idx])
             lower_bound = np.array(lower_bound)
 
         return lower_bound
@@ -1251,8 +1222,8 @@ class QuantileConformalRegression:
     def update_interval_width(self, sampled_idx: int, sampled_performance: float):
         if isinstance(self.sampler, UCBSampler):
             sample_quantiles = [
-                self.lower_interval_bound[sampled_idx],
-                self.upper_interval_bound[sampled_idx],
+                self.predictions_per_interval[0][sampled_idx],
+                self.predictions_per_interval[1][sampled_idx],
             ]
             if sample_quantiles[0] <= sampled_performance <= sample_quantiles[1]:
                 breach = 0
@@ -1261,17 +1232,14 @@ class QuantileConformalRegression:
             self.sampler.update_interval_width(breach=breach)
 
         elif isinstance(self.sampler, ThompsonSampler):
-            sample_quantiles = list(self.adjusted_predictions[sampled_idx, :])
-            quantile_sequence = QuantileIntervalSequence().from_flattened_list(
-                flattened_list=sample_quantiles
-            )
             breaches = []
-            for quantile_interval in quantile_sequence.quantile_interval_sequence:
-                if (
-                    quantile_interval.lower_quantile_level
-                    <= sampled_performance
-                    <= quantile_interval.upper_quantile_level
-                ):
+            for predictions in self.predictions_per_interval:
+                sampled_predictions = predictions[sampled_idx, :]
+                lower_quantile, upper_quantile = (
+                    sampled_predictions[0],
+                    sampled_predictions[1],
+                )
+                if lower_quantile <= sampled_performance <= upper_quantile:
                     breach = 0
                 else:
                     breach = 1

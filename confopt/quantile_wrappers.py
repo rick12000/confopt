@@ -1,15 +1,89 @@
-from typing import List, Union
+from typing import List, Union, Optional
 
 import numpy as np
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import (
+    GradientBoostingRegressor,
+    HistGradientBoostingRegressor,
+    RandomForestRegressor,
+)
+from sklearn.neighbors import NearestNeighbors
+
+# from sklearn.base import BaseEstimator
 
 # from sklearn.neighbors import KNeighborsRegressor
 # from statsmodels.regression.quantile_regression import QuantReg
 
 
-class QuantileGBM:
+class BaseQuantileEstimator:
+    """
+    Base class for quantile estimators using customizable models.
+    """
+
+    def __init__(
+        self,
+        quantiles: List[float],
+        model_class: type,
+        model_params: dict,
+    ):
+        """
+        Initializes the BaseQuantileEstimator with the specified model and quantiles.
+
+        Parameters
+        ----------
+        quantiles: List[float]
+            List of quantiles to predict.
+        model_class: type
+            The class of the model to be used for quantile prediction.
+        model_params: dict
+            Dictionary of hyperparameters for the model.
+        """
+        self.quantiles = quantiles
+        self.model_class = model_class
+        self.model_params = model_params
+        self.trained_estimators = []
+
+    def fit(self, X: np.array, y: np.array):
+        """
+        Fits the model for each quantile.
+
+        Parameters
+        ----------
+        X: np.array
+            Feature variables.
+        y: np.array
+            Target variable.
+        """
+        self.trained_estimators = []
+        for quantile in self.quantiles:
+            params_with_quantile = {**self.model_params, "alpha": quantile}
+            quantile_estimator = self.model_class(**params_with_quantile)
+            quantile_estimator.fit(X, y)
+            self.trained_estimators.append(quantile_estimator)
+
+    def predict(self, X: np.array) -> np.array:
+        """
+        Predicts the target variable for each quantile.
+
+        Parameters
+        ----------
+        X: np.array
+            Feature variables.
+
+        Returns
+        -------
+        np.array
+            A 2D numpy array with each column corresponding to a quantile's predictions.
+        """
+        y_pred = np.column_stack(
+            [estimator.predict(X) for estimator in self.trained_estimators]
+        )
+        return y_pred
+
+
+class QuantileGBM(BaseQuantileEstimator):
     """
     Quantile gradient boosted machine estimator.
+    Inherits from BaseQuantileEstimator and uses GradientBoostingRegressor.
     """
 
     def __init__(
@@ -22,13 +96,40 @@ class QuantileGBM:
         max_depth: int,
         random_state: int,
     ):
-        self.learning_rate = learning_rate
-        self.n_estimators = n_estimators
-        self.min_samples_split = min_samples_split
-        self.min_samples_leaf = min_samples_leaf
-        self.max_depth = max_depth
-        self.quantiles = quantiles
-        self.random_state = random_state
+        """
+        Initializes the QuantileGBM with GBM-specific hyperparameters.
+
+        Parameters
+        ----------
+        quantiles: List[float]
+            List of quantiles to predict.
+        learning_rate: float
+            Learning rate for the GBM.
+        n_estimators: int
+            Number of boosting stages to perform.
+        min_samples_split: Union[float, int]
+            Minimum number of samples required to split an internal node.
+        min_samples_leaf: Union[float, int]
+            Minimum number of samples required to be at a leaf node.
+        max_depth: int
+            Maximum depth of the individual regression estimators.
+        random_state: int
+            Seed for random number generation.
+        """
+        model_params = {
+            "learning_rate": learning_rate,
+            "n_estimators": n_estimators,
+            "min_samples_split": min_samples_split,
+            "min_samples_leaf": min_samples_leaf,
+            "max_depth": max_depth,
+            "random_state": random_state,
+            "loss": "quantile",
+        }
+        super().__init__(
+            quantiles=quantiles,
+            model_class=GradientBoostingRegressor,
+            model_params=model_params,
+        )
 
     def __str__(self):
         return "QuantileGBM()"
@@ -36,46 +137,64 @@ class QuantileGBM:
     def __repr__(self):
         return "QuantileGBM()"
 
-    def fit(self, X: np.array, y: np.array):
-        """
-        Trains a bi-quantile GBM model on X and y data.
 
-        Two separate quantile estimators are trained, one predicting
-        an upper quantile and one predicting a symmetrical lower quantile.
-        The estimators are aggregated in a tuple, for later joint
-        use in prediction.
+class QuantileHistGBM(BaseQuantileEstimator):
+    """
+    Quantile HistGradientBoostingRegressor estimator.
+
+    This estimator leverages HistGradientBoostingRegressor for quantile
+    regression by setting the loss to "quantile" and specifying the desired
+    quantile via the 'quantile' parameter.
+    """
+
+    def __init__(
+        self,
+        quantiles: List[float],
+        learning_rate: float,
+        max_iter: int,
+        max_depth: Optional[int] = None,
+        random_state: Optional[int] = None,
+        **kwargs,
+    ):
+        """
+        Initializes the QuantileHistGBM with HistGradientBoostingRegressor-specific hyperparameters.
 
         Parameters
         ----------
-        X :
-            Feature variables.
-        y :
-            Target variable.
+        quantiles : List[float]
+            List of quantiles to predict. Each value should be between 0 and 1.
+        learning_rate : float
+            The learning rate for the boosting process.
+        max_iter : int
+            The maximum number of iterations (boosting stages).
+        max_depth : int, optional
+            The maximum depth of the individual trees.
+        random_state : int, optional
+            Seed for random number generation.
+        **kwargs :
+            Additional keyword arguments to pass to HistGradientBoostingRegressor.
         """
-        self.trained_estimators = ()
-        for quantile in self.quantiles:
-            quantile_estimator = GradientBoostingRegressor(
-                learning_rate=self.learning_rate,
-                n_estimators=self.n_estimators,
-                min_samples_split=self.min_samples_split,
-                min_samples_leaf=self.min_samples_leaf,
-                max_depth=self.max_depth,
-                random_state=self.random_state,
-                loss="quantile",
-                alpha=quantile,
-            )
-            quantile_estimator.fit(X, y)
-            self.trained_estimators = self.trained_estimators + (quantile_estimator,)
+        # Set up parameters for HistGradientBoostingRegressor. Note that for quantile regression,
+        # we need to specify loss="quantile". The actual quantile value for each model is set later.
+        model_params = {
+            "learning_rate": learning_rate,
+            "max_iter": max_iter,
+            "max_depth": max_depth,
+            "random_state": random_state,
+            "loss": "quantile",
+            **kwargs,
+        }
+        super().__init__(
+            quantiles=quantiles,
+            model_class=HistGradientBoostingRegressor,
+            model_params=model_params,
+        )
 
-    def predict(self, X: np.array) -> np.array:
-        y_pred = np.array([])
-        for estimator in self.trained_estimators:
-            if len(y_pred) == 0:
-                y_pred = estimator.predict(X).reshape(len(X), 1)
-            else:
-                y_pred = np.hstack([y_pred, estimator.predict(X).reshape(len(X), 1)])
+    def __str__(self):
+        return "QuantileHistGBM()"
 
-        return y_pred
+    def __repr__(self):
+        return "QuantileHistGBM()"
 
 
 # class QuantileKNN(BiQuantileEstimator):
@@ -161,3 +280,217 @@ class QuantileGBM:
 #         for i, q in enumerate(self.quantiles):
 #             predictions[:, i] = self.models[q].predict(X_with_intercept)
 #         return predictions
+
+
+class BaseSingleFitQuantileEstimator:
+    """
+    Base class for quantile estimators that are fit only once and then produce
+    quantile predictions by aggregating a set of predictions (e.g., from sub-models
+    or from nearest neighbors).
+
+    Child classes should implement the fit() method and, if needed, override
+    _get_submodel_predictions().
+    """
+
+    def __init__(self, quantiles: List[float]):
+        """
+        Parameters
+        ----------
+        quantiles : List[float]
+            List of quantiles to predict (values between 0 and 1).
+        """
+        self.quantiles = quantiles
+        self.fitted_model = None  # For ensemble models (e.g., forest)
+
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        """
+        Fit the underlying model. Subclasses should implement this.
+        """
+        raise NotImplementedError("Subclasses should implement the fit() method.")
+
+    def _get_submodel_predictions(self, X: np.ndarray) -> np.ndarray:
+        """
+        Retrieves a collection of predictions for each sample.
+
+        Default implementation assumes that self.fitted_model has an attribute
+        'estimators_' (e.g. for ensembles like RandomForestRegressor). This method
+        should be overridden for models that do not follow this pattern (e.g. KNN).
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Feature matrix for prediction.
+
+        Returns
+        -------
+        np.ndarray
+            An array of shape (n_samples, n_predictions) where each row contains
+            multiple predictions whose distribution will be used to compute quantiles.
+        """
+        if not hasattr(self.fitted_model, "estimators_"):
+            raise ValueError(
+                "The fitted model does not have an 'estimators_' attribute."
+            )
+        # Collect predictions from each sub-model (e.g. tree in a forest)
+        sub_preds = np.column_stack(
+            [estimator.predict(X) for estimator in self.fitted_model.estimators_]
+        )
+        return sub_preds
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """
+        Computes quantile predictions for each sample by aggregating predictions.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Feature matrix for prediction.
+
+        Returns
+        -------
+        np.ndarray
+            A 2D array of shape (n_samples, len(quantiles)), where each column
+            corresponds to a quantile prediction.
+        """
+        submodel_preds = self._get_submodel_predictions(X)
+        # Convert quantiles (0-1) to percentiles (0-100)
+        percentiles = [q * 100 for q in self.quantiles]
+        quantile_preds = np.percentile(submodel_preds, percentiles, axis=1).T
+        return quantile_preds
+
+
+class QuantileForest(BaseSingleFitQuantileEstimator):
+    """
+    Quantile estimator based on an ensemble (e.g., RandomForestRegressor).
+    The quantile is computed as the percentile of predictions from the ensemble's
+    individual sub-models (e.g., trees).
+    """
+
+    def __init__(self, quantiles: List[float], **rf_kwargs):
+        """
+        Parameters
+        ----------
+        quantiles : List[float]
+            List of target quantiles (each between 0 and 1).
+        **rf_kwargs : dict
+            Additional keyword arguments to pass to RandomForestRegressor.
+        """
+        super().__init__(quantiles)
+        self.rf_kwargs = rf_kwargs
+
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        """
+        Fits a RandomForestRegressor on the training data.
+        """
+        self.fitted_model = RandomForestRegressor(**self.rf_kwargs)
+        self.fitted_model.fit(X, y)
+        return self
+
+
+class QuantileKNN(BaseSingleFitQuantileEstimator):
+    """
+    Quantile KNN estimator: for each query sample, finds the m nearest neighbors
+    in the training data and returns the desired quantile of their target values.
+    """
+
+    def __init__(self, quantiles: List[float], n_neighbors: int = 5):
+        """
+        Parameters
+        ----------
+        quantiles : List[float]
+            List of quantiles to predict (values between 0 and 1).
+        n_neighbors : int, default=5
+            The number of neighbors to use for the quantile estimation.
+        """
+        super().__init__(quantiles)
+        self.n_neighbors = n_neighbors
+        self.X_train = None
+        self.y_train = None
+        self.nn_model = None  # NearestNeighbors model
+
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        """
+        Stores the training data and fits a NearestNeighbors model.
+        """
+        self.X_train = X
+        self.y_train = y
+        self.nn_model = NearestNeighbors(n_neighbors=self.n_neighbors)
+        self.nn_model.fit(X)
+        return self
+
+    def _get_submodel_predictions(self, X: np.ndarray) -> np.ndarray:
+        """
+        For each sample in X, finds the n_neighbors in the training data and
+        returns their target values.
+
+        Returns
+        -------
+        np.ndarray
+            An array of shape (n_samples, n_neighbors) containing neighbor target values.
+        """
+        # Get indices of nearest neighbors for each sample
+        _, indices = self.nn_model.kneighbors(X)
+        # Retrieve the corresponding y values for the neighbors
+        neighbor_preds = self.y_train[indices]  # shape: (n_samples, n_neighbors)
+        return neighbor_preds
+
+
+# from annoy import AnnoyIndex
+# # Assuming BaseSingleFitQuantileEstimator is already defined as in the previous snippet
+
+# class QuantileKNNApprox(BaseSingleFitQuantileEstimator):
+#     """
+#     Approximate Quantile KNN estimator using Annoy for fast nearest neighbor search.
+#     For each query sample, the approximate m nearest neighbors are fetched from the training data,
+#     and the target quantile is computed from their target values.
+#     """
+#     def __init__(self, quantiles: List[float], n_neighbors: int = 5, n_trees: int = 10, metric: str = 'euclidean'):
+#         """
+#         Parameters
+#         ----------
+#         quantiles : List[float]
+#             List of quantiles to predict (values between 0 and 1).
+#         n_neighbors : int, default=5
+#             Number of neighbors to use for quantile estimation.
+#         n_trees : int, default=10
+#             Number of trees to build in the Annoy index (more trees gives higher accuracy at the expense of speed).
+#         metric : str, default='euclidean'
+#             Distance metric for Annoy. Common options include 'euclidean' and 'manhattan'.
+#         """
+#         super().__init__(quantiles)
+#         self.n_neighbors = n_neighbors
+#         self.n_trees = n_trees
+#         self.metric = metric
+#         self.X_train = None
+#         self.y_train = None
+#         self.annoy_index = None
+
+#     def fit(self, X: np.ndarray, y: np.ndarray):
+#         """
+#         Fits the approximate nearest neighbor index (Annoy) on the training data.
+#         """
+#         self.X_train = X
+#         self.y_train = y
+#         n_features = X.shape[1]
+#         self.annoy_index = AnnoyIndex(n_features, self.metric)
+#         for i, row in enumerate(X):
+#             self.annoy_index.add_item(i, row.tolist())
+#         self.annoy_index.build(self.n_trees)
+#         return self
+
+#     def _get_submodel_predictions(self, X: np.ndarray) -> np.ndarray:
+#         """
+#         For each sample in X, uses the Annoy index to quickly retrieve the approximate
+#         n_neighbors from the training data, then returns their target values.
+
+#         Returns
+#         -------
+#         np.ndarray
+#             Array of shape (n_samples, n_neighbors) with the neighbors' target values.
+#         """
+#         neighbor_vals = []
+#         for x in X:
+#             # Get the indices of the approximate nearest neighbors for this sample
+#             indices = self.annoy_index.get_nns_by_vector(x.tolist(), self.n_neighbors)
+#             neighbor_vals.append(self.y_train[indices])
+#         return np.array(neighbor_vals)
