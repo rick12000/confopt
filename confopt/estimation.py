@@ -608,6 +608,7 @@ class ThompsonSampler:
         self,
         n_quantiles: int = 4,
         adapter_framework: Optional[Literal["ACI", "DtACI"]] = None,
+        enable_optimistic_sampling: bool = False,
     ):
         if n_quantiles % 2 != 0:
             raise ValueError("Number of Thompson quantiles must be even.")
@@ -639,6 +640,8 @@ class ThompsonSampler:
                 self.adapters: list[DtACI] = []
                 for alpha in self.alphas:
                     self.adapters.append(DtACI(alpha=alpha))
+
+        self.enable_optimistic_sampling = enable_optimistic_sampling
 
     def fetch_alphas(self):
         return self.alphas
@@ -969,7 +972,12 @@ class LocallyWeightedConformalSearcher:
             lower_bound = []
             for i in range(predictions_per_quantile.shape[0]):
                 ts_idx = random.choice(range(self.sampler.n_quantiles))
-                lower_bound.append(predictions_per_quantile[i, ts_idx])
+                if self.sampler.enable_optimistic_sampling:
+                    lower_bound.append(
+                        min(predictions_per_quantile[i, ts_idx], y_pred[i, 0])
+                    )
+                else:
+                    lower_bound.append(predictions_per_quantile[i, ts_idx])
             lower_bound = np.array(lower_bound)
 
         return lower_bound
@@ -1105,6 +1113,19 @@ class QuantileConformalRegression:
             quantile_intervals = [self.sampler.fetch_interval()]
         elif isinstance(self.sampler, ThompsonSampler):
             quantile_intervals = self.sampler.fetch_intervals()
+            if self.sampler.enable_optimistic_sampling:
+                median_estimator_params = SEARCH_MODEL_DEFAULT_CONFIGURATIONS[
+                    self.quantile_estimator_architecture
+                ].copy()
+                self.median_estimator = initialize_quantile_estimator(
+                    estimator_architecture=self.quantile_estimator_architecture,
+                    initialization_params=median_estimator_params,
+                    pinball_loss_alpha=[0.5],
+                    random_state=random_state,
+                )
+                self.median_estimator.fit(
+                    np.vstack((X_train, X_val)), np.concatenate((y_train, y_val))
+                )
 
         if tuning_iterations > 1:
             params_per_interval = []
@@ -1249,11 +1270,24 @@ class QuantileConformalRegression:
                     predictions = estimator.predict(X)
                     self.predictions_per_interval.append(predictions)
 
+            if self.sampler.enable_optimistic_sampling:
+                median_predictions = np.array(
+                    self.median_estimator.predict(X)[:, 0]
+                ).reshape(-1, 1)
+
             predictions_per_quantile = np.hstack(self.predictions_per_interval)
             lower_bound = []
             for i in range(predictions_per_quantile.shape[0]):
                 ts_idx = random.choice(range(self.sampler.n_quantiles))
-                lower_bound.append(predictions_per_quantile[i, ts_idx])
+                if self.sampler.enable_optimistic_sampling:
+                    lower_bound.append(
+                        min(
+                            predictions_per_quantile[i, ts_idx],
+                            median_predictions[i, 0],
+                        )
+                    )
+                else:
+                    lower_bound.append(predictions_per_quantile[i, ts_idx])
             lower_bound = np.array(lower_bound)
 
         return lower_bound

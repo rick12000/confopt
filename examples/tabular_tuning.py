@@ -109,7 +109,9 @@ for i in range(5):
 
     # Carry out hyperparameter search:
     # sampler = UCBSampler(c=5, interval_width=0.8, adapter_framework=None)
-    sampler = ThompsonSampler(n_quantiles=4, adapter_framework="ACI")
+    sampler = ThompsonSampler(
+        n_quantiles=4, adapter_framework="ACI", enable_optimistic_sampling=True
+    )
     # sampler = BayesUCBSampler(c=2, n=20)
     # searcher = LocallyWeightedConformalSearcher(
     #     point_estimator_architecture="gbm",
