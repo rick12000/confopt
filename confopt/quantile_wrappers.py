@@ -183,6 +183,7 @@ class QuantileLightGBM(BaseQuantileEstimator):
             "max_depth": max_depth,
             "random_state": random_state,
             "objective": "quantile",
+            "metric": "quantile",
             "verbose": -1,
             **kwargs,
         }

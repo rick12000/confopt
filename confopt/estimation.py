@@ -578,7 +578,7 @@ class UCBSampler:
             elif adapter_framework == "DtACI":
                 self.adapter = DtACI(alpha=self.alpha)
         self.quantiles = QuantileInterval(
-            lower_quantile=0.5, upper_quantile=1 - (self.alpha / 2)
+            lower_quantile=self.alpha / 2, upper_quantile=0.5
         )
 
         self.t = 1
@@ -967,7 +967,7 @@ class LocallyWeightedConformalSearcher:
 
             predictions_per_quantile = np.hstack(self.predictions_per_interval)
             lower_bound = []
-            for i in range(predictions_per_quantile.shape[1]):
+            for i in range(predictions_per_quantile.shape[0]):
                 ts_idx = random.choice(range(self.sampler.n_quantiles))
                 lower_bound.append(predictions_per_quantile[i, ts_idx])
             lower_bound = np.array(lower_bound)
@@ -1219,7 +1219,7 @@ class QuantileConformalRegression:
                 score = 0
             prediction = self.estimators_per_interval[0].predict(X)
             lower_interval_bound = np.array(prediction[:, 0]) - score
-            upper_interval_bound = np.array(prediction[:, -1]) + score
+            upper_interval_bound = np.array(prediction[:, 1]) + score
 
             self.predictions_per_interval = [lower_interval_bound, upper_interval_bound]
 
@@ -1251,7 +1251,7 @@ class QuantileConformalRegression:
 
             predictions_per_quantile = np.hstack(self.predictions_per_interval)
             lower_bound = []
-            for i in range(predictions_per_quantile.shape[1]):
+            for i in range(predictions_per_quantile.shape[0]):
                 ts_idx = random.choice(range(self.sampler.n_quantiles))
                 lower_bound.append(predictions_per_quantile[i, ts_idx])
             lower_bound = np.array(lower_bound)

@@ -535,7 +535,10 @@ class ObjectiveConformalSearcher:
             validation_performance = self.objective_function(
                 configuration=minimal_parameter
             )
-            if hasattr(searcher.sampler, "adapter"):
+            # TODO: fix this
+            if hasattr(searcher.sampler, "adapter") or hasattr(
+                searcher.sampler, "adapters"
+            ):
                 searcher.update_interval_width(
                     sampled_idx=minimal_idx, sampled_performance=validation_performance
                 )
