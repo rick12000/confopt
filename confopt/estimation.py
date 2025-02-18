@@ -5,6 +5,7 @@ from pydantic import BaseModel
 import random
 import numpy as np
 from sklearn import metrics
+from lightgbm import LGBMRegressor
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RationalQuadratic, RBF
@@ -25,10 +26,15 @@ from confopt.config import (
     KR_NAME,
     RF_NAME,
     QL_NAME,
+    QLGBM_NAME,
+    LGBM_NAME,
     QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
 from confopt.tracking import RuntimeTracker
-from confopt.quantile_wrappers import QuantileGBM  # , QuantileKNN, QuantileLasso
+from confopt.quantile_wrappers import (
+    QuantileGBM,
+    QuantileLightGBM,
+)  # , QuantileKNN, QuantileLasso
 from confopt.utils import get_tuning_configurations, get_perceptron_layers
 
 logger = logging.getLogger(__name__)
@@ -49,6 +55,11 @@ SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
         "min_samples_leaf": [1, 2, 3],
     },
     KNN_NAME: {"n_neighbors": [1, 2, 3]},
+    LGBM_NAME: {
+        "learning_rate": [0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.8],
+        "n_estimators": [25, 50, 100, 200],
+        "max_depth": [2, 3, 5, 10],
+    },
     GBM_NAME: {
         "learning_rate": [0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.8],
         "n_estimators": [25, 50, 100, 200],
@@ -69,6 +80,11 @@ SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
         "n_estimators": [25, 50, 100, 200],
         "min_samples_split": [2, 3, 5],
         "min_samples_leaf": [1, 3, 5],
+        "max_depth": [2, 3, 5, 10],
+    },
+    QLGBM_NAME: {
+        "learning_rate": [0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.8],
+        "n_estimators": [25, 50, 100, 200],
         "max_depth": [2, 3, 5, 10],
     },
 }
@@ -94,6 +110,11 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
         "min_samples_leaf": 2,
         "max_depth": 3,
     },
+    LGBM_NAME: {
+        "learning_rate": 0.1,
+        "n_estimators": 50,
+        "max_depth": 3,
+    },
     GP_NAME: {"kernel": RBF()},
     KR_NAME: {"alpha": 0.1, "kernel": "rbf"},
     QRF_NAME: {"n_estimators": 50},
@@ -107,6 +128,11 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
         "n_estimators": 50,
         "min_samples_split": 2,
         "min_samples_leaf": 2,
+        "max_depth": 3,
+    },
+    QLGBM_NAME: {
+        "learning_rate": 0.1,
+        "n_estimators": 50,
         "max_depth": 3,
     },
 }
@@ -282,6 +308,10 @@ def initialize_point_estimator(
         initialized_model = GradientBoostingRegressor(
             **initialization_params, random_state=random_state
         )
+    elif estimator_architecture == LGBM_NAME:
+        initialized_model = LGBMRegressor(
+            **initialization_params, random_state=random_state, verbose=-1
+        )
     elif estimator_architecture == GP_NAME:
         initialized_model = GaussianProcessRegressor(
             **initialization_params, random_state=random_state
@@ -334,6 +364,12 @@ def initialize_quantile_estimator(
     """
     if estimator_architecture == QGBM_NAME:
         initialized_model = QuantileGBM(
+            **initialization_params,
+            quantiles=pinball_loss_alpha,
+            random_state=random_state,
+        )
+    elif estimator_architecture == QLGBM_NAME:
+        initialized_model = QuantileLightGBM(
             **initialization_params,
             quantiles=pinball_loss_alpha,
             random_state=random_state,
@@ -915,6 +951,9 @@ class LocallyWeightedConformalSearcher:
             ]
             lower_bound = self.predictions_per_interval[0][:, 0]
 
+            # # TODO: TEMP
+            # lower_bound = self.pe_estimator.predict(X)
+
             self.sampler.update_exploration_step()
 
         elif isinstance(self.sampler, ThompsonSampler):
@@ -938,9 +977,9 @@ class LocallyWeightedConformalSearcher:
     def update_interval_width(self, sampled_idx: int, sampled_performance: float):
         if isinstance(self.sampler, UCBSampler):
             if (
-                self.predictions_per_interval[0][sampled_idx]
+                self.predictions_per_interval[0][sampled_idx][0]
                 <= sampled_performance
-                <= self.predictions_per_interval[1][sampled_idx]
+                <= self.predictions_per_interval[0][sampled_idx][1]
             ):
                 breach = 0
             else:

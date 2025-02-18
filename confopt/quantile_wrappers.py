@@ -1,9 +1,10 @@
 from typing import List, Union, Optional
+from lightgbm import LGBMRegressor
 
 import numpy as np
 from sklearn.ensemble import (
     GradientBoostingRegressor,
-    HistGradientBoostingRegressor,
+    # HistGradientBoostingRegressor,
     RandomForestRegressor,
 )
 from sklearn.neighbors import NearestNeighbors
@@ -138,26 +139,26 @@ class QuantileGBM(BaseQuantileEstimator):
         return "QuantileGBM()"
 
 
-class QuantileHistGBM(BaseQuantileEstimator):
+class QuantileLightGBM(BaseQuantileEstimator):
     """
-    Quantile HistGradientBoostingRegressor estimator.
+    Quantile LightGBM estimator.
 
-    This estimator leverages HistGradientBoostingRegressor for quantile
-    regression by setting the loss to "quantile" and specifying the desired
-    quantile via the 'quantile' parameter.
+    This estimator leverages LGBMRegressor for quantile regression by setting
+    the objective to "quantile" and specifying the desired quantile via the
+    'alpha' parameter.
     """
 
     def __init__(
         self,
         quantiles: List[float],
         learning_rate: float,
-        max_iter: int,
+        n_estimators: int,
         max_depth: Optional[int] = None,
         random_state: Optional[int] = None,
         **kwargs,
     ):
         """
-        Initializes the QuantileHistGBM with HistGradientBoostingRegressor-specific hyperparameters.
+        Initializes the QuantileLightGBM with LightGBM-specific hyperparameters.
 
         Parameters
         ----------
@@ -165,36 +166,37 @@ class QuantileHistGBM(BaseQuantileEstimator):
             List of quantiles to predict. Each value should be between 0 and 1.
         learning_rate : float
             The learning rate for the boosting process.
-        max_iter : int
-            The maximum number of iterations (boosting stages).
+        n_estimators : int
+            The number of boosting iterations (equivalent to max_iter).
         max_depth : int, optional
             The maximum depth of the individual trees.
         random_state : int, optional
             Seed for random number generation.
         **kwargs :
-            Additional keyword arguments to pass to HistGradientBoostingRegressor.
+            Additional keyword arguments to pass to LGBMRegressor.
         """
-        # Set up parameters for HistGradientBoostingRegressor. Note that for quantile regression,
-        # we need to specify loss="quantile". The actual quantile value for each model is set later.
+        # Set up parameters for LGBMRegressor. For quantile regression,
+        # we specify objective="quantile".
         model_params = {
             "learning_rate": learning_rate,
-            "max_iter": max_iter,
+            "n_estimators": n_estimators,
             "max_depth": max_depth,
             "random_state": random_state,
-            "loss": "quantile",
+            "objective": "quantile",
+            "verbose": -1,
             **kwargs,
         }
         super().__init__(
             quantiles=quantiles,
-            model_class=HistGradientBoostingRegressor,
+            model_class=LGBMRegressor,
             model_params=model_params,
         )
 
     def __str__(self):
-        return "QuantileHistGBM()"
+        return "QuantileLightGBM()"
 
     def __repr__(self):
-        return "QuantileHistGBM()"
+        return "QuantileLightGBM()"
 
 
 # class QuantileKNN(BiQuantileEstimator):

@@ -438,12 +438,15 @@ class ObjectiveConformalSearcher:
         search_model_tuning_count = 0
 
         search_idx_range = range(len(self.tuning_configurations) - n_random_searches)
-        if runtime_budget is not None:
-            search_progress_bar = tqdm(total=runtime_budget, desc="Conformal search: ")
-        elif max_iter is not None:
-            search_progress_bar = tqdm(
-                total=max_iter - n_random_searches, desc="Conformal search: "
-            )
+        if verbose:
+            if runtime_budget is not None:
+                search_progress_bar = tqdm(
+                    total=runtime_budget, desc="Conformal search: "
+                )
+            elif max_iter is not None:
+                search_progress_bar = tqdm(
+                    total=max_iter - n_random_searches, desc="Conformal search: "
+                )
         for config_idx in search_idx_range:
             if verbose:
                 if runtime_budget is not None:
@@ -528,7 +531,6 @@ class ObjectiveConformalSearcher:
             )
 
             minimal_idx = np.argmin(parameter_performance_bounds)
-
             minimal_parameter = searchable_configurations[minimal_idx].copy()
             validation_performance = self.objective_function(
                 configuration=minimal_parameter
@@ -550,7 +552,6 @@ class ObjectiveConformalSearcher:
                     timestamp=datetime.now(),
                     configuration=minimal_parameter.copy(),
                     performance=validation_performance,
-                    breached_interval=None,
                 )
             )
 

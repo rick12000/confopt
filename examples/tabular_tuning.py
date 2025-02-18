@@ -3,8 +3,8 @@ from confopt.tuning import ObjectiveConformalSearcher
 from confopt.estimation import (
     LocallyWeightedConformalSearcher,
     # QuantileConformalRegression,
-    # UCBSampler,
-    ThompsonSampler,
+    UCBSampler,
+    # ThompsonSampler,
 )
 
 import numpy as np
@@ -100,7 +100,7 @@ objective_function_in_scope = confopt_artificial_objective_function(
 )
 
 best_values = []
-for i in range(20):
+for i in range(5):
     conformal_searcher = ObjectiveConformalSearcher(
         objective_function=objective_function_in_scope,
         search_space=confopt_params,
@@ -108,23 +108,23 @@ for i in range(20):
     )
 
     # Carry out hyperparameter search:
-    # sampler = UCBSampler(c=5, interval_width=0.9)
-    sampler = ThompsonSampler(n_quantiles=4)
+    sampler = UCBSampler(c=5, interval_width=0.2)
+    # sampler = ThompsonSampler(n_quantiles=4, adapter_framework="ACI")
     # sampler = BayesUCBSampler(c=2, n=20)
     searcher = LocallyWeightedConformalSearcher(
-        point_estimator_architecture="gbm",
+        point_estimator_architecture="lgbm",
         variance_estimator_architecture="gbm",
         demeaning_estimator_architecture=None,
         sampler=sampler,
     )
     # searcher = QuantileConformalRegression(
-    #     quantile_estimator_architecture="qgbm",
+    #     quantile_estimator_architecture="qlgbm",
     #     sampler=sampler,
     # )
 
     conformal_searcher.search(
         searcher=searcher,
-        n_random_searches=10,
+        n_random_searches=15,
         max_iter=30,
         conformal_retraining_frequency=1,
         random_state=i,
@@ -134,6 +134,9 @@ for i in range(20):
 
 print(np.mean(np.array(best_values)))
 print(np.std(np.array(best_values)))
+
+# for trial in conformal_searcher.study.trials:
+#     print(trial)
 
 # Extract results, in the form of either:
 
