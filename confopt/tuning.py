@@ -9,10 +9,9 @@ from tqdm import tqdm
 from datetime import datetime
 import inspect
 
-# from confopt.tracking import derive_optimal_tuning_count, RuntimeTracker
 from confopt.preprocessing import train_val_split, remove_iqr_outliers
 from confopt.utils import get_tuning_configurations, tabularize_configurations
-from confopt.tracking import Trial, Study, RuntimeTracker
+from confopt.tracking import Trial, Study, RuntimeTracker, derive_optimal_tuning_count
 from confopt.estimation import (
     LocallyWeightedConformalSearcher,
     QuantileConformalRegression,
@@ -281,7 +280,6 @@ class ObjectiveConformalSearcher:
         rs_trials = []
 
         skipped_configuration_counter = 0
-        runtime_per_search = 0
 
         shuffled_tuning_configurations = self.tuning_configurations.copy()
         random.seed(random_state)
@@ -290,8 +288,6 @@ class ObjectiveConformalSearcher:
             : min(n_searches, len(self.tuning_configurations))
         ]
 
-        model_training_timer = RuntimeTracker()
-        model_training_timer.pause_runtime()
         if verbose:
             randomly_sampled_configurations = tqdm(
                 randomly_sampled_configurations, desc="Random search: "
@@ -299,11 +295,11 @@ class ObjectiveConformalSearcher:
         for config_idx, hyperparameter_configuration in enumerate(
             randomly_sampled_configurations
         ):
-            model_training_timer.resume_runtime()
+            training_time_tracker = RuntimeTracker()
             validation_performance = self.objective_function(
                 configuration=hyperparameter_configuration
             )
-            model_training_timer.pause_runtime()
+            training_time = training_time_tracker.return_runtime()
 
             if np.isnan(validation_performance):
                 skipped_configuration_counter += 1
@@ -318,13 +314,10 @@ class ObjectiveConformalSearcher:
                     timestamp=datetime.now(),
                     configuration=hyperparameter_configuration.copy(),
                     performance=validation_performance,
-                    breached_interval=None,
+                    target_model_runtime=training_time,
+                    acquisition_source="rs",
                 )
             )
-
-            runtime_per_search = (
-                runtime_per_search + model_training_timer.return_runtime()
-            ) / (config_idx - skipped_configuration_counter + 1)
 
             logger.debug(
                 f"Random search iter {config_idx} performance: {validation_performance}"
@@ -352,6 +345,7 @@ class ObjectiveConformalSearcher:
         searcher: Union[LocallyWeightedConformalSearcher, QuantileConformalRegression],
         n_random_searches: int = 20,
         conformal_retraining_frequency: int = 1,
+        searcher_tuning_framework: Optional[Literal["runtime", "ucb", "fixed"]] = None,
         verbose: bool = True,
         random_state: Optional[int] = None,
         max_iter: Optional[int] = None,
@@ -505,6 +499,7 @@ class ObjectiveConformalSearcher:
 
             hit_retraining_interval = config_idx % conformal_retraining_frequency == 0
             if config_idx == 0 or hit_retraining_interval:
+                runtime_tracker = RuntimeTracker()
                 searcher.fit(
                     X_train=X_train_conformal,
                     y_train=y_train_conformal,
@@ -513,18 +508,23 @@ class ObjectiveConformalSearcher:
                     tuning_iterations=search_model_tuning_count,
                     random_state=random_state,
                 )
+                searcher_runtime = runtime_tracker.return_runtime()
 
-            # hyperreg_model_runtime_per_iter = searcher.training_time
-            # search_model_tuning_count = derive_optimal_tuning_count(
-            #     baseline_model_runtime=runtime_per_search,
-            #     search_model_runtime=hyperreg_model_runtime_per_iter,
-            #     search_model_retraining_freq=conformal_retraining_frequency,
-            #     search_to_baseline_runtime_ratio=0.3,
-            # )
-            search_model_tuning_count = 0
+                if config_idx == 0:
+                    first_searcher_runtime = searcher_runtime
 
-            # search_model_tuning_count = max(5, search_model_tuning_count)
-            # search_model_tuning_count = 5
+            if searcher_tuning_framework is not None:
+                if searcher_tuning_framework == "runtime":
+                    search_model_tuning_count = derive_optimal_tuning_count(
+                        target_model_runtime=self.study.get_average_target_model_runtime(),
+                        search_model_runtime=first_searcher_runtime,
+                        search_model_retraining_freq=conformal_retraining_frequency,
+                        search_to_baseline_runtime_ratio=0.3,
+                    )
+                elif searcher_tuning_framework == "fixed":
+                    search_model_tuning_count = 3
+            else:
+                search_model_tuning_count = 0
 
             parameter_performance_bounds = searcher.predict(
                 X=tabularized_searchable_configurations
@@ -555,6 +555,8 @@ class ObjectiveConformalSearcher:
                     timestamp=datetime.now(),
                     configuration=minimal_parameter.copy(),
                     performance=validation_performance,
+                    acquisition_source=str(searcher),
+                    searcher_runtime=searcher_runtime,
                 )
             )
 

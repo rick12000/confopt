@@ -803,9 +803,7 @@ class LocallyWeightedConformalSearcher:
             initialization_params=initialization_params,
             random_state=random_state,
         )
-        self.training_time_tracker.resume_runtime()
         estimator.fit(X, y)
-        self.training_time_tracker.pause_runtime()
 
         return estimator
 
@@ -871,8 +869,7 @@ class LocallyWeightedConformalSearcher:
             f"and sub validation set of size {X_ve.shape}"
         )
 
-        self.training_time_tracker = RuntimeTracker()
-        self.training_time_tracker.pause_runtime()
+        training_time_tracker = RuntimeTracker()
 
         self.pe_estimator = self._fit_component_estimator(
             X=X_pe,
@@ -909,7 +906,7 @@ class LocallyWeightedConformalSearcher:
         self.nonconformity_scores = (
             abs(np.array(y_val) - self.pe_estimator.predict(X_val)) / var_pred
         )
-        self.training_time = self.training_time_tracker.return_runtime()
+        self.training_time = training_time_tracker.return_runtime()
 
     def predict(self, X: np.array):
         """
@@ -1109,11 +1106,14 @@ class QuantileConformalRegression:
         estimator :
             Fitted estimator object.
         """
+        training_time_tracker = RuntimeTracker()
+        training_time_tracker.pause_runtime()
         if isinstance(self.sampler, UCBSampler):
             quantile_intervals = [self.sampler.fetch_interval()]
         elif isinstance(self.sampler, ThompsonSampler):
             quantile_intervals = self.sampler.fetch_intervals()
             if self.sampler.enable_optimistic_sampling:
+                training_time_tracker.resume_runtime()
                 median_estimator_params = SEARCH_MODEL_DEFAULT_CONFIGURATIONS[
                     self.quantile_estimator_architecture
                 ].copy()
@@ -1126,7 +1126,9 @@ class QuantileConformalRegression:
                 self.median_estimator.fit(
                     np.vstack((X_train, X_val)), np.concatenate((y_train, y_val))
                 )
+                training_time_tracker.pause_runtime()
 
+        training_time_tracker.resume_runtime()
         if tuning_iterations > 1:
             params_per_interval = []
             for interval in quantile_intervals:
@@ -1155,12 +1157,10 @@ class QuantileConformalRegression:
             )
             self.estimators_per_interval.append(quantile_estimator)
 
-        training_time_tracker = RuntimeTracker()
         if len(X_train) + len(X_val) > self.n_pre_conformal_trials:
             for estimator in self.estimators_per_interval:
                 estimator.fit(X_train, y_train)
 
-            self.training_time = training_time_tracker.return_runtime()
             if isinstance(self.sampler, UCBSampler):
                 self.nonconformity_scores_per_interval = []
                 val_prediction = self.estimators_per_interval[0].predict(X_val)
@@ -1199,9 +1199,10 @@ class QuantileConformalRegression:
                 estimator.fit(
                     np.vstack((X_train, X_val)), np.concatenate((y_train, y_val))
                 )
-            self.training_time = training_time_tracker.return_runtime()
 
             self.conformalize_predictions = False
+
+        self.training_time = training_time_tracker.return_runtime()
 
     def predict(self, X: np.array):
         """

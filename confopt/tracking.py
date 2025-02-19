@@ -34,8 +34,10 @@ class Trial(BaseModel):
     timestamp: datetime
     configuration: dict
     performance: float
+    acquisition_source: Optional[str] = None
     breached_interval: Optional[bool] = None
-    search_model_runtime: Optional[float] = None
+    searcher_runtime: Optional[float] = None
+    target_model_runtime: Optional[float] = None
 
 
 class Study:
@@ -73,9 +75,16 @@ class Study:
             searched_performances.append(trial.performance)
         return min(searched_performances)
 
+    def get_average_target_model_runtime(self) -> float:
+        target_model_runtimes = []
+        for trial in self.trials:
+            if trial.target_model_runtime is not None:
+                target_model_runtimes.append(trial.target_model_runtime)
+        return sum(target_model_runtimes) / len(target_model_runtimes)
+
 
 def derive_optimal_tuning_count(
-    baseline_model_runtime: float,
+    target_model_runtime: float,
     search_model_runtime: float,
     search_model_retraining_freq: int,
     search_to_baseline_runtime_ratio: float,
@@ -109,10 +118,10 @@ def derive_optimal_tuning_count(
         ratio constraint.
     """
     margin_of_error_runtime = 0.0001
-    baseline_model_runtime = max(baseline_model_runtime, margin_of_error_runtime)
+    target_model_runtime = max(target_model_runtime, margin_of_error_runtime)
     search_model_runtime = max(search_model_runtime, margin_of_error_runtime)
     search_model_tuning_count = (
-        baseline_model_runtime * search_model_retraining_freq
+        target_model_runtime * search_model_retraining_freq
     ) / (search_model_runtime * (1 / search_to_baseline_runtime_ratio) ** 2)
 
     # Hard coded number of maximum useful evaluations (arbitrary):
