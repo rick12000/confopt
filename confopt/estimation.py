@@ -597,6 +597,7 @@ class UCBSampler:
         self.t = self.t + 1
 
     def update_interval_width(self, breach: int):
+        self.breach = breach
         self.alpha = self.adapter.update(breach_indicator=breach)
         self.quantiles = QuantileInterval(
             lower_quantile=self.alpha / 2, upper_quantile=1 - (self.alpha / 2)
@@ -982,9 +983,9 @@ class LocallyWeightedConformalSearcher:
     def update_interval_width(self, sampled_idx: int, sampled_performance: float):
         if isinstance(self.sampler, UCBSampler):
             if (
-                self.predictions_per_interval[0][sampled_idx][0]
+                self.predictions_per_interval[0][sampled_idx, 0]
                 <= sampled_performance
-                <= self.predictions_per_interval[0][sampled_idx][1]
+                <= self.predictions_per_interval[0][sampled_idx, 1]
             ):
                 breach = 0
             else:
@@ -1243,7 +1244,7 @@ class QuantileConformalRegression:
             lower_interval_bound = np.array(prediction[:, 0]) - score
             upper_interval_bound = np.array(prediction[:, 1]) + score
 
-            self.predictions_per_interval = [lower_interval_bound, upper_interval_bound]
+            self.predictions_per_interval = [prediction]
 
             lower_bound = lower_interval_bound + self.sampler.beta * (
                 upper_interval_bound - lower_interval_bound
@@ -1295,11 +1296,11 @@ class QuantileConformalRegression:
 
     def update_interval_width(self, sampled_idx: int, sampled_performance: float):
         if isinstance(self.sampler, UCBSampler):
-            sample_quantiles = [
-                self.predictions_per_interval[0][sampled_idx],
-                self.predictions_per_interval[1][sampled_idx],
-            ]
-            if sample_quantiles[0] <= sampled_performance <= sample_quantiles[1]:
+            if (
+                self.predictions_per_interval[0][sampled_idx, 0]
+                <= sampled_performance
+                <= self.predictions_per_interval[0][sampled_idx, 1]
+            ):
                 breach = 0
             else:
                 breach = 1

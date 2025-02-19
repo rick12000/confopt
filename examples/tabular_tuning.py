@@ -3,8 +3,8 @@ from confopt.tuning import ObjectiveConformalSearcher
 from confopt.estimation import (
     # LocallyWeightedConformalSearcher,
     QuantileConformalRegression,
-    # UCBSampler,
-    ThompsonSampler,
+    UCBSampler,
+    # ThompsonSampler,
 )
 
 import numpy as np
@@ -100,7 +100,7 @@ objective_function_in_scope = confopt_artificial_objective_function(
 )
 
 best_values = []
-for i in range(5):
+for i in range(1):
     conformal_searcher = ObjectiveConformalSearcher(
         objective_function=objective_function_in_scope,
         search_space=confopt_params,
@@ -108,10 +108,10 @@ for i in range(5):
     )
 
     # Carry out hyperparameter search:
-    # sampler = UCBSampler(c=5, interval_width=0.8, adapter_framework=None)
-    sampler = ThompsonSampler(
-        n_quantiles=4, adapter_framework="ACI", enable_optimistic_sampling=True
-    )
+    sampler = UCBSampler(c=0.0001, interval_width=0.8, adapter_framework=None)
+    # sampler = ThompsonSampler(
+    #     n_quantiles=4, adapter_framework="ACI", enable_optimistic_sampling=True
+    # )
     # sampler = BayesUCBSampler(c=2, n=20)
     # searcher = LocallyWeightedConformalSearcher(
     #     point_estimator_architecture="gbm",
@@ -127,7 +127,7 @@ for i in range(5):
     conformal_searcher.search(
         searcher=searcher,
         n_random_searches=10,
-        max_iter=30,
+        max_iter=50,
         conformal_retraining_frequency=1,
         random_state=i * 2,
     )
@@ -137,8 +137,13 @@ for i in range(5):
 print(np.mean(np.array(best_values)))
 print(np.std(np.array(best_values)))
 
-# for trial in conformal_searcher.study.trials:
-#     print(trial)
+breaches_list = []
+for trial in conformal_searcher.study.trials:
+    if trial.breached_interval is not None:
+        breaches_list.append(trial.breached_interval)
+    # print(trial)
+
+print(np.mean(np.array(breaches_list)))
 
 # Extract results, in the form of either:
 

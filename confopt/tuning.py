@@ -15,6 +15,7 @@ from confopt.tracking import Trial, Study, RuntimeTracker, derive_optimal_tuning
 from confopt.estimation import (
     LocallyWeightedConformalSearcher,
     QuantileConformalRegression,
+    UCBSampler,
 )
 
 logger = logging.getLogger(__name__)
@@ -549,6 +550,20 @@ class ObjectiveConformalSearcher:
             if np.isnan(validation_performance):
                 continue
 
+            # TODO: TEMP
+            if isinstance(searcher.sampler, UCBSampler):
+                if (
+                    searcher.predictions_per_interval[0][minimal_idx][0]
+                    <= validation_performance
+                    <= searcher.predictions_per_interval[0][minimal_idx][1]
+                ):
+                    breach = 0
+                else:
+                    breach = 1
+            else:
+                breach = None
+            # TODO: END OF TEMP
+
             self.study.append_trial(
                 Trial(
                     iteration=config_idx,
@@ -557,6 +572,7 @@ class ObjectiveConformalSearcher:
                     performance=validation_performance,
                     acquisition_source=str(searcher),
                     searcher_runtime=searcher_runtime,
+                    breached_interval=breach,
                 )
             )
 
