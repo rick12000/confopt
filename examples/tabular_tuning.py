@@ -2,7 +2,7 @@ from sklearn.datasets import fetch_california_housing
 from confopt.tuning import ObjectiveConformalSearcher
 from confopt.estimation import (
     LocallyWeightedConformalSearcher,
-    QuantileConformalRegression,
+    MultiFitQuantileConformalSearcher,
     UCBSampler,
     ThompsonSampler,
 )
@@ -41,22 +41,6 @@ for param_name, param_values in parameter_search_space.items():
         ]
     else:
         confopt_params[param_name] = param_values
-
-
-# def noisy_rastrigin(x, A=20, noise_seed=42, noise_scale=10):
-#     n = len(x)
-#     x_bytes = x.tobytes()
-#     combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
-#     hash_value = int.from_bytes(sha256(combined_bytes).digest()[:4], "big")
-#     rng = np.random.default_rng(hash_value)
-
-#     rastrigin_value = A * n + np.sum(x**2 - A * np.cos(2 * np.pi * x))
-
-#     # Heteroskedastic noise: scale increases with |x|
-#     noise_std = noise_scale * (1 + np.abs(x))
-#     noise = rng.normal(loc=0.0, scale=noise_std)
-
-#     return rastrigin_value + np.sum(noise)
 
 
 def noisy_rastrigin(x, A=20, noise_seed=42, noise=0):
@@ -116,7 +100,7 @@ for i in range(1):
         variance_estimator_architecture="gbm",
         sampler=sampler,
     )
-    searcher = QuantileConformalRegression(
+    searcher = MultiFitQuantileConformalSearcher(
         quantile_estimator_architecture="qgbm",
         sampler=sampler,
     )

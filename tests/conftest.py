@@ -7,7 +7,7 @@ from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_squared_error
 
 from confopt.estimation import (
-    QuantileConformalRegression,
+    MultiFitQuantileConformalSearcher,
     LocallyWeightedConformalSearcher,
 )
 from confopt.tuning import (
@@ -67,7 +67,7 @@ def dummy_fixed_quantile_dataset():
 
 @pytest.fixture
 def dummy_init_quantile_regression():
-    qcr = QuantileConformalRegression(quantile_estimator_architecture="qgbm")
+    qcr = MultiFitQuantileConformalSearcher(quantile_estimator_architecture="qgbm")
     return qcr
 
 

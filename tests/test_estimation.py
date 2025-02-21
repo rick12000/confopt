@@ -5,7 +5,7 @@ import pytest
 
 from confopt.config import GBM_NAME, RF_NAME, QGBM_NAME, QRF_NAME
 from confopt.estimation import (
-    QuantileConformalRegression,
+    MultiFitQuantileConformalSearcher,
     LocallyWeightedConformalSearcher,
     initialize_point_estimator,
     initialize_quantile_estimator,
@@ -196,7 +196,7 @@ def test_quantile_conformal_regression__fit(
     )
     X_val, y_val = X[round(len(X) * train_split) :, :], y[round(len(y) * train_split) :]
 
-    qcr = QuantileConformalRegression(
+    qcr = MultiFitQuantileConformalSearcher(
         quantile_estimator_architecture=quantile_estimator_architecture,
     )
     qcr.fit(
@@ -233,7 +233,7 @@ def test_quantile_conformal_regression__predict(
     )
     X_val, y_val = X[round(len(X) * train_split) :, :], y[round(len(y) * train_split) :]
 
-    qcr = QuantileConformalRegression(
+    qcr = MultiFitQuantileConformalSearcher(
         quantile_estimator_architecture=quantile_estimator_architecture,
     )
     qcr.fit(
