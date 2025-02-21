@@ -1,10 +1,10 @@
 from sklearn.datasets import fetch_california_housing
 from confopt.tuning import ObjectiveConformalSearcher
 from confopt.estimation import (
-    # LocallyWeightedConformalSearcher,
+    LocallyWeightedConformalSearcher,
     QuantileConformalRegression,
     UCBSampler,
-    # ThompsonSampler,
+    ThompsonSampler,
 )
 
 import numpy as np
@@ -107,18 +107,15 @@ for i in range(1):
         metric_optimization="inverse",
     )
 
-    # Carry out hyperparameter search:
     sampler = UCBSampler(c=0.0001, interval_width=0.8, adapter_framework=None)
-    # sampler = ThompsonSampler(
-    #     n_quantiles=4, adapter_framework="ACI", enable_optimistic_sampling=True
-    # )
-    # sampler = BayesUCBSampler(c=2, n=20)
-    # searcher = LocallyWeightedConformalSearcher(
-    #     point_estimator_architecture="gbm",
-    #     variance_estimator_architecture="gbm",
-    #     demeaning_estimator_architecture=None,
-    #     sampler=sampler,
-    # )
+    sampler = ThompsonSampler(
+        n_quantiles=4, adapter_framework="ACI", enable_optimistic_sampling=True
+    )
+    searcher = LocallyWeightedConformalSearcher(
+        point_estimator_architecture="gbm",
+        variance_estimator_architecture="gbm",
+        sampler=sampler,
+    )
     searcher = QuantileConformalRegression(
         quantile_estimator_architecture="qgbm",
         sampler=sampler,
@@ -130,6 +127,7 @@ for i in range(1):
         max_iter=50,
         conformal_retraining_frequency=1,
         random_state=i * 2,
+        searcher_tuning_framework=None,
     )
     best_value = conformal_searcher.get_best_value()
     best_values.append(best_value)

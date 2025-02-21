@@ -36,6 +36,7 @@ from confopt.quantile_wrappers import (
     QuantileLightGBM,
 )  # , QuantileKNN, QuantileLasso
 from confopt.utils import get_tuning_configurations, get_perceptron_layers
+from confopt.adaptation import ACI, DtACI
 
 logger = logging.getLogger(__name__)
 
@@ -136,134 +137,6 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
         "max_depth": 3,
     },
 }
-
-
-class BaseACI:
-    def __init__(self, alpha=0.1, gamma=0.01):
-        """
-        Base class for Adaptive Conformal Inference (ACI).
-
-        Parameters:
-        - alpha: Target coverage level (1 - alpha is the desired coverage).
-        - gamma: Step-size parameter for updating alpha_t.
-        """
-        self.alpha = alpha
-        self.gamma = gamma
-        self.alpha_t = alpha  # Initial confidence level
-
-    def update(self, breach_indicator):
-        """
-        Update the confidence level alpha_t based on the breach indicator.
-
-        Parameters:
-        - breach_indicator: 1 if the previous prediction breached its interval, 0 otherwise.
-
-        Returns:
-        - alpha_t: Updated confidence level.
-        """
-        raise NotImplementedError("Subclasses must implement the `update` method.")
-
-
-class ACI(BaseACI):
-    def __init__(self, alpha=0.1, gamma=0.01):
-        """
-        Standard Adaptive Conformal Inference (ACI).
-
-        Parameters:
-        - alpha: Target coverage level (1 - alpha is the desired coverage).
-        - gamma: Step-size parameter for updating alpha_t.
-        """
-        super().__init__(alpha, gamma)
-
-    def update(self, breach_indicator):
-        """
-        Update the confidence level alpha_t using the standard ACI update rule.
-
-        Parameters:
-        - breach_indicator: 1 if the previous prediction breached its interval, 0 otherwise.
-
-        Returns:
-        - alpha_t: Updated confidence level.
-        """
-        # Update alpha_t using the standard ACI rule
-        self.alpha_t += self.gamma * (self.alpha - breach_indicator)
-        self.alpha_t = max(0.01, min(self.alpha_t, 0.99))
-        return self.alpha_t
-
-
-class DtACI(BaseACI):
-    def __init__(self, alpha=0.1, gamma_candidates=None, eta=0.1, sigma=0.01):
-        """
-        Dynamically-Tuned Adaptive Conformal Intervals (DtACI).
-
-        Parameters:
-        - alpha (float): Target coverage level (1 - alpha is the desired coverage). Must be between 0 and 1.
-        - gamma_candidates (list of float): List of candidate step sizes for the experts. Defaults to a predefined list.
-        - eta (float): Learning rate for expert weights. Controls the magnitude of weight adjustments. Must be positive.
-        - sigma (float): Exploration rate for expert weights. Small sigma encourages more reliance on the best experts. Must be in [0, 1].
-        """
-        if not (0 < alpha < 1):
-            raise ValueError("alpha must be between 0 and 1.")
-        if gamma_candidates is None:
-            gamma_candidates = [0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064, 0.128]
-        if any(g <= 0 for g in gamma_candidates):
-            raise ValueError("All gamma candidates must be positive.")
-        if eta <= 0:
-            raise ValueError("eta (learning rate) must be positive.")
-        if not (0 <= sigma <= 1):
-            raise ValueError("sigma (exploration rate) must be in [0, 1].")
-
-        super().__init__(alpha, gamma=None)  # gamma is not used in DtACI
-        self.gamma_candidates = gamma_candidates
-        self.eta = eta
-        self.sigma = sigma
-
-        # Initialize experts
-        self.num_experts = len(self.gamma_candidates)
-        self.alpha_t = (
-            np.ones(self.num_experts) * alpha
-        )  # Initial quantile estimates for each expert
-        self.weights = (
-            np.ones(self.num_experts) / self.num_experts
-        )  # Uniform initial weights
-
-    def update(self, breach_indicator):
-        """
-        Update the confidence level alpha_t using the DtACI update rule.
-
-        Parameters:
-        - breach_indicator (int): 1 if the previous prediction breached its interval, 0 otherwise.
-
-        Returns:
-        - float: Updated confidence level, calculated as a weighted average of the experts' estimates.
-        """
-        if breach_indicator not in [0, 1]:
-            raise ValueError("breach_indicator must be either 0 or 1.")
-
-        # Update each expert's alpha estimate based on the breach indicator
-        for i in range(self.num_experts):
-            self.alpha_t[i] += self.gamma_candidates[i] * (
-                self.alpha - breach_indicator
-            )
-
-        # Update expert weights using the exponential weighting scheme
-        losses = np.abs(
-            self.alpha - breach_indicator
-        )  # Pinball loss simplifies to breach indicator here
-        self.weights *= np.exp(-self.eta * losses)
-
-        # Normalize weights to prevent underflow or overflow
-        self.weights = (1 - self.sigma) * self.weights / np.sum(
-            self.weights
-        ) + self.sigma / self.num_experts
-
-        # Compute the final alpha_t as a weighted average of experts' alpha estimates
-        final_alpha_t = np.dot(self.weights, self.alpha_t)
-
-        # Ensure final_alpha_t stays within valid bounds [0, 1]
-        final_alpha_t = np.clip(final_alpha_t, 0.01, 0.99)
-
-        return final_alpha_t
 
 
 def initialize_point_estimator(
@@ -535,21 +408,6 @@ def cross_validate_configurations(
     return cross_fold_scored_configurations, cross_fold_scores
 
 
-# class BayesUCBSampler:
-#     def __init__(self, c: float = 1, n: float = 50):
-#         self.c = c
-#         self.n = n
-#         self.t = 1
-
-#     def fetch_quantiles(self):
-#         lower_bound_quantile = 1 / (self.t * (np.log(self.n) ** self.c))
-#         quantiles = [lower_bound_quantile, 1 - lower_bound_quantile]
-#         return quantiles
-
-#     def update_exploration_step(self):
-#         self.t = self.t + 1
-
-
 class QuantileInterval(BaseModel):
     lower_quantile: float
     upper_quantile: float
@@ -665,6 +523,38 @@ class ThompsonSampler:
         self.quantiles = quantiles
 
 
+def tune(
+    X: np.array,
+    y: np.array,
+    estimator_architecture: str,
+    n_searches: int,
+    quantiles: Optional[List[float]] = None,
+    k_fold_splits: int = 3,
+    random_state: Optional[int] = None,
+) -> Dict:
+    tuning_configurations = get_tuning_configurations(
+        parameter_grid=SEARCH_MODEL_TUNING_SPACE[estimator_architecture],
+        n_configurations=n_searches,
+        random_state=random_state,
+    )
+    tuning_configurations.append(
+        SEARCH_MODEL_DEFAULT_CONFIGURATIONS[estimator_architecture]
+    )
+
+    scored_configurations, scores = cross_validate_configurations(
+        configurations=tuning_configurations,
+        estimator_architecture=estimator_architecture,
+        X=X,
+        y=y,
+        k_fold_splits=k_fold_splits,
+        quantiles=quantiles,
+        random_state=random_state,
+    )
+    best_configuration = scored_configurations[scores.index(min(scores))]
+
+    return best_configuration
+
+
 class LocallyWeightedConformalSearcher:
     """
     Locally weighted conformal regression.
@@ -680,75 +570,12 @@ class LocallyWeightedConformalSearcher:
         point_estimator_architecture: str,
         variance_estimator_architecture: str,
         sampler: Union[UCBSampler, ThompsonSampler],
-        demeaning_estimator_architecture: Optional[str] = None,
     ):
         self.point_estimator_architecture = point_estimator_architecture
-        self.demeaning_estimator_architecture = demeaning_estimator_architecture
         self.variance_estimator_architecture = variance_estimator_architecture
         self.sampler = sampler
 
         self.training_time = None
-
-    def _tune_component_estimator(
-        self,
-        X: np.array,
-        y: np.array,
-        estimator_architecture: str,
-        n_searches: int,
-        k_fold_splits: int = 3,
-        random_state: Optional[int] = None,
-    ) -> Dict:
-        """
-        Tune specified estimator's hyperparameters.
-
-        Hyperparameters are selected randomly as part of the
-        tuning process and a final optimal hyperparameter
-        configuration is returned.
-
-        Parameters
-        ----------
-        X :
-            Explanatory variables.
-        y :
-            Target variable.
-        estimator_architecture :
-            String name for the type of estimator to tune.
-        n_searches :
-            Number of tuning searches to perform (eg. 5 means
-            the model will randomly select 5 hyperparameter
-            configurations for the estimator to evaluate).
-        k_fold_splits :
-            Number of cross validation data splits.
-        random_state :
-            Random generation seed.
-
-        Returns
-        -------
-        best_configuration :
-            Best performing hyperparameter configuration
-            in tuning.
-        """
-        tuning_configurations = get_tuning_configurations(
-            parameter_grid=SEARCH_MODEL_TUNING_SPACE[estimator_architecture],
-            n_configurations=n_searches,
-            random_state=random_state,
-        )
-        tuning_configurations.append(
-            SEARCH_MODEL_DEFAULT_CONFIGURATIONS[estimator_architecture]
-        )
-
-        scored_configurations, scores = cross_validate_configurations(
-            configurations=tuning_configurations,
-            estimator_architecture=estimator_architecture,
-            X=X,
-            y=y,
-            k_fold_splits=k_fold_splits,
-            quantiles=None,
-            random_state=random_state,
-        )
-        best_configuration = scored_configurations[scores.index(min(scores))]
-
-        return best_configuration
 
     def _fit_component_estimator(
         self,
@@ -787,12 +614,13 @@ class LocallyWeightedConformalSearcher:
         estimator :
             Fitted estimator object.
         """
-        if tuning_iterations > 1:
-            initialization_params = self._tune_component_estimator(
+        if tuning_iterations > 1 and len(X) > 10:
+            initialization_params = tune(
                 X=X,
                 y=y,
                 estimator_architecture=estimator_architecture,
                 n_searches=tuning_iterations,
+                quantiles=None,
                 random_state=random_state,
             )
         else:
@@ -881,18 +709,7 @@ class LocallyWeightedConformalSearcher:
         )
 
         pe_residuals = y_ve - self.pe_estimator.predict(X_ve)
-
-        if self.demeaning_estimator_architecture is not None:
-            de_estimator = self._fit_component_estimator(
-                X=X_ve,
-                y=pe_residuals,
-                estimator_architecture=self.demeaning_estimator_architecture,
-                tuning_iterations=tuning_iterations,
-                random_state=random_state,
-            )
-            abs_pe_residuals = abs(pe_residuals - de_estimator.predict(X_ve))
-        else:
-            abs_pe_residuals = abs(pe_residuals)
+        abs_pe_residuals = abs(pe_residuals)
 
         self.ve_estimator = self._fit_component_estimator(
             X=X_ve,
@@ -1030,38 +847,6 @@ class QuantileConformalRegression:
 
         self.training_time = None
 
-    def _tune(
-        self,
-        X: np.array,
-        y: np.array,
-        estimator_architecture: str,
-        n_searches: int,
-        quantiles: List[float],
-        k_fold_splits: int = 3,
-        random_state: Optional[int] = None,
-    ) -> Dict:
-        tuning_configurations = get_tuning_configurations(
-            parameter_grid=SEARCH_MODEL_TUNING_SPACE[estimator_architecture],
-            n_configurations=n_searches,
-            random_state=random_state,
-        )
-        tuning_configurations.append(
-            SEARCH_MODEL_DEFAULT_CONFIGURATIONS[estimator_architecture]
-        )
-
-        scored_configurations, scores = cross_validate_configurations(
-            configurations=tuning_configurations,
-            estimator_architecture=estimator_architecture,
-            X=X,
-            y=y,
-            k_fold_splits=k_fold_splits,
-            quantiles=quantiles,
-            random_state=random_state,
-        )
-        best_configuration = scored_configurations[scores.index(min(scores))]
-
-        return best_configuration
-
     def fit(
         self,
         X_train: np.array,
@@ -1130,10 +915,10 @@ class QuantileConformalRegression:
                 training_time_tracker.pause_runtime()
 
         training_time_tracker.resume_runtime()
-        if tuning_iterations > 1:
+        if tuning_iterations > 1 and len(X_train) > 10:
             params_per_interval = []
             for interval in quantile_intervals:
-                initialization_params = self._tune(
+                initialization_params = tune(
                     X=X_train,
                     y=y_train,
                     estimator_architecture=self.quantile_estimator_architecture,
