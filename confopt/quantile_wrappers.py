@@ -295,14 +295,13 @@ class BaseSingleFitQuantileEstimator:
     _get_submodel_predictions().
     """
 
-    def __init__(self, quantiles: List[float]):
+    def __init__(self):
         """
         Parameters
         ----------
         quantiles : List[float]
             List of quantiles to predict (values between 0 and 1).
         """
-        self.quantiles = quantiles
         self.fitted_model = None  # For ensemble models (e.g., forest)
 
     def fit(self, X: np.ndarray, y: np.ndarray):
@@ -340,7 +339,7 @@ class BaseSingleFitQuantileEstimator:
         )
         return sub_preds
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
+    def predict(self, X: np.ndarray, quantiles: List[float]) -> np.ndarray:
         """
         Computes quantile predictions for each sample by aggregating predictions.
 
@@ -357,7 +356,7 @@ class BaseSingleFitQuantileEstimator:
         """
         submodel_preds = self._get_submodel_predictions(X)
         # Convert quantiles (0-1) to percentiles (0-100)
-        percentiles = [q * 100 for q in self.quantiles]
+        percentiles = [q * 100 for q in quantiles]
         quantile_preds = np.percentile(submodel_preds, percentiles, axis=1).T
         return quantile_preds
 
@@ -369,16 +368,14 @@ class QuantileForest(BaseSingleFitQuantileEstimator):
     individual sub-models (e.g., trees).
     """
 
-    def __init__(self, quantiles: List[float], **rf_kwargs):
+    def __init__(self, **rf_kwargs):
         """
         Parameters
         ----------
-        quantiles : List[float]
-            List of target quantiles (each between 0 and 1).
         **rf_kwargs : dict
             Additional keyword arguments to pass to RandomForestRegressor.
         """
-        super().__init__(quantiles)
+        super().__init__()
         self.rf_kwargs = rf_kwargs
 
     def fit(self, X: np.ndarray, y: np.ndarray):
@@ -387,7 +384,6 @@ class QuantileForest(BaseSingleFitQuantileEstimator):
         """
         self.fitted_model = RandomForestRegressor(**self.rf_kwargs)
         self.fitted_model.fit(X, y)
-        return self
 
 
 class QuantileKNN(BaseSingleFitQuantileEstimator):
@@ -396,16 +392,14 @@ class QuantileKNN(BaseSingleFitQuantileEstimator):
     in the training data and returns the desired quantile of their target values.
     """
 
-    def __init__(self, quantiles: List[float], n_neighbors: int = 5):
+    def __init__(self, n_neighbors: int = 5):
         """
         Parameters
         ----------
-        quantiles : List[float]
-            List of quantiles to predict (values between 0 and 1).
         n_neighbors : int, default=5
             The number of neighbors to use for the quantile estimation.
         """
-        super().__init__(quantiles)
+        super().__init__()
         self.n_neighbors = n_neighbors
         self.X_train = None
         self.y_train = None
@@ -419,7 +413,6 @@ class QuantileKNN(BaseSingleFitQuantileEstimator):
         self.y_train = y
         self.nn_model = NearestNeighbors(n_neighbors=self.n_neighbors)
         self.nn_model.fit(X)
-        return self
 
     def _get_submodel_predictions(self, X: np.ndarray) -> np.ndarray:
         """

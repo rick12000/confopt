@@ -3,6 +3,7 @@ from confopt.tuning import ObjectiveConformalSearcher
 from confopt.estimation import (
     LocallyWeightedConformalSearcher,
     MultiFitQuantileConformalSearcher,
+    SingleFitQuantileConformalSearcher,
     UCBSampler,
     ThompsonSampler,
 )
@@ -84,16 +85,16 @@ objective_function_in_scope = confopt_artificial_objective_function(
 )
 
 best_values = []
-for i in range(1):
+for i in range(5):
     conformal_searcher = ObjectiveConformalSearcher(
         objective_function=objective_function_in_scope,
         search_space=confopt_params,
         metric_optimization="inverse",
     )
 
-    sampler = UCBSampler(c=0.0001, interval_width=0.8, adapter_framework=None)
+    sampler = UCBSampler(c=0.01, interval_width=0.8, adapter_framework="ACI")
     sampler = ThompsonSampler(
-        n_quantiles=4, adapter_framework="ACI", enable_optimistic_sampling=True
+        n_quantiles=4, adapter_framework=None, enable_optimistic_sampling=True
     )
     searcher = LocallyWeightedConformalSearcher(
         point_estimator_architecture="gbm",
@@ -104,11 +105,15 @@ for i in range(1):
         quantile_estimator_architecture="qgbm",
         sampler=sampler,
     )
+    searcher = SingleFitQuantileConformalSearcher(
+        quantile_estimator_architecture="qknn",
+        sampler=sampler,
+    )
 
     conformal_searcher.search(
         searcher=searcher,
         n_random_searches=10,
-        max_iter=50,
+        max_iter=30,
         conformal_retraining_frequency=1,
         random_state=i * 2,
         searcher_tuning_framework=None,

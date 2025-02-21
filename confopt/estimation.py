@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Optional, List, Tuple, Union
+from typing import Dict, Optional, List, Tuple, Union, Literal
 from pydantic import BaseModel
 
 import random
@@ -34,6 +34,8 @@ from confopt.tracking import RuntimeTracker
 from confopt.quantile_wrappers import (
     QuantileGBM,
     QuantileLightGBM,
+    QuantileForest,
+    QuantileKNN,
 )  # , QuantileKNN, QuantileLasso
 from confopt.utils import get_tuning_configurations, get_perceptron_layers
 from confopt.adaptation import ACI, DtACI
@@ -191,6 +193,12 @@ def initialize_point_estimator(
         )
     elif estimator_architecture == KR_NAME:
         initialized_model = KernelRidge(**initialization_params)
+    elif estimator_architecture == QRF_NAME:
+        initialized_model = QuantileForest(
+            **initialization_params, random_state=random_state
+        )
+    elif estimator_architecture == QKNN_NAME:
+        initialized_model = QuantileKNN(**initialization_params)
     else:
         raise ValueError(
             f"{estimator_architecture} is not a valid point estimator architecture."
@@ -247,18 +255,7 @@ def initialize_quantile_estimator(
             quantiles=pinball_loss_alpha,
             random_state=random_state,
         )
-    # elif estimator_architecture == QKNN_NAME:
-    #     initialized_model = QuantileKNN(
-    #         **initialization_params,
-    #         quantiles=pinball_loss_alpha,
-    #         random_state=random_state,
-    #     )
-    # elif estimator_architecture == QL_NAME:
-    #     initialized_model = QuantileLasso(
-    #         **initialization_params,
-    #         quantiles=pinball_loss_alpha,
-    #         random_state=random_state,
-    #     )
+
     else:
         raise ValueError(
             f"{estimator_architecture} is not a valid estimator architecture."
@@ -811,7 +808,255 @@ class LocallyWeightedConformalSearcher:
 
 
 class SingleFitQuantileConformalSearcher:
-    pass
+    def __init__(
+        self,
+        quantile_estimator_architecture: Literal["qknn", "qrf"],
+        sampler: Union[UCBSampler, ThompsonSampler],
+        n_pre_conformal_trials: int = 20,
+    ):
+        self.quantile_estimator_architecture = quantile_estimator_architecture
+        self.sampler = sampler
+        self.n_pre_conformal_trials = n_pre_conformal_trials
+
+        self.training_time = None
+
+    def fit(
+        self,
+        X_train: np.array,
+        y_train: np.array,
+        X_val: np.array,
+        y_val: np.array,
+        tuning_iterations: Optional[int] = 0,
+        random_state: Optional[int] = None,
+    ):
+        """
+        Fit quantile estimator with option to tune.
+
+        Quantile estimators are fitted based on a specified confidence
+        level and return two quantile estimates for the symmetrical
+        lower and upper bounds around that level.
+
+        Parameters
+        ----------
+        X_train :
+            Explanatory variables used to train the quantile estimator.
+        y_train :
+            Target variable used to train the quantile estimator.
+        X_val :
+            Explanatory variables used to calibrate conformal intervals.
+        y_val :
+            Target variable used to calibrate conformal intervals.
+        confidence_level :
+            Confidence level determining quantiles to be predicted
+            by the quantile estimator. Quantiles are obtained symmetrically
+            around the confidence level (eg. 0.5 confidence level would
+            result in a quantile estimator for the 25th and 75th percentiles
+            of the target variable).
+        tuning_iterations :
+            Number of tuning searches to perform (eg. 5 means
+            the model will randomly select 5 hyperparameter
+            configurations for the quantile estimator to evaluate).
+            To skip tuning during fitting, set this to 0.
+        random_state :
+            Random generation seed.
+
+        Returns
+        -------
+        estimator :
+            Fitted estimator object.
+        """
+        training_time_tracker = RuntimeTracker()
+        training_time_tracker.pause_runtime()
+        if isinstance(self.sampler, UCBSampler):
+            quantile_intervals = [self.sampler.fetch_interval()]
+        elif isinstance(self.sampler, ThompsonSampler):
+            quantile_intervals = self.sampler.fetch_intervals()
+            if self.sampler.enable_optimistic_sampling:
+                pass
+
+        training_time_tracker.resume_runtime()
+        if tuning_iterations > 1 and len(X_train) > 10:
+            initialization_params = tune(
+                X=X_train,
+                y=y_train,
+                estimator_architecture=self.quantile_estimator_architecture,
+                n_searches=tuning_iterations,
+                quantiles=None,
+                random_state=random_state,
+            )
+        else:
+            initialization_params = SEARCH_MODEL_DEFAULT_CONFIGURATIONS[
+                self.quantile_estimator_architecture
+            ].copy()
+
+        # TODO HERE
+        self.quantile_estimator = initialize_point_estimator(
+            estimator_architecture=self.quantile_estimator_architecture,
+            initialization_params=initialization_params,
+            random_state=random_state,
+        )
+
+        if len(X_train) + len(X_val) > self.n_pre_conformal_trials:
+            self.quantile_estimator.fit(X_train, y_train)
+
+            if isinstance(self.sampler, UCBSampler):
+                self.nonconformity_scores_per_interval = []
+                for interval in quantile_intervals:
+                    val_prediction = self.quantile_estimator.predict(
+                        X=X_val,
+                        quantiles=[interval.lower_quantile, interval.upper_quantile],
+                    )
+                    lower_conformal_deviations = list(val_prediction[:, 0] - y_val)
+                    upper_conformal_deviations = list(y_val - val_prediction[:, 1])
+                    nonconformity_scores = []
+                    for lower_deviation, upper_deviation in zip(
+                        lower_conformal_deviations, upper_conformal_deviations
+                    ):
+                        nonconformity_scores.append(
+                            max(lower_deviation, upper_deviation)
+                        )
+                    self.nonconformity_scores_per_interval.append(
+                        np.array(nonconformity_scores)
+                    )
+
+            elif isinstance(self.sampler, ThompsonSampler):
+                self.nonconformity_scores_per_interval = []
+                for interval in quantile_intervals:
+                    val_prediction = self.quantile_estimator.predict(
+                        X=X_val,
+                        quantiles=[interval.lower_quantile, interval.upper_quantile],
+                    )
+                    lower_conformal_deviations = list(val_prediction[:, 0] - y_val)
+                    upper_conformal_deviations = list(y_val - val_prediction[:, 1])
+                    nonconformity_scores = []
+                    for lower_deviation, upper_deviation in zip(
+                        lower_conformal_deviations, upper_conformal_deviations
+                    ):
+                        nonconformity_scores.append(
+                            max(lower_deviation, upper_deviation)
+                        )
+                    self.nonconformity_scores_per_interval.append(
+                        np.array(nonconformity_scores)
+                    )
+
+            self.conformalize_predictions = True
+
+        else:
+            self.quantile_estimator.fit(
+                X=np.vstack((X_train, X_val)), y=np.concatenate((y_train, y_val))
+            )
+            self.conformalize_predictions = False
+
+        self.training_time = training_time_tracker.return_runtime()
+
+    def predict(self, X: np.array):
+        if isinstance(self.sampler, UCBSampler):
+            return self._predict_with_ucb(X)
+        elif isinstance(self.sampler, ThompsonSampler):
+            return self._predict_with_thompson(X)
+
+    def _predict_with_ucb(self, X: np.array):
+        if self.conformalize_predictions:
+            interval = self.sampler.fetch_interval()
+            score = np.quantile(
+                self.nonconformity_scores_per_interval[0],
+                interval.upper_quantile - interval.lower_quantile,
+            )
+        else:
+            score = 0
+        interval = self.sampler.fetch_interval()
+        prediction = self.quantile_estimator.predict(
+            X=X, quantiles=[interval.lower_quantile, interval.upper_quantile]
+        )
+        lower_interval_bound = np.array(prediction[:, 0]) - score
+        upper_interval_bound = np.array(prediction[:, 1]) + score
+
+        self.predictions_per_interval = [prediction]
+
+        lower_bound = lower_interval_bound + self.sampler.beta * (
+            upper_interval_bound - lower_interval_bound
+        )
+
+        self.sampler.update_exploration_step()
+
+        return lower_bound
+
+    def _predict_with_thompson(self, X):
+        self.predictions_per_interval = []
+        if self.conformalize_predictions:
+            for nonconformity_scores, interval in zip(
+                self.nonconformity_scores_per_interval, self.sampler.fetch_intervals()
+            ):
+                score = np.quantile(
+                    nonconformity_scores,
+                    interval.upper_quantile - interval.lower_quantile,
+                )
+                scores = [-score, score]
+                predictions = self.quantile_estimator.predict(
+                    X=X, quantiles=[interval.lower_quantile, interval.upper_quantile]
+                )
+                adjusted_predictions = predictions + np.array(scores).reshape(-1, 1).T
+                self.predictions_per_interval.append(adjusted_predictions)
+        else:
+            for interval in self.sampler.fetch_intervals():
+                predictions = self.quantile_estimator.predict(
+                    X=X, quantiles=[interval.lower_quantile, interval.upper_quantile]
+                )
+                self.predictions_per_interval.append(predictions)
+
+        if self.sampler.enable_optimistic_sampling:
+            median_predictions = np.array(
+                self.quantile_estimator.predict(X=X, quantiles=[0.5])[:, 0]
+            ).reshape(-1, 1)
+
+        predictions_per_quantile = np.hstack(self.predictions_per_interval)
+        lower_bound = []
+        for i in range(predictions_per_quantile.shape[0]):
+            ts_idx = random.choice(range(self.sampler.n_quantiles))
+            if self.sampler.enable_optimistic_sampling:
+                lower_bound.append(
+                    min(
+                        predictions_per_quantile[i, ts_idx],
+                        median_predictions[i, 0],
+                    )
+                )
+            else:
+                lower_bound.append(predictions_per_quantile[i, ts_idx])
+        lower_bound = np.array(lower_bound)
+
+        return lower_bound
+
+    def update_interval_width(self, sampled_idx: int, sampled_performance: float):
+        if isinstance(self.sampler, UCBSampler):
+            self._update_with_ucb(sampled_idx, sampled_performance)
+        elif isinstance(self.sampler, ThompsonSampler):
+            self._update_with_thompson(sampled_idx, sampled_performance)
+
+    def _update_with_ucb(self, sampled_idx, sampled_performance):
+        if (
+            self.predictions_per_interval[0][sampled_idx, 0]
+            <= sampled_performance
+            <= self.predictions_per_interval[0][sampled_idx, 1]
+        ):
+            breach = 0
+        else:
+            breach = 1
+        self.sampler.update_interval_width(breach=breach)
+
+    def _update_with_thompson(self, sampled_idx, sampled_performance):
+        breaches = []
+        for predictions in self.predictions_per_interval:
+            sampled_predictions = predictions[sampled_idx, :]
+            lower_quantile, upper_quantile = (
+                sampled_predictions[0],
+                sampled_predictions[1],
+            )
+            if lower_quantile <= sampled_performance <= upper_quantile:
+                breach = 0
+            else:
+                breach = 1
+            breaches.append(breach)
+        self.sampler.update_interval_width(breaches=breaches)
 
 
 # TODO
