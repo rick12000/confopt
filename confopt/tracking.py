@@ -38,6 +38,7 @@ class Trial(BaseModel):
     breached_interval: Optional[bool] = None
     searcher_runtime: Optional[float] = None
     target_model_runtime: Optional[float] = None
+    primary_estimator_error: Optional[float] = None
 
 
 class Study:

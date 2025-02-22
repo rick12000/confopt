@@ -17,8 +17,6 @@ QLGBM_NAME: str = "qlgbm"
 # Reference names of quantile regression estimators:
 QUANTILE_ESTIMATOR_ARCHITECTURES: List[str] = [
     QGBM_NAME,
-    QRF_NAME,
-    QKNN_NAME,
     QL_NAME,
     QLGBM_NAME,
 ]

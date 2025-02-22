@@ -85,6 +85,7 @@ objective_function_in_scope = confopt_artificial_objective_function(
 )
 
 best_values = []
+primary_estimator_errors = []
 for i in range(5):
     conformal_searcher = ObjectiveConformalSearcher(
         objective_function=objective_function_in_scope,
@@ -116,26 +117,20 @@ for i in range(5):
         max_iter=30,
         conformal_retraining_frequency=1,
         random_state=i * 2,
-        searcher_tuning_framework=None,
+        searcher_tuning_framework="fixed",
     )
     best_value = conformal_searcher.get_best_value()
     best_values.append(best_value)
+    breaches_list = []
+    for trial in conformal_searcher.study.trials:
+        if trial.primary_estimator_error is not None:
+            breaches_list.append(trial.primary_estimator_error)
+
+    primary_estimator_errors.append(np.mean(np.array(breaches_list)))
 
 print(np.mean(np.array(best_values)))
 print(np.std(np.array(best_values)))
 
-breaches_list = []
-for trial in conformal_searcher.study.trials:
-    if trial.breached_interval is not None:
-        breaches_list.append(trial.breached_interval)
-    # print(trial)
+# print(trial)
 
-print(np.mean(np.array(breaches_list)))
-
-# Extract results, in the form of either:
-
-# 1. The best hyperparamter configuration found during search
-best_params = conformal_searcher.get_best_params()
-
-best_value = conformal_searcher.get_best_value()
-print(f"Best value: {best_value}")
+print(f"Avg estimator error: {np.mean(np.array(primary_estimator_errors))}")

@@ -4,13 +4,12 @@ from pydantic import BaseModel
 
 import random
 import numpy as np
-from sklearn import metrics
 from lightgbm import LGBMRegressor
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RationalQuadratic, RBF
 from sklearn.kernel_ridge import KernelRidge
-from sklearn.metrics import mean_pinball_loss
+from sklearn.metrics import mean_pinball_loss, mean_squared_error
 from sklearn.model_selection import KFold
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.neural_network import MLPRegressor
@@ -36,6 +35,7 @@ from confopt.quantile_wrappers import (
     QuantileLightGBM,
     QuantileForest,
     QuantileKNN,
+    BaseSingleFitQuantileEstimator,
 )  # , QuantileKNN, QuantileLasso
 from confopt.utils import get_tuning_configurations, get_perceptron_layers
 from confopt.adaptation import ACI, DtACI
@@ -365,7 +365,6 @@ def cross_validate_configurations(
                     random_state=random_state,
                 )
             model.fit(X_train, Y_train)
-            y_pred = model.predict(X_val)
 
             try:
                 if estimator_architecture in QUANTILE_ESTIMATOR_ARCHITECTURES:
@@ -375,8 +374,9 @@ def cross_validate_configurations(
                         )
                     else:
                         # Then evaluate on pinball loss:
-                        lo_y_pred = model.predict(X_val)[:, 0]
-                        hi_y_pred = model.predict(X_val)[:, 1]
+                        prediction = model.predict(X_val)
+                        lo_y_pred = prediction[:, 0]
+                        hi_y_pred = prediction[:, 1]
                         lo_score = mean_pinball_loss(
                             Y_val, lo_y_pred, alpha=quantiles[0]
                         )
@@ -384,9 +384,20 @@ def cross_validate_configurations(
                             Y_val, hi_y_pred, alpha=quantiles[1]
                         )
                         score = (lo_score + hi_score) / 2
+                elif isinstance(model, BaseSingleFitQuantileEstimator):
+                    prediction = model.predict(X_val, quantiles=quantiles)
+                    scores = []
+                    for i, quantile in enumerate(quantiles):
+                        y_pred = prediction[:, i]
+                        quantile_score = mean_pinball_loss(
+                            Y_val, y_pred, alpha=quantile
+                        )
+                        scores.append(quantile_score)
+                    score = sum(scores) / len(scores)
                 else:
                     # Then evaluate on MSE:
-                    score = metrics.mean_squared_error(Y_val, y_pred)
+                    y_pred = model.predict(X=X_val)
+                    score = mean_squared_error(Y_val, y_pred)
 
                 scored_configurations.append(configuration)
                 scores.append(score)
@@ -725,6 +736,12 @@ class LocallyWeightedConformalSearcher:
         )
         self.training_time = training_time_tracker.return_runtime()
 
+        # TODO: TEMP
+        self.primary_estimator_error = mean_squared_error(
+            self.pe_estimator.predict(X=X_val), y_val
+        )
+        # TODO: END OF TEMP
+
     def predict(self, X: np.array):
         y_pred = np.array(self.pe_estimator.predict(X)).reshape(-1, 1)
         var_pred = self.ve_estimator.predict(X)
@@ -876,12 +893,16 @@ class SingleFitQuantileConformalSearcher:
 
         training_time_tracker.resume_runtime()
         if tuning_iterations > 1 and len(X_train) > 10:
+            flattened_quantiles = []
+            for interval in quantile_intervals:
+                flattened_quantiles.append(interval.lower_quantile)
+                flattened_quantiles.append(interval.upper_quantile)
             initialization_params = tune(
                 X=X_train,
                 y=y_train,
                 estimator_architecture=self.quantile_estimator_architecture,
                 n_searches=tuning_iterations,
-                quantiles=None,
+                quantiles=flattened_quantiles,
                 random_state=random_state,
             )
         else:
@@ -948,6 +969,29 @@ class SingleFitQuantileConformalSearcher:
             self.conformalize_predictions = False
 
         self.training_time = training_time_tracker.return_runtime()
+
+        # TODO: TEMP
+        scores = []
+        for quantile_interval in quantile_intervals:
+            predictions = self.quantile_estimator.predict(
+                X=X_val,
+                quantiles=[
+                    quantile_interval.lower_quantile,
+                    quantile_interval.upper_quantile,
+                ],
+            )
+            lo_y_pred = predictions[:, 0]
+            hi_y_pred = predictions[:, 1]
+            lo_score = mean_pinball_loss(
+                y_val, lo_y_pred, alpha=quantile_interval.lower_quantile
+            )
+            hi_score = mean_pinball_loss(
+                y_val, hi_y_pred, alpha=quantile_interval.upper_quantile
+            )
+            score = (lo_score + hi_score) / 2
+            scores.append(score)
+        self.primary_estimator_error = sum(scores) / len(scores)
+        # TODO: END OF TEMP
 
     def predict(self, X: np.array):
         if isinstance(self.sampler, UCBSampler):
@@ -1033,10 +1077,11 @@ class SingleFitQuantileConformalSearcher:
             self._update_with_thompson(sampled_idx, sampled_performance)
 
     def _update_with_ucb(self, sampled_idx, sampled_performance):
+        predictions_per_interval = self.predictions_per_interval[0]
         if (
-            self.predictions_per_interval[0][sampled_idx, 0]
+            predictions_per_interval[sampled_idx, 0]
             <= sampled_performance
-            <= self.predictions_per_interval[0][sampled_idx, 1]
+            <= predictions_per_interval[sampled_idx, 1]
         ):
             breach = 0
         else:
@@ -1227,6 +1272,25 @@ class MultiFitQuantileConformalSearcher:
 
         self.training_time = training_time_tracker.return_runtime()
 
+        # TODO: TEMP
+        scores = []
+        for quantile_interval, estimator in zip(
+            quantile_intervals, self.estimators_per_interval
+        ):
+            predictions = estimator.predict(X_val)
+            lo_y_pred = predictions[:, 0]
+            hi_y_pred = predictions[:, 1]
+            lo_score = mean_pinball_loss(
+                y_val, lo_y_pred, alpha=quantile_interval.lower_quantile
+            )
+            hi_score = mean_pinball_loss(
+                y_val, hi_y_pred, alpha=quantile_interval.upper_quantile
+            )
+            score = (lo_score + hi_score) / 2
+            scores.append(score)
+        self.primary_estimator_error = sum(scores) / len(scores)
+        # TODO: END OF TEMP
+
     def predict(self, X: np.array):
         if isinstance(self.sampler, UCBSampler):
             return self._predict_with_ucb(X)
@@ -1304,10 +1368,11 @@ class MultiFitQuantileConformalSearcher:
             self._update_with_thompson(sampled_idx, sampled_performance)
 
     def _update_with_ucb(self, sampled_idx, sampled_performance):
+        predictions_per_interval = self.predictions_per_interval[0]
         if (
-            self.predictions_per_interval[0][sampled_idx, 0]
+            predictions_per_interval[sampled_idx, 0]
             <= sampled_performance
-            <= self.predictions_per_interval[0][sampled_idx, 1]
+            <= predictions_per_interval[sampled_idx, 1]
         ):
             breach = 0
         else:

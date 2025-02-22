@@ -564,6 +564,8 @@ class ObjectiveConformalSearcher:
                     breach = 1
             else:
                 breach = None
+
+            estimator_error = searcher.primary_estimator_error
             # TODO: END OF TEMP
 
             self.study.append_trial(
@@ -575,6 +577,7 @@ class ObjectiveConformalSearcher:
                     acquisition_source=str(searcher),
                     searcher_runtime=searcher_runtime,
                     breached_interval=breach,
+                    primary_estimator_error=estimator_error,
                 )
             )
 
