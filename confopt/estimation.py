@@ -439,14 +439,18 @@ class UCBSampler:
 
         # Initialize adapter if specified
         self.adapter = self._initialize_adapter(adapter_framework)
+
         self.quantiles = self._calculate_quantiles()
 
     def _initialize_adapter(self, framework: Optional[str]):
         if framework == "ACI":
-            return ACI(alpha=self.alpha)
+            adapter = ACI(alpha=self.alpha)
         elif framework == "DtACI":
-            return DtACI(alpha=self.alpha)
-        return None
+            adapter = DtACI(alpha=self.alpha)
+            self.expert_alphas = adapter.alpha_t_values
+        else:
+            adapter = None
+        return adapter
 
     def _calculate_quantiles(self) -> QuantileInterval:
         return QuantileInterval(
@@ -455,6 +459,9 @@ class UCBSampler:
 
     def fetch_alpha(self) -> float:
         return self.alpha
+
+    def fetch_expert_alphas(self) -> List[float]:
+        return self.expert_alphas
 
     def fetch_interval(self) -> QuantileInterval:
         return self.quantiles
@@ -466,9 +473,14 @@ class UCBSampler:
             self.beta = 2 * np.log(self.t + 1)
         self.t += 1
 
-    def update_interval_width(self, breach: int):
-        if self.adapter:
-            self.alpha = self.adapter.update(breach_indicator=breach)
+    def update_interval_width(self, breaches: list[int]):
+        if isinstance(self.adapter, ACI):
+            if len(breaches) != 1:
+                raise ValueError("ACI adapter requires a single breach indicator.")
+            self.alpha = self.adapter.update(breach_indicator=breaches[0])
+            self.quantiles = self._calculate_quantiles()
+        elif isinstance(self.adapter, DtACI):
+            self.alpha = self.adapter.update(breach_indicators=breaches)
             self.quantiles = self._calculate_quantiles()
 
 
@@ -510,9 +522,7 @@ class ThompsonSampler:
         if not framework:
             return []
 
-        adapter_class = (
-            ACI if framework == "ACI" else DtACI if framework == "DtACI" else None
-        )
+        adapter_class = ACI if framework == "ACI" else None
         if not adapter_class:
             raise ValueError(f"Unknown adapter framework: {framework}")
 
@@ -752,26 +762,43 @@ class LocallyWeightedConformalSearcher:
             return self._predict_with_thompson(y_pred, var_pred)
 
     def _predict_with_ucb(self, y_pred: np.array, var_pred: np.array):
-        score_quantile = np.quantile(
-            self.nonconformity_scores, self.sampler.fetch_alpha()
-        )
-        scaled_score = score_quantile * var_pred
-        self.predictions_per_interval = [
-            np.hstack(
-                [
-                    y_pred - self.sampler.beta * scaled_score,
-                    y_pred + self.sampler.beta * scaled_score,
-                ]
+        if isinstance(self.sampler.adapter, DtACI):
+            self.predictions_per_interval = []
+            for alpha in self.sampler.fetch_expert_alphas():
+                score_quantile = np.quantile(self.nonconformity_scores, 1 - alpha)
+                scaled_score = score_quantile * var_pred
+                self.predictions_per_interval.append(
+                    np.hstack(
+                        [
+                            y_pred - self.sampler.beta * scaled_score,
+                            y_pred + self.sampler.beta * scaled_score,
+                        ]
+                    )
+                )
+                # Use the current best alpha as the bound:
+                if self.sampler.fetch_alpha() == alpha:
+                    lower_bound = y_pred - self.sampler.beta * scaled_score
+        else:
+            score_quantile = np.quantile(
+                self.nonconformity_scores, 1 - self.sampler.fetch_alpha()
             )
-        ]
-        lower_bound = y_pred - self.sampler.beta * scaled_score
+            scaled_score = score_quantile * var_pred
+            self.predictions_per_interval = [
+                np.hstack(
+                    [
+                        y_pred - self.sampler.beta * scaled_score,
+                        y_pred + self.sampler.beta * scaled_score,
+                    ]
+                )
+            ]
+            lower_bound = y_pred - self.sampler.beta * scaled_score
         self.sampler.update_exploration_step()
         return lower_bound
 
     def _predict_with_thompson(self, y_pred: np.array, var_pred: np.array):
         self.predictions_per_interval = []
         for alpha in self.sampler.fetch_alphas():
-            score_quantile = np.quantile(self.nonconformity_scores, alpha)
+            score_quantile = np.quantile(self.nonconformity_scores, 1 - alpha)
             scaled_score = score_quantile * var_pred
             self.predictions_per_interval.append(
                 np.hstack([y_pred - scaled_score, y_pred + scaled_score])
@@ -792,23 +819,6 @@ class LocallyWeightedConformalSearcher:
         return lower_bound
 
     def update_interval_width(self, sampled_idx: int, sampled_performance: float):
-        if isinstance(self.sampler, UCBSampler):
-            self._update_with_ucb(sampled_idx, sampled_performance)
-        elif isinstance(self.sampler, ThompsonSampler):
-            self._update_with_thompson(sampled_idx, sampled_performance)
-
-    def _update_with_ucb(self, sampled_idx: int, sampled_performance: float):
-        if (
-            self.predictions_per_interval[0][sampled_idx, 0]
-            <= sampled_performance
-            <= self.predictions_per_interval[0][sampled_idx, 1]
-        ):
-            breach = 0
-        else:
-            breach = 1
-        self.sampler.update_interval_width(breach=breach)
-
-    def _update_with_thompson(self, sampled_idx: int, sampled_performance: float):
         breaches = []
         for predictions in self.predictions_per_interval:
             sampled_predictions = predictions[sampled_idx, :]

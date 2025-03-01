@@ -24,3 +24,6 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Dev
+examples/
