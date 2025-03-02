@@ -2,7 +2,6 @@ import logging
 from typing import Dict, Optional, List, Tuple, Union, Literal
 from pydantic import BaseModel
 
-import random
 import numpy as np
 from lightgbm import LGBMRegressor
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
@@ -807,7 +806,8 @@ class LocallyWeightedConformalSearcher:
         predictions_per_quantile = np.hstack(self.predictions_per_interval)
         lower_bound = []
         for i in range(predictions_per_quantile.shape[0]):
-            ts_idx = random.choice(range(self.sampler.n_quantiles))
+            # Use numpy's choice for reproducibility
+            ts_idx = np.random.choice(range(self.sampler.n_quantiles))
             if self.sampler.enable_optimistic_sampling:
                 lower_bound.append(
                     min(predictions_per_quantile[i, ts_idx], y_pred[i, 0])
@@ -1066,7 +1066,8 @@ class SingleFitQuantileConformalSearcher:
         predictions_per_quantile = np.hstack(self.predictions_per_interval)
         lower_bound = []
         for i in range(predictions_per_quantile.shape[0]):
-            ts_idx = random.choice(range(self.sampler.n_quantiles))
+            # Use numpy's random choice instead of random.choice
+            ts_idx = np.random.choice(range(self.sampler.n_quantiles))
             if self.sampler.enable_optimistic_sampling:
                 lower_bound.append(
                     min(
@@ -1339,7 +1340,8 @@ class MultiFitQuantileConformalSearcher:
         predictions_per_quantile = np.hstack(self.predictions_per_interval)
         lower_bound = []
         for i in range(predictions_per_quantile.shape[0]):
-            ts_idx = random.choice(range(self.sampler.n_quantiles))
+            # Use numpy's choice instead of random.choice
+            ts_idx = np.random.choice(range(self.sampler.n_quantiles))
             if self.sampler.enable_optimistic_sampling:
                 lower_bound.append(
                     min(

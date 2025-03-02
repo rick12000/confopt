@@ -1,5 +1,4 @@
 import numpy as np
-import random
 
 
 class BaseACI:
@@ -98,8 +97,8 @@ class DtACI(BaseACI):
         total_weight = sum(self.weights)
         probs = [w / total_weight for w in self.weights]
 
-        # Sample an index based on probabilities
-        self.chosen_idx = random.choices(range(self.k), weights=probs, k=1)[0]
+        # Use numpy instead of random.choices for reproducibility
+        self.chosen_idx = np.random.choice(range(self.k), p=probs)
 
         # Set the current alpha_t
         self.alpha_t = self.alpha_t_values[self.chosen_idx]

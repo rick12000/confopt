@@ -1,7 +1,6 @@
 import logging
 import random
-from copy import deepcopy
-from typing import Optional, Dict, Any, Tuple, get_type_hints, Literal, Union
+from typing import Optional, Dict, Tuple, get_type_hints, Literal, Union
 
 import numpy as np
 from sklearn.preprocessing import StandardScaler
@@ -19,40 +18,6 @@ from confopt.estimation import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def update_model_parameters(
-    model_instance: Any, configuration: Dict, random_state: int = None
-):
-    """
-    Updates the attributes of an initialized model object.
-
-    Only attributes which are specified in the 'configuration'
-    dictionary input of this function will be overridden.
-
-    Parameters
-    ----------
-    model_instance :
-        An instance of a prediction model.
-    configuration :
-        A dictionary whose keys represent the attributes of
-        the model instance that need to be overridden and whose
-        values represent what they should be overridden to.
-        Keys must match model instance attribute names.
-    random_state :
-        Random generation seed.
-
-    Returns
-    -------
-    updated_model_instance :
-        Model instance with updated attributes.
-    """
-    updated_model_instance = deepcopy(model_instance)
-    for tuning_attr_name, tuning_attr in configuration.items():
-        setattr(updated_model_instance, tuning_attr_name, tuning_attr)
-    if hasattr(updated_model_instance, "random_state"):
-        setattr(updated_model_instance, "random_state", random_state)
-    return updated_model_instance
 
 
 def process_and_split_estimation_data(
@@ -243,7 +208,6 @@ class ObjectiveConformalSearcher:
         n_searches: int,
         verbose: bool = True,
         max_runtime: Optional[int] = None,
-        random_state: Optional[int] = None,
     ) -> list[Trial]:
         """
         Randomly search a portion of the model's hyperparameter space.
@@ -275,16 +239,14 @@ class ObjectiveConformalSearcher:
             Average time taken to train the model being tuned
             across configurations, in seconds.
         """
-        random.seed(random_state)
-        np.random.seed(random_state)
-
         rs_trials = []
 
         skipped_configuration_counter = 0
 
-        shuffled_tuning_configurations = self.tuning_configurations.copy()
-        random.seed(random_state)
-        random.shuffle(shuffled_tuning_configurations)
+        # Replace global random.shuffle with numpy permutation for reproducibility:
+        shuffled_tuning_configurations = np.random.permutation(
+            self.tuning_configurations
+        ).tolist()
         randomly_sampled_configurations = shuffled_tuning_configurations[
             : min(n_searches, len(self.tuning_configurations))
         ]
@@ -419,15 +381,16 @@ class ObjectiveConformalSearcher:
         random_state :
             Random generation seed.
         """
-
-        self.random_state = random_state
         self.search_timer = RuntimeTracker()
+
+        if random_state is not None:
+            random.seed(random_state)
+            np.random.seed(random_state)
 
         rs_trials = self._random_search(
             n_searches=n_random_searches,
             max_runtime=runtime_budget,
             verbose=verbose,
-            random_state=random_state,
         )
 
         self.study.batch_append_trials(trials=rs_trials)
@@ -487,7 +450,6 @@ class ObjectiveConformalSearcher:
                 searched_performances=np.array(self.study.get_searched_performances()),
                 train_split=(1 - validation_split),
                 filter_outliers=False,
-                random_state=random_state,
             )
 
             (
@@ -509,7 +471,7 @@ class ObjectiveConformalSearcher:
                     X_val=X_val_conformal,
                     y_val=y_val_conformal,
                     tuning_iterations=search_model_tuning_count,
-                    random_state=random_state,
+                    # random_state=random_state,
                 )
                 searcher_runtime = runtime_tracker.return_runtime()
 
@@ -627,37 +589,3 @@ class ObjectiveConformalSearcher:
             Best predictive performance achieved.
         """
         return self.study.get_best_performance()
-
-    def configure_best_model(self):
-        """
-        Extract best initialized (but unfitted) model identified
-        during conformal search.
-
-        Returns
-        -------
-        best_model :
-            Best model from search.
-        """
-        best_model = update_model_parameters(
-            model_instance=self.model,
-            configuration=self.get_best_params(),
-            random_state=self.random_state,
-        )
-        return best_model
-
-    def fit_best_model(self):
-        """
-        Fit best model identified during conformal search.
-
-        Returns
-        -------
-        best_fitted_model :
-            Best model from search, fit on all available data.
-        """
-        best_fitted_model = self.configure_best_model()
-        X_full = np.vstack((self.X_train, self.X_val))
-        y_full = np.hstack((self.y_train, self.y_val))
-
-        best_fitted_model.fit(X=X_full, y=y_full)
-
-        return best_fitted_model
