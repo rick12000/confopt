@@ -1081,24 +1081,6 @@ class SingleFitQuantileConformalSearcher:
         return lower_bound
 
     def update_interval_width(self, sampled_idx: int, sampled_performance: float):
-        if isinstance(self.sampler, UCBSampler):
-            self._update_with_ucb(sampled_idx, sampled_performance)
-        elif isinstance(self.sampler, ThompsonSampler):
-            self._update_with_thompson(sampled_idx, sampled_performance)
-
-    def _update_with_ucb(self, sampled_idx, sampled_performance):
-        predictions_per_interval = self.predictions_per_interval[0]
-        if (
-            predictions_per_interval[sampled_idx, 0]
-            <= sampled_performance
-            <= predictions_per_interval[sampled_idx, 1]
-        ):
-            breach = 0
-        else:
-            breach = 1
-        self.sampler.update_interval_width(breach=breach)
-
-    def _update_with_thompson(self, sampled_idx, sampled_performance):
         breaches = []
         for predictions in self.predictions_per_interval:
             sampled_predictions = predictions[sampled_idx, :]
@@ -1372,24 +1354,6 @@ class MultiFitQuantileConformalSearcher:
         return lower_bound
 
     def update_interval_width(self, sampled_idx: int, sampled_performance: float):
-        if isinstance(self.sampler, UCBSampler):
-            self._update_with_ucb(sampled_idx, sampled_performance)
-        elif isinstance(self.sampler, ThompsonSampler):
-            self._update_with_thompson(sampled_idx, sampled_performance)
-
-    def _update_with_ucb(self, sampled_idx, sampled_performance):
-        predictions_per_interval = self.predictions_per_interval[0]
-        if (
-            predictions_per_interval[sampled_idx, 0]
-            <= sampled_performance
-            <= predictions_per_interval[sampled_idx, 1]
-        ):
-            breach = 0
-        else:
-            breach = 1
-        self.sampler.update_interval_width(breach=breach)
-
-    def _update_with_thompson(self, sampled_idx, sampled_performance):
         breaches = []
         for predictions in self.predictions_per_interval:
             sampled_predictions = predictions[sampled_idx, :]
