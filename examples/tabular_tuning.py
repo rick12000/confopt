@@ -1,11 +1,13 @@
+# %%
+
 from sklearn.datasets import fetch_california_housing
 from confopt.tuning import ObjectiveConformalSearcher
 from confopt.estimation import (
     LocallyWeightedConformalSearcher,
-    MultiFitQuantileConformalSearcher,
-    SingleFitQuantileConformalSearcher,
+    # MultiFitQuantileConformalSearcher,
+    # SingleFitQuantileConformalSearcher,
     UCBSampler,
-    ThompsonSampler,
+    # ThompsonSampler,
 )
 
 import numpy as np
@@ -86,35 +88,36 @@ objective_function_in_scope = confopt_artificial_objective_function(
 
 best_values = []
 primary_estimator_errors = []
-for i in range(5):
+breaches = []
+for i in range(3):
     conformal_searcher = ObjectiveConformalSearcher(
         objective_function=objective_function_in_scope,
         search_space=confopt_params,
         metric_optimization="inverse",
     )
 
-    sampler = UCBSampler(c=0.01, interval_width=0.8, adapter_framework="ACI")
-    sampler = ThompsonSampler(
-        n_quantiles=4, adapter_framework=None, enable_optimistic_sampling=True
-    )
+    sampler = UCBSampler(c=1, interval_width=0.8, adapter_framework="ACI")
+    # sampler = ThompsonSampler(
+    #     n_quantiles=4, adapter_framework=None, enable_optimistic_sampling=True
+    # )
     searcher = LocallyWeightedConformalSearcher(
-        point_estimator_architecture="gbm",
-        variance_estimator_architecture="gbm",
+        point_estimator_architecture="kr",
+        variance_estimator_architecture="kr",
         sampler=sampler,
     )
-    searcher = MultiFitQuantileConformalSearcher(
-        quantile_estimator_architecture="qgbm",
-        sampler=sampler,
-    )
-    searcher = SingleFitQuantileConformalSearcher(
-        quantile_estimator_architecture="qknn",
-        sampler=sampler,
-    )
+    # searcher = MultiFitQuantileConformalSearcher(
+    #     quantile_estimator_architecture="qgbm",
+    #     sampler=sampler,
+    # )
+    # searcher = SingleFitQuantileConformalSearcher(
+    #     quantile_estimator_architecture="qknn",
+    #     sampler=sampler,
+    # )
 
     conformal_searcher.search(
         searcher=searcher,
-        n_random_searches=10,
-        max_iter=30,
+        n_random_searches=20,
+        max_iter=50,
         conformal_retraining_frequency=1,
         random_state=i * 2,
         searcher_tuning_framework="fixed",
@@ -122,15 +125,23 @@ for i in range(5):
     best_value = conformal_searcher.get_best_value()
     best_values.append(best_value)
     breaches_list = []
+    error_list = []
     for trial in conformal_searcher.study.trials:
         if trial.primary_estimator_error is not None:
-            breaches_list.append(trial.primary_estimator_error)
+            error_list.append(trial.primary_estimator_error)
+        if trial.breached_interval is not None:
+            breaches_list.append(trial.breached_interval)
 
-    primary_estimator_errors.append(np.mean(np.array(breaches_list)))
+    primary_estimator_errors.append(np.mean(np.array(error_list)))
+    breaches.append(np.mean(np.array(breaches_list)))
 
-print(np.mean(np.array(best_values)))
-print(np.std(np.array(best_values)))
+print(f"Average best value: {np.mean(np.array(best_values))}")
+print(f"Std of best values: {np.std(np.array(best_values))}")
+print(f"Avg estimator error: {np.mean(np.array(primary_estimator_errors))}")
+print(f"Avg breaches: {np.mean(np.array(breaches))}")
 
 # print(trial)
 
 print(f"Avg estimator error: {np.mean(np.array(primary_estimator_errors))}")
+
+# %%

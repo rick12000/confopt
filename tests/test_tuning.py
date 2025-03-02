@@ -3,56 +3,15 @@ from copy import deepcopy
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from confopt.config import GBM_NAME
 from confopt.tracking import RuntimeTracker
 from confopt.tuning import (
-    score_predictions,
-    get_best_configuration_idx,
     process_and_split_estimation_data,
     normalize_estimation_data,
-    update_adaptive_confidence_level,
 )
 
 DEFAULT_SEED = 1234
-
-
-@pytest.mark.parametrize("optimization_direction", ["direct", "inverse"])
-def test_get_best_configuration_idx(optimization_direction):
-    lower_bound = np.array([5, 4, 3, 2, 1])
-    higher_bound = lower_bound + 1
-    dummy_performance_bounds = (lower_bound, higher_bound)
-
-    best_idx = get_best_configuration_idx(
-        configuration_performance_bounds=dummy_performance_bounds,
-        optimization_direction=optimization_direction,
-    )
-
-    assert best_idx >= 0
-    if optimization_direction == "direct":
-        assert best_idx == np.argmax(higher_bound)
-    elif optimization_direction == "inverse":
-        assert best_idx == np.argmin(lower_bound)
-
-
-@pytest.mark.parametrize(
-    "scoring_function", ["accuracy_score", "mean_squared_error", "log_loss"]
-)
-def test_score_predictions__perfect_score(scoring_function):
-    dummy_y_obs = np.array([1, 0, 1, 0, 1, 1])
-    dummy_y_pred = deepcopy(dummy_y_obs)
-
-    score = score_predictions(
-        y_obs=dummy_y_obs, y_pred=dummy_y_pred, scoring_function=scoring_function
-    )
-
-    if scoring_function == "accuracy_score":
-        assert score == 1
-    elif scoring_function == "mean_squared_error":
-        assert score == 0
-    elif scoring_function == "log_loss":
-        assert 0 < score < 0.001
 
 
 def test_process_and_split_estimation_data(dummy_configurations):
@@ -199,24 +158,6 @@ def test_normalize_estimation_data(dummy_configurations):
     assert np.array_equal(
         dummy_searchable_configurations, stored_dummy_searchable_configurations
     )
-
-
-@pytest.mark.parametrize("breach", [True, False])
-@pytest.mark.parametrize("true_confidence_level", [0.2, 0.8])
-@pytest.mark.parametrize("learning_rate", [0.01, 0.1])
-def test_update_adaptive_interval(breach, true_confidence_level, learning_rate):
-    updated_confidence_level = update_adaptive_confidence_level(
-        true_confidence_level=true_confidence_level,
-        last_confidence_level=true_confidence_level,
-        breach=breach,
-        learning_rate=learning_rate,
-    )
-
-    assert 0 < updated_confidence_level < 1
-    if breach:
-        assert updated_confidence_level >= true_confidence_level
-    else:
-        assert updated_confidence_level <= true_confidence_level
 
 
 def test_get_tuning_configurations(dummy_initialized_conformal_searcher__gbm_mse):

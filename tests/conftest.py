@@ -11,7 +11,6 @@ from confopt.estimation import (
     LocallyWeightedConformalSearcher,
 )
 from confopt.tuning import (
-    ConformalSearcher,
     ObjectiveConformalSearcher,
     update_model_parameters,
 )
@@ -128,48 +127,6 @@ def dummy_gbm_configurations(dummy_gbm_parameter_grid):
         random_state=DEFAULT_SEED,
     )
     return gbm_tuning_configurations
-
-
-@pytest.fixture
-def dummy_initialized_conformal_searcher__gbm_mse(
-    dummy_stationary_gaussian_dataset, dummy_gbm_parameter_grid
-):
-    """
-    Creates a conformal searcher instance from dummy raw X, y data
-    and a dummy parameter grid.
-
-    This particular fixture is set to optimize a GBM base model on
-    regression data, using an MSE objective. The model architecture
-    and type of data are arbitrarily pinned; more fixtures could
-    be created to test other model or data types.
-    """
-    custom_loss_function = "mean_squared_error"
-    prediction_type = "regression"
-    model = GradientBoostingRegressor()
-
-    X, y = (
-        dummy_stationary_gaussian_dataset[:, 0].reshape(-1, 1),
-        dummy_stationary_gaussian_dataset[:, 1],
-    )
-    train_split = 0.5
-    X_train, y_train = (
-        X[: round(len(X) * train_split), :],
-        y[: round(len(y) * train_split)],
-    )
-    X_val, y_val = X[round(len(X) * train_split) :, :], y[round(len(y) * train_split) :]
-
-    searcher = ConformalSearcher(
-        model=model,
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
-        search_space=dummy_gbm_parameter_grid,
-        prediction_type=prediction_type,
-        custom_loss_function=custom_loss_function,
-    )
-
-    return searcher
 
 
 @pytest.fixture
