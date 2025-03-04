@@ -12,7 +12,6 @@ from sklearn.metrics import mean_pinball_loss, mean_squared_error
 from sklearn.model_selection import KFold
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.neural_network import MLPRegressor
-from confopt.preprocessing import train_val_split
 from confopt.config import (
     GBM_NAME,
     QRF_NAME,
@@ -38,6 +37,7 @@ from confopt.quantile_wrappers import (
 )  # , QuantileKNN, QuantileLasso
 from confopt.utils import get_tuning_configurations, get_perceptron_layers
 from confopt.adaptation import ACI, DtACI
+from confopt.conformalization import LocallyWeightedConformalEstimator
 
 logger = logging.getLogger(__name__)
 
@@ -576,12 +576,10 @@ def tune(
 
 class LocallyWeightedConformalSearcher:
     """
-    Locally weighted conformal regression.
+    Locally weighted conformal regression with sampling.
 
-    Fits sequential estimators on X and y data to form point and
-    variability predictions for y.
-
-    The class contains tuning, fitting and prediction methods.
+    Uses a locally weighted conformal estimator and applies sampling strategies
+    to form point and variability predictions for y.
     """
 
     def __init__(
@@ -590,70 +588,13 @@ class LocallyWeightedConformalSearcher:
         variance_estimator_architecture: str,
         sampler: Union[UCBSampler, ThompsonSampler],
     ):
-        self.point_estimator_architecture = point_estimator_architecture
-        self.variance_estimator_architecture = variance_estimator_architecture
-        self.sampler = sampler
-
-        self.training_time = None
-
-    def _fit_component_estimator(
-        self,
-        X,
-        y,
-        estimator_architecture,
-        tuning_iterations,
-        random_state: Optional[int] = None,
-    ):
-        """
-        Fit component estimator with option to tune.
-
-        Component estimators are loosely defined, general use
-        point estimators. Their final purpose is dependent on
-        what X and y data is passed to the function (eg. if y is
-        a target, a residual, etc.).
-
-        Parameters
-        ----------
-        X :
-            Explanatory variables.
-        y :
-            Target variable.
-        estimator_architecture :
-            String name for the type of estimator to tune.
-        tuning_iterations :
-            Number of tuning searches to perform (eg. 5 means
-            the model will randomly select 5 hyperparameter
-            configurations for the estimator to evaluate).
-            To skip tuning during fitting, set this to 0.
-        random_state :
-            Random generation seed.
-
-        Returns
-        -------
-        estimator :
-            Fitted estimator object.
-        """
-        if tuning_iterations > 1 and len(X) > 10:
-            initialization_params = tune(
-                X=X,
-                y=y,
-                estimator_architecture=estimator_architecture,
-                n_searches=tuning_iterations,
-                quantiles=None,
-                random_state=random_state,
-            )
-        else:
-            initialization_params = SEARCH_MODEL_DEFAULT_CONFIGURATIONS[
-                estimator_architecture
-            ].copy()
-        estimator = initialize_point_estimator(
-            estimator_architecture=estimator_architecture,
-            initialization_params=initialization_params,
-            random_state=random_state,
+        self.conformal_estimator = LocallyWeightedConformalEstimator(
+            point_estimator_architecture=point_estimator_architecture,
+            variance_estimator_architecture=variance_estimator_architecture,
         )
-        estimator.fit(X, y)
-
-        return estimator
+        self.sampler = sampler
+        self.training_time = None
+        self.predictions_per_interval = None
 
     def fit(
         self,
@@ -665,134 +606,54 @@ class LocallyWeightedConformalSearcher:
         random_state: Optional[int] = None,
     ):
         """
-        Fit conformal regression model on specified data.
-
-        Fitting process involves the following sequential steps:
-            1.  Fitting an estimator on a first portion of the
-                data, training on X to predict y.
-            2.  Obtaining residuals between the estimator and
-                observed y's on a second portion of the data.
-            3.  Fitting a conditional mean estimator on the
-                residual data.
-            4.  Using the mean estimator to de-mean the residual
-                data.
-            5.  Fitting an estimator to predict absolute, de-meaned
-                residuals (residual spread around the local mean).
-            6.  Using a third portion of the data as a conformal
-                hold out set to calibrate intervals for the estimator.
-
-        Parameters
-        ----------
-        X_pe :
-            Explanatory variables used to train the point estimator.
-        y_pe :
-            Target variable used to train the point estimator.
-        X_ve :
-            Explanatory variables used to train the residual spread
-            (variability) estimator.
-        y_ve :
-            Target variable used to train the residual spread
-            (variability) estimator.
-        X_val :
-            Explanatory variables used to calibrate the point estimator.
-        y_val :
-            Target variable used to calibrate the point estimator.
-        tuning_iterations :
-            Number of tuning searches to perform (eg. 5 means
-            the model will randomly select 5 hyperparameter
-            configurations for the estimator to evaluate).
-            To skip tuning during fitting, set this to 0.
-        random_state :
-            Random generation seed.
+        Fit the conformal estimator.
         """
-        (X_pe, y_pe, X_ve, y_ve,) = train_val_split(
-            X_train,
-            y_train,
-            train_split=0.75,
-            normalize=False,
-            random_state=random_state,
-        )
-        logger.debug(
-            f"Obtained sub training set of size {X_pe.shape} "
-            f"and sub validation set of size {X_ve.shape}"
-        )
-
-        training_time_tracker = RuntimeTracker()
-
-        self.pe_estimator = self._fit_component_estimator(
-            X=X_pe,
-            y=y_pe,
-            estimator_architecture=self.point_estimator_architecture,
+        self.conformal_estimator.fit(
+            X_train=X_train,
+            y_train=y_train,
+            X_val=X_val,
+            y_val=y_val,
             tuning_iterations=tuning_iterations,
             random_state=random_state,
         )
-
-        pe_residuals = y_ve - self.pe_estimator.predict(X_ve)
-        abs_pe_residuals = abs(pe_residuals)
-
-        self.ve_estimator = self._fit_component_estimator(
-            X=X_ve,
-            y=abs_pe_residuals,
-            estimator_architecture=self.variance_estimator_architecture,
-            tuning_iterations=tuning_iterations,
-            random_state=random_state,
-        )
-        var_pred = self.ve_estimator.predict(X_val)
-        var_pred = np.array([1 if x <= 0 else x for x in var_pred])
-
-        self.nonconformity_scores = (
-            abs(np.array(y_val) - self.pe_estimator.predict(X_val)) / var_pred
-        )
-        self.training_time = training_time_tracker.return_runtime()
-
-        # TODO: TEMP
-        self.primary_estimator_error = mean_squared_error(
-            self.pe_estimator.predict(X=X_val), y_val
-        )
-        # TODO: END OF TEMP
+        self.training_time = self.conformal_estimator.training_time
+        self.primary_estimator_error = self.conformal_estimator.primary_estimator_error
 
     def predict(self, X: np.array):
-        y_pred = np.array(self.pe_estimator.predict(X)).reshape(-1, 1)
-        var_pred = self.ve_estimator.predict(X)
-        var_pred = np.array([max(x, 0) for x in var_pred]).reshape(-1, 1)
+        """
+        Predict using the conformal estimator and apply the sampler.
+        """
         if isinstance(self.sampler, UCBSampler):
-            return self._predict_with_ucb(y_pred, var_pred)
+            return self._predict_with_ucb(X)
         elif isinstance(self.sampler, ThompsonSampler):
-            return self._predict_with_thompson(y_pred, var_pred)
+            return self._predict_with_thompson(X)
 
-    def _predict_with_ucb(self, y_pred: np.array, var_pred: np.array):
+    def _predict_with_ucb(self, X: np.array):
+        """
+        Predict using UCB sampling strategy.
+        """
         if isinstance(self.sampler.adapter, DtACI):
             self.predictions_per_interval = []
             for alpha in self.sampler.fetch_expert_alphas():
-                score_quantile = np.quantile(self.nonconformity_scores, 1 - alpha)
-                scaled_score = score_quantile * var_pred
+                lower_bound, upper_bound = self.conformal_estimator.predict_interval(
+                    X=X, alpha=alpha, beta=self.sampler.beta
+                )
                 self.predictions_per_interval.append(
-                    np.hstack(
-                        [
-                            y_pred - self.sampler.beta * scaled_score,
-                            y_pred + self.sampler.beta * scaled_score,
-                        ]
-                    )
+                    np.hstack([lower_bound, upper_bound])
                 )
-                # Use the current best alpha as the bound:
+                # Use the current best alpha as the bound
                 if self.sampler.fetch_alpha() == alpha:
-                    lower_bound = y_pred - self.sampler.beta * scaled_score
+                    result_lower_bound = lower_bound
         else:
-            score_quantile = np.quantile(
-                self.nonconformity_scores, 1 - self.sampler.fetch_alpha()
+            alpha = self.sampler.fetch_alpha()
+            lower_bound, upper_bound = self.conformal_estimator.predict_interval(
+                X=X, alpha=alpha, beta=self.sampler.beta
             )
-            scaled_score = score_quantile * var_pred
-            self.predictions_per_interval = [
-                np.hstack(
-                    [
-                        y_pred - self.sampler.beta * scaled_score,
-                        y_pred + self.sampler.beta * scaled_score,
-                    ]
-                )
-            ]
-            lower_bound = y_pred - self.sampler.beta * scaled_score
+            self.predictions_per_interval = [np.hstack([lower_bound, upper_bound])]
+            result_lower_bound = lower_bound
+
         self.sampler.update_exploration_step()
-        return lower_bound
+        return result_lower_bound
 
     def _predict_with_thompson(self, y_pred: np.array, var_pred: np.array):
         self.predictions_per_interval = []
