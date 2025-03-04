@@ -298,9 +298,9 @@ class ObjectiveConformalSearcher:
     @staticmethod
     def _set_conformal_validation_split(X: np.array) -> float:
         if len(X) <= 30:
-            validation_split = 5 / len(X)
+            validation_split = 4 / len(X)
         else:
-            validation_split = 0.33
+            validation_split = 0.20
         return validation_split
 
     def search(

@@ -1,3 +1,5 @@
+import pytest
+
 from confopt.utils import (
     get_tuning_configurations,
     get_perceptron_layers,
@@ -46,15 +48,14 @@ def test_get_perceptron_layers__reproducibility():
         assert layer_first_call == layer_second_call
 
 
-def test_get_tuning_configurations(dummy_parameter_grid):
-    dummy_n_configurations = 10000
-
+@pytest.mark.parametrize("dummy_n_configurations", [100, 1000, 10000])
+def test_get_tuning_configurations(dummy_parameter_grid, dummy_n_configurations):
     tuning_configurations = get_tuning_configurations(
         parameter_grid=dummy_parameter_grid,
         n_configurations=dummy_n_configurations,
         random_state=DEFAULT_SEED,
     )
-    assert len(tuning_configurations) < dummy_n_configurations
+    assert len(tuning_configurations) == dummy_n_configurations
     configuration_lens = []
     for configuration in tuning_configurations:
         for k, v in configuration.items():

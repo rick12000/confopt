@@ -1,5 +1,4 @@
 import random
-from typing import Dict
 
 import numpy as np
 import pytest
@@ -16,23 +15,8 @@ from hashlib import sha256
 
 DEFAULT_SEED = 1234
 
-# Dummy made up search space:
-DUMMY_PARAMETER_GRID: Dict = {
-    "int_parameter": [1, 2, 3, 4, 5],
-    "float_parameter": [1.1, 2.2, 3.3, 4.4],
-    "bool_parameter": [True, False],
-    "mixed_str_parameter": [None, "SGD"],
-    "str_parmeter": ["1", "check"],
-}
-
-# Dummy search space for a GBM model:
-DUMMY_GBM_PARAMETER_GRID: Dict = {
-    "n_estimators": [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-    "learning_rate": [0.1, 0.2, 0.3, 0.4, 0.5],
-}
-
 # Define parameter search space:
-parameter_search_space = {
+DUMMY_PARAMETER_GRID = {
     "param1": list(range(0, 100)),
     "param2": list(range(0, 100)),
     "param3": list(range(0, 100)),
@@ -147,25 +131,7 @@ def dummy_configurations(dummy_parameter_grid):
 
 
 @pytest.fixture
-def dummy_gbm_parameter_grid():
-    return DUMMY_GBM_PARAMETER_GRID
-
-
-@pytest.fixture
-def dummy_gbm_configurations(dummy_gbm_parameter_grid):
-    max_configurations = 60
-    gbm_tuning_configurations = get_tuning_configurations(
-        parameter_grid=dummy_gbm_parameter_grid,
-        n_configurations=max_configurations,
-        random_state=DEFAULT_SEED,
-    )
-    return gbm_tuning_configurations
-
-
-@pytest.fixture
-def dummy_initialized_objective_conformal_searcher__gbm_mse(
-    dummy_stationary_gaussian_dataset, dummy_gbm_parameter_grid
-):
+def dummy_tuner(dummy_parameter_grid):
     """
     Creates a conformal searcher instance from dummy raw X, y data
     and a dummy parameter grid.
@@ -182,7 +148,7 @@ def dummy_initialized_objective_conformal_searcher__gbm_mse(
 
     searcher = ObjectiveConformalSearcher(
         objective_function=objective_function,
-        search_space=dummy_gbm_parameter_grid,
+        search_space=dummy_parameter_grid,
         metric_optimization="inverse",
     )
 

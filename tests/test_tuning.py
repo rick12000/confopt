@@ -164,15 +164,11 @@ def test_normalize_estimation_data(dummy_configurations):
 
 
 def test_get_tuning_configurations(
-    dummy_initialized_objective_conformal_searcher__gbm_mse,
+    dummy_tuner,
 ):
-    stored_search_space = (
-        dummy_initialized_objective_conformal_searcher__gbm_mse.search_space
-    )
+    stored_search_space = dummy_tuner.search_space
 
-    tuning_configurations = (
-        dummy_initialized_objective_conformal_searcher__gbm_mse._get_tuning_configurations()
-    )
+    tuning_configurations = dummy_tuner._get_tuning_configurations()
 
     for configuration in tuning_configurations:
         for param_name, param_value in configuration.items():
@@ -181,37 +177,27 @@ def test_get_tuning_configurations(
             # Check values in configuration come from range in parameter grid prompt:
             assert param_value in stored_search_space[param_name]
     # Test for mutability:
-    assert (
-        stored_search_space
-        == dummy_initialized_objective_conformal_searcher__gbm_mse.search_space
-    )
+    assert stored_search_space == dummy_tuner.search_space
 
 
 def test_get_tuning_configurations__reproducibility(
-    dummy_initialized_objective_conformal_searcher__gbm_mse,
+    dummy_tuner,
 ):
-    tuning_configs_first_call = (
-        dummy_initialized_objective_conformal_searcher__gbm_mse._get_tuning_configurations()
-    )
-    tuning_configs_second_call = (
-        dummy_initialized_objective_conformal_searcher__gbm_mse._get_tuning_configurations()
-    )
+    tuning_configs_first_call = dummy_tuner._get_tuning_configurations()
+    tuning_configs_second_call = dummy_tuner._get_tuning_configurations()
     assert tuning_configs_first_call == tuning_configs_second_call
 
 
-def test_random_search(dummy_initialized_objective_conformal_searcher__gbm_mse):
+def test_random_search(dummy_tuner):
     n_searches = 5
-    dummy_initialized_objective_conformal_searcher__gbm_mse.search_timer = (
-        RuntimeTracker()
-    )
+    dummy_tuner.search_timer = RuntimeTracker()
 
-    rs_trials = dummy_initialized_objective_conformal_searcher__gbm_mse._random_search(
+    rs_trials = dummy_tuner._random_search(
         n_searches=n_searches,
         max_runtime=30,
         verbose=False,
     )
 
-    assert len(rs_trials) > 0
     assert len(rs_trials) == n_searches
 
     for trial in rs_trials:
@@ -222,31 +208,25 @@ def test_random_search(dummy_initialized_objective_conformal_searcher__gbm_mse):
 
 
 def test_random_search__reproducibility(
-    dummy_initialized_objective_conformal_searcher__gbm_mse,
+    dummy_tuner,
 ):
     n_searches = 5
-    dummy_initialized_objective_conformal_searcher__gbm_mse.search_timer = (
-        RuntimeTracker()
-    )
+    dummy_tuner.search_timer = RuntimeTracker()
 
     # Set numpy random seed for reproducibility
     np.random.seed(DEFAULT_SEED)
-    rs_trials_first_call = (
-        dummy_initialized_objective_conformal_searcher__gbm_mse._random_search(
-            n_searches=n_searches,
-            max_runtime=30,
-            verbose=False,
-        )
+    rs_trials_first_call = dummy_tuner._random_search(
+        n_searches=n_searches,
+        max_runtime=30,
+        verbose=False,
     )
 
     # Reset random seed
     np.random.seed(DEFAULT_SEED)
-    rs_trials_second_call = (
-        dummy_initialized_objective_conformal_searcher__gbm_mse._random_search(
-            n_searches=n_searches,
-            max_runtime=30,
-            verbose=False,
-        )
+    rs_trials_second_call = dummy_tuner._random_search(
+        n_searches=n_searches,
+        max_runtime=30,
+        verbose=False,
     )
 
     # Check that the same configurations were selected
@@ -255,24 +235,20 @@ def test_random_search__reproducibility(
         assert first_trial.performance == second_trial.performance
 
 
-def test_search(dummy_initialized_objective_conformal_searcher__gbm_mse):
+def test_search(dummy_tuner):
     searcher = LocallyWeightedConformalSearcher(
         point_estimator_architecture="gbm",
         variance_estimator_architecture="gbm",
         sampler=UCBSampler(c=1, interval_width=0.8),
     )
 
-    n_random_searches = 5
-    max_iter = 8
+    n_random_searches = 10
+    max_iter = 12
 
-    stored_search_space = (
-        dummy_initialized_objective_conformal_searcher__gbm_mse.search_space
-    )
-    stored_tuning_configurations = (
-        dummy_initialized_objective_conformal_searcher__gbm_mse.tuning_configurations
-    )
+    stored_search_space = dummy_tuner.search_space
+    stored_tuning_configurations = dummy_tuner.tuning_configurations
 
-    dummy_initialized_objective_conformal_searcher__gbm_mse.search(
+    dummy_tuner.search(
         searcher=searcher,
         n_random_searches=n_random_searches,
         max_iter=max_iter,
@@ -282,40 +258,22 @@ def test_search(dummy_initialized_objective_conformal_searcher__gbm_mse):
     )
 
     # Check that trials were recorded
-    assert len(dummy_initialized_objective_conformal_searcher__gbm_mse.study.trials) > 0
-    assert (
-        len(dummy_initialized_objective_conformal_searcher__gbm_mse.study.trials)
-        == max_iter
-    )
+    assert len(dummy_tuner.study.trials) == max_iter
 
     # Check that random search and conformal search trials are both present
-    rs_trials = [
-        t
-        for t in dummy_initialized_objective_conformal_searcher__gbm_mse.study.trials
-        if t.acquisition_source == "rs"
-    ]
-    conf_trials = [
-        t
-        for t in dummy_initialized_objective_conformal_searcher__gbm_mse.study.trials
-        if t.acquisition_source != "rs"
-    ]
+    rs_trials = [t for t in dummy_tuner.study.trials if t.acquisition_source == "rs"]
+    conf_trials = [t for t in dummy_tuner.study.trials if t.acquisition_source != "rs"]
 
     assert len(rs_trials) == n_random_searches
     assert len(conf_trials) == max_iter - n_random_searches
 
     # Test for mutability:
-    assert (
-        stored_search_space
-        == dummy_initialized_objective_conformal_searcher__gbm_mse.search_space
-    )
-    assert (
-        stored_tuning_configurations
-        == dummy_initialized_objective_conformal_searcher__gbm_mse.tuning_configurations
-    )
+    assert stored_search_space == dummy_tuner.search_space
+    assert stored_tuning_configurations == dummy_tuner.tuning_configurations
 
 
 def test_search__reproducibility(
-    dummy_initialized_objective_conformal_searcher__gbm_mse,
+    dummy_tuner,
 ):
     searcher = LocallyWeightedConformalSearcher(
         point_estimator_architecture="gbm",
@@ -323,16 +281,12 @@ def test_search__reproducibility(
         sampler=UCBSampler(c=1, interval_width=0.8),
     )
 
-    n_random_searches = 5
-    max_iter = 8
+    n_random_searches = 10
+    max_iter = 12
 
     # Create copies for two independent runs
-    searcher_first_call = deepcopy(
-        dummy_initialized_objective_conformal_searcher__gbm_mse
-    )
-    searcher_second_call = deepcopy(
-        dummy_initialized_objective_conformal_searcher__gbm_mse
-    )
+    searcher_first_call = deepcopy(dummy_tuner)
+    searcher_second_call = deepcopy(dummy_tuner)
 
     # Run with same random seed
     searcher_first_call.search(
@@ -362,9 +316,9 @@ def test_search__reproducibility(
         assert first_trial.acquisition_source == second_trial.acquisition_source
 
 
-def test_get_best_params(dummy_initialized_objective_conformal_searcher__gbm_mse):
+def test_get_best_params(dummy_tuner):
     # Setup a simple trial with some sample configurations
-    searcher = dummy_initialized_objective_conformal_searcher__gbm_mse
+    searcher = dummy_tuner
     config1 = {"param1": 1, "param2": 2}
     config2 = {"param1": 3, "param2": 4}
 
@@ -388,9 +342,9 @@ def test_get_best_params(dummy_initialized_objective_conformal_searcher__gbm_mse
     assert best_params == config2
 
 
-def test_get_best_value(dummy_initialized_objective_conformal_searcher__gbm_mse):
+def test_get_best_value(dummy_tuner):
     # Setup a simple trial with some sample configurations
-    searcher = dummy_initialized_objective_conformal_searcher__gbm_mse
+    searcher = dummy_tuner
     config1 = {"param1": 1, "param2": 2}
     config2 = {"param1": 3, "param2": 4}
 
