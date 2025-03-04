@@ -4,7 +4,6 @@ from typing import Dict
 import numpy as np
 import pytest
 from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.metrics import mean_squared_error
 
 from confopt.estimation import (
     MultiFitQuantileConformalSearcher,
@@ -12,9 +11,9 @@ from confopt.estimation import (
 )
 from confopt.tuning import (
     ObjectiveConformalSearcher,
-    update_model_parameters,
 )
 from confopt.utils import get_tuning_configurations
+from hashlib import sha256
 
 DEFAULT_SEED = 1234
 
@@ -32,6 +31,30 @@ DUMMY_GBM_PARAMETER_GRID: Dict = {
     "n_estimators": [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
     "learning_rate": [0.1, 0.2, 0.3, 0.4, 0.5],
 }
+
+
+def noisy_rastrigin(x, A=20, noise_seed=42, noise=0):
+    n = len(x)
+    x_bytes = x.tobytes()
+    combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
+    hash_value = int.from_bytes(sha256(combined_bytes).digest()[:4], "big")
+    rng = np.random.default_rng(hash_value)
+    rastrigin_value = A * n + np.sum(x**2 - A * np.cos(2 * np.pi * x))
+    noise = rng.normal(loc=0.0, scale=noise)
+    return rastrigin_value + noise
+
+
+class ObjectiveSurfaceGenerator:
+    def __init__(self, generator: str):
+        self.generator = generator
+
+    def predict(self, params):
+        x = np.array(list(params.values()), dtype=float)
+
+        if self.generator == "rastrigin":
+            y = noisy_rastrigin(x=x)
+
+        return y
 
 
 @pytest.fixture
@@ -143,33 +166,11 @@ def dummy_initialized_objective_conformal_searcher__gbm_mse(
     be created to test other model or data types.
     """
 
-    def create_objective_function(dummy_stationary_gaussian_dataset, model):
-        def objective_function(configuration):
-            X, y = (
-                dummy_stationary_gaussian_dataset[:, 0].reshape(-1, 1),
-                dummy_stationary_gaussian_dataset[:, 1],
-            )
-            train_split = 0.5
-            X_train, y_train = (
-                X[: round(len(X) * train_split), :],
-                y[: round(len(y) * train_split)],
-            )
-            X_val, y_val = (
-                X[round(len(X) * train_split) :, :],
-                y[round(len(y) * train_split) :],
-            )
-            updated_model = update_model_parameters(
-                model_instance=model, configuration=configuration, random_state=None
-            )
-            updated_model.fit(X=X_train, y=y_train)
+    def objective_function(configuration):
+        generator = ObjectiveSurfaceGenerator(generator="rastrigin")
+        return generator.predict(params=configuration)
 
-            return mean_squared_error(
-                y_true=y_val, y_pred=updated_model.predict(X=X_val)
-            )
-
-        return objective_function
-
-    objective_function = create_objective_function(
+    objective_function = objective_function(
         dummy_stationary_gaussian_dataset=dummy_stationary_gaussian_dataset,
         model=GradientBoostingRegressor(random_state=DEFAULT_SEED),
     )

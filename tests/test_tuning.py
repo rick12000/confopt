@@ -4,11 +4,14 @@ from copy import deepcopy
 import numpy as np
 import pandas as pd
 
-from confopt.config import GBM_NAME
-from confopt.tracking import RuntimeTracker
+from confopt.tracking import RuntimeTracker, Trial
 from confopt.tuning import (
     process_and_split_estimation_data,
     normalize_estimation_data,
+)
+from confopt.estimation import (
+    LocallyWeightedConformalSearcher,
+    UCBSampler,
 )
 
 DEFAULT_SEED = 1234
@@ -160,11 +163,15 @@ def test_normalize_estimation_data(dummy_configurations):
     )
 
 
-def test_get_tuning_configurations(dummy_initialized_conformal_searcher__gbm_mse):
-    stored_search_space = dummy_initialized_conformal_searcher__gbm_mse.search_space
+def test_get_tuning_configurations(
+    dummy_initialized_objective_conformal_searcher__gbm_mse,
+):
+    stored_search_space = (
+        dummy_initialized_objective_conformal_searcher__gbm_mse.search_space
+    )
 
     tuning_configurations = (
-        dummy_initialized_conformal_searcher__gbm_mse._get_tuning_configurations()
+        dummy_initialized_objective_conformal_searcher__gbm_mse._get_tuning_configurations()
     )
 
     for configuration in tuning_configurations:
@@ -176,28 +183,33 @@ def test_get_tuning_configurations(dummy_initialized_conformal_searcher__gbm_mse
     # Test for mutability:
     assert (
         stored_search_space
-        == dummy_initialized_conformal_searcher__gbm_mse.search_space
+        == dummy_initialized_objective_conformal_searcher__gbm_mse.search_space
     )
 
 
 def test_get_tuning_configurations__reproducibility(
-    dummy_initialized_conformal_searcher__gbm_mse,
+    dummy_initialized_objective_conformal_searcher__gbm_mse,
 ):
-    assert (
-        dummy_initialized_conformal_searcher__gbm_mse._get_tuning_configurations()
-        == dummy_initialized_conformal_searcher__gbm_mse._get_tuning_configurations()
+    tuning_configs_first_call = (
+        dummy_initialized_objective_conformal_searcher__gbm_mse._get_tuning_configurations()
     )
+    tuning_configs_second_call = (
+        dummy_initialized_objective_conformal_searcher__gbm_mse._get_tuning_configurations()
+    )
+    assert tuning_configs_first_call == tuning_configs_second_call
 
 
-def test_evaluate_configuration_performance(
-    dummy_initialized_conformal_searcher__gbm_mse, dummy_gbm_configurations
+def test_objective_function(
+    dummy_initialized_objective_conformal_searcher__gbm_mse, dummy_gbm_configurations
 ):
     # Arbitrarily select the first configuration in the list:
     dummy_configuration = dummy_gbm_configurations[0]
     stored_dummy_configuration = deepcopy(dummy_configuration)
 
-    performance = dummy_initialized_conformal_searcher__gbm_mse._evaluate_configuration_performance(
-        configuration=dummy_configuration, random_state=DEFAULT_SEED
+    performance = (
+        dummy_initialized_objective_conformal_searcher__gbm_mse.objective_function(
+            configuration=dummy_configuration
+        )
     )
 
     assert performance > 0
@@ -205,183 +217,91 @@ def test_evaluate_configuration_performance(
     assert stored_dummy_configuration == dummy_configuration
 
 
-def test_evaluate_configuration_performance__reproducibility(
-    dummy_initialized_conformal_searcher__gbm_mse, dummy_gbm_configurations
+def test_objective_function__reproducibility(
+    dummy_initialized_objective_conformal_searcher__gbm_mse, dummy_gbm_configurations
 ):
     # Arbitrarily select the first configuration in the list:
     dummy_configuration = dummy_gbm_configurations[0]
 
-    assert dummy_initialized_conformal_searcher__gbm_mse._evaluate_configuration_performance(
-        configuration=dummy_configuration, random_state=DEFAULT_SEED
-    ) == dummy_initialized_conformal_searcher__gbm_mse._evaluate_configuration_performance(
-        configuration=dummy_configuration, random_state=DEFAULT_SEED
+    first_result = (
+        dummy_initialized_objective_conformal_searcher__gbm_mse.objective_function(
+            configuration=dummy_configuration
+        )
     )
+    second_result = (
+        dummy_initialized_objective_conformal_searcher__gbm_mse.objective_function(
+            configuration=dummy_configuration
+        )
+    )
+    assert first_result == second_result
 
 
-def test_random_search(dummy_initialized_conformal_searcher__gbm_mse):
+def test_random_search(dummy_initialized_objective_conformal_searcher__gbm_mse):
     n_searches = 5
-    max_runtime = 30
-    dummy_initialized_conformal_searcher__gbm_mse.search_timer = RuntimeTracker()
+    dummy_initialized_objective_conformal_searcher__gbm_mse.search_timer = (
+        RuntimeTracker()
+    )
 
-    (
-        searched_configurations,
-        searched_performances,
-        searched_timestamps,
-        runtime_per_search,
-    ) = dummy_initialized_conformal_searcher__gbm_mse._random_search(
+    rs_trials = dummy_initialized_objective_conformal_searcher__gbm_mse._random_search(
         n_searches=n_searches,
-        max_runtime=max_runtime,
-        random_state=DEFAULT_SEED,
+        max_runtime=30,
+        verbose=False,
     )
 
-    for performance in searched_performances:
-        assert performance > 0
-    assert len(searched_configurations) > 0
-    assert len(searched_performances) > 0
-    assert len(searched_timestamps) > 0
-    assert (
-        len(searched_configurations)
-        == len(searched_performances)
-        == len(searched_timestamps)
-    )
-    assert len(searched_configurations) == n_searches
-    assert 0 < runtime_per_search < max_runtime
+    assert len(rs_trials) > 0
+    assert len(rs_trials) == n_searches
+
+    for trial in rs_trials:
+        assert isinstance(trial, Trial)
+        assert trial.performance > 0
+        assert trial.acquisition_source == "rs"
+        assert trial.configuration is not None
+        assert trial.timestamp is not None
 
 
 def test_random_search__reproducibility(
-    dummy_initialized_conformal_searcher__gbm_mse,
+    dummy_initialized_objective_conformal_searcher__gbm_mse,
 ):
     n_searches = 5
-    max_runtime = 30
-    dummy_initialized_conformal_searcher__gbm_mse.search_timer = RuntimeTracker()
-
-    (
-        searched_configurations_first_call,
-        searched_performances_first_call,
-        _,
-        _,
-    ) = dummy_initialized_conformal_searcher__gbm_mse._random_search(
-        n_searches=n_searches,
-        max_runtime=max_runtime,
-        random_state=DEFAULT_SEED,
-    )
-    (
-        searched_configurations_second_call,
-        searched_performances_second_call,
-        _,
-        _,
-    ) = dummy_initialized_conformal_searcher__gbm_mse._random_search(
-        n_searches=n_searches,
-        max_runtime=max_runtime,
-        random_state=DEFAULT_SEED,
+    dummy_initialized_objective_conformal_searcher__gbm_mse.search_timer = (
+        RuntimeTracker()
     )
 
-    assert searched_configurations_first_call == searched_configurations_second_call
-    assert searched_performances_first_call == searched_performances_second_call
-
-
-def test_search(dummy_initialized_conformal_searcher__gbm_mse):
-    # TODO: Below I hard coded a slice of possible inputs, but consider
-    #  pytest parametrizing these (though test will be very heavy,
-    #  so tag as slow and only run when necessary)
-    confidence_level = 0.2
-    conformal_model_type = GBM_NAME
-    conformal_retraining_frequency = 1
-    conformal_learning_rate = 0.01
-    enable_adaptive_intervals = True
-    max_runtime = 120
-    min_training_iterations = 20
-
-    stored_search_space = dummy_initialized_conformal_searcher__gbm_mse.search_space
-    stored_tuning_configurations = (
-        dummy_initialized_conformal_searcher__gbm_mse.tuning_configurations
+    # Set numpy random seed for reproducibility
+    np.random.seed(DEFAULT_SEED)
+    rs_trials_first_call = (
+        dummy_initialized_objective_conformal_searcher__gbm_mse._random_search(
+            n_searches=n_searches,
+            max_runtime=30,
+            verbose=False,
+        )
     )
 
-    dummy_initialized_conformal_searcher__gbm_mse.search(
-        conformal_search_estimator=conformal_model_type,
-        confidence_level=confidence_level,
-        n_random_searches=min_training_iterations,
-        runtime_budget=max_runtime,
-        conformal_retraining_frequency=conformal_retraining_frequency,
-        conformal_learning_rate=conformal_learning_rate,
-        enable_adaptive_intervals=enable_adaptive_intervals,
-        verbose=0,
+    # Reset random seed
+    np.random.seed(DEFAULT_SEED)
+    rs_trials_second_call = (
+        dummy_initialized_objective_conformal_searcher__gbm_mse._random_search(
+            n_searches=n_searches,
+            max_runtime=30,
+            verbose=False,
+        )
     )
 
-    assert (
-        len(dummy_initialized_conformal_searcher__gbm_mse.searched_configurations) > 0
-    )
-    assert len(dummy_initialized_conformal_searcher__gbm_mse.searched_performances) > 0
-    assert len(
-        dummy_initialized_conformal_searcher__gbm_mse.searched_configurations
-    ) == len(dummy_initialized_conformal_searcher__gbm_mse.searched_performances)
-    # Test for mutability:
-    assert (
-        stored_search_space
-        == dummy_initialized_conformal_searcher__gbm_mse.search_space
-    )
-    assert (
-        stored_tuning_configurations
-        == dummy_initialized_conformal_searcher__gbm_mse.tuning_configurations
-    )
+    # Check that the same configurations were selected
+    for first_trial, second_trial in zip(rs_trials_first_call, rs_trials_second_call):
+        assert first_trial.configuration == second_trial.configuration
+        assert first_trial.performance == second_trial.performance
 
 
-def test_search__reproducibility(dummy_initialized_conformal_searcher__gbm_mse):
-    confidence_level = 0.2
-    conformal_model_type = GBM_NAME
-    conformal_retraining_frequency = 1
-    conformal_learning_rate = 0.01
-    enable_adaptive_intervals = True
-    max_runtime = 120
-    min_training_iterations = 20
-
-    searcher_first_call = deepcopy(dummy_initialized_conformal_searcher__gbm_mse)
-    searcher_second_call = deepcopy(dummy_initialized_conformal_searcher__gbm_mse)
-
-    searcher_first_call.search(
-        conformal_search_estimator=conformal_model_type,
-        confidence_level=confidence_level,
-        n_random_searches=min_training_iterations,
-        runtime_budget=max_runtime,
-        conformal_retraining_frequency=conformal_retraining_frequency,
-        conformal_learning_rate=conformal_learning_rate,
-        enable_adaptive_intervals=enable_adaptive_intervals,
-        verbose=0,
-        random_state=DEFAULT_SEED,
-    )
-    searcher_second_call.search(
-        conformal_search_estimator=conformal_model_type,
-        confidence_level=confidence_level,
-        n_random_searches=min_training_iterations,
-        runtime_budget=max_runtime,
-        conformal_retraining_frequency=conformal_retraining_frequency,
-        conformal_learning_rate=conformal_learning_rate,
-        enable_adaptive_intervals=enable_adaptive_intervals,
-        verbose=0,
-        random_state=DEFAULT_SEED,
+def test_search(dummy_initialized_objective_conformal_searcher__gbm_mse):
+    searcher = LocallyWeightedConformalSearcher(
+        point_estimator_architecture="gbm",
+        variance_estimator_architecture="gbm",
+        sampler=UCBSampler(c=1, interval_width=0.8),
     )
 
-    assert (
-        searcher_first_call.searched_configurations
-        == searcher_second_call.searched_configurations
-    )
-    assert (
-        searcher_first_call.searched_performances
-        == searcher_second_call.searched_performances
-    )
-
-
-def test_objective_search(dummy_initialized_objective_conformal_searcher__gbm_mse):
-    # TODO: Below I hard coded a slice of possible inputs, but consider
-    #  pytest parametrizing these (though test will be very heavy,
-    #  so tag as slow and only run when necessary)
-    confidence_level = 0.2
-    conformal_model_type = GBM_NAME
-    conformal_retraining_frequency = 1
-    conformal_learning_rate = 0.01
-    enable_adaptive_intervals = True
-    max_runtime = 120
-    min_training_iterations = 20
+    n_random_searches = 5
+    max_iter = 8
 
     stored_search_space = (
         dummy_initialized_objective_conformal_searcher__gbm_mse.search_space
@@ -391,33 +311,36 @@ def test_objective_search(dummy_initialized_objective_conformal_searcher__gbm_ms
     )
 
     dummy_initialized_objective_conformal_searcher__gbm_mse.search(
-        conformal_search_estimator=conformal_model_type,
-        confidence_level=confidence_level,
-        n_random_searches=min_training_iterations,
-        runtime_budget=max_runtime,
-        conformal_retraining_frequency=conformal_retraining_frequency,
-        conformal_learning_rate=conformal_learning_rate,
-        enable_adaptive_intervals=enable_adaptive_intervals,
-        verbose=0,
+        searcher=searcher,
+        n_random_searches=n_random_searches,
+        max_iter=max_iter,
+        conformal_retraining_frequency=1,
+        verbose=False,
+        random_state=DEFAULT_SEED,
     )
 
+    # Check that trials were recorded
+    assert len(dummy_initialized_objective_conformal_searcher__gbm_mse.study.trials) > 0
     assert (
-        len(
-            dummy_initialized_objective_conformal_searcher__gbm_mse.searched_configurations
-        )
-        > 0
+        len(dummy_initialized_objective_conformal_searcher__gbm_mse.study.trials)
+        == max_iter
     )
-    assert (
-        len(
-            dummy_initialized_objective_conformal_searcher__gbm_mse.searched_performances
-        )
-        > 0
-    )
-    assert len(
-        dummy_initialized_objective_conformal_searcher__gbm_mse.searched_configurations
-    ) == len(
-        dummy_initialized_objective_conformal_searcher__gbm_mse.searched_performances
-    )
+
+    # Check that random search and conformal search trials are both present
+    rs_trials = [
+        t
+        for t in dummy_initialized_objective_conformal_searcher__gbm_mse.study.trials
+        if t.acquisition_source == "rs"
+    ]
+    conf_trials = [
+        t
+        for t in dummy_initialized_objective_conformal_searcher__gbm_mse.study.trials
+        if t.acquisition_source != "rs"
+    ]
+
+    assert len(rs_trials) == n_random_searches
+    assert len(conf_trials) == max_iter - n_random_searches
+
     # Test for mutability:
     assert (
         stored_search_space
@@ -429,17 +352,19 @@ def test_objective_search(dummy_initialized_objective_conformal_searcher__gbm_ms
     )
 
 
-def test_objective_search__reproducibility(
+def test_search__reproducibility(
     dummy_initialized_objective_conformal_searcher__gbm_mse,
 ):
-    confidence_level = 0.2
-    conformal_model_type = GBM_NAME
-    conformal_retraining_frequency = 1
-    conformal_learning_rate = 0.01
-    enable_adaptive_intervals = True
-    max_runtime = 120
-    min_training_iterations = 20
+    searcher = LocallyWeightedConformalSearcher(
+        point_estimator_architecture="gbm",
+        variance_estimator_architecture="gbm",
+        sampler=UCBSampler(c=1, interval_width=0.8),
+    )
 
+    n_random_searches = 5
+    max_iter = 8
+
+    # Create copies for two independent runs
     searcher_first_call = deepcopy(
         dummy_initialized_objective_conformal_searcher__gbm_mse
     )
@@ -447,34 +372,81 @@ def test_objective_search__reproducibility(
         dummy_initialized_objective_conformal_searcher__gbm_mse
     )
 
+    # Run with same random seed
     searcher_first_call.search(
-        conformal_search_estimator=conformal_model_type,
-        confidence_level=confidence_level,
-        n_random_searches=min_training_iterations,
-        runtime_budget=max_runtime,
-        conformal_retraining_frequency=conformal_retraining_frequency,
-        conformal_learning_rate=conformal_learning_rate,
-        enable_adaptive_intervals=enable_adaptive_intervals,
-        verbose=0,
-        random_state=DEFAULT_SEED,
-    )
-    searcher_second_call.search(
-        conformal_search_estimator=conformal_model_type,
-        confidence_level=confidence_level,
-        n_random_searches=min_training_iterations,
-        runtime_budget=max_runtime,
-        conformal_retraining_frequency=conformal_retraining_frequency,
-        conformal_learning_rate=conformal_learning_rate,
-        enable_adaptive_intervals=enable_adaptive_intervals,
-        verbose=0,
+        searcher=searcher,
+        n_random_searches=n_random_searches,
+        max_iter=max_iter,
+        conformal_retraining_frequency=1,
+        verbose=False,
         random_state=DEFAULT_SEED,
     )
 
-    assert (
-        searcher_first_call.searched_configurations
-        == searcher_second_call.searched_configurations
+    searcher_second_call.search(
+        searcher=searcher,
+        n_random_searches=n_random_searches,
+        max_iter=max_iter,
+        conformal_retraining_frequency=1,
+        verbose=False,
+        random_state=DEFAULT_SEED,
     )
-    assert (
-        searcher_first_call.searched_performances
-        == searcher_second_call.searched_performances
+
+    # Check that the same configurations were selected and performances match
+    for first_trial, second_trial in zip(
+        searcher_first_call.study.trials, searcher_second_call.study.trials
+    ):
+        assert first_trial.configuration == second_trial.configuration
+        assert first_trial.performance == second_trial.performance
+        assert first_trial.acquisition_source == second_trial.acquisition_source
+
+
+def test_get_best_params(dummy_initialized_objective_conformal_searcher__gbm_mse):
+    # Setup a simple trial with some sample configurations
+    searcher = dummy_initialized_objective_conformal_searcher__gbm_mse
+    config1 = {"param1": 1, "param2": 2}
+    config2 = {"param1": 3, "param2": 4}
+
+    trial1 = Trial(
+        iteration=0,
+        timestamp=pd.Timestamp.now(),
+        configuration=config1,
+        performance=10.0,
     )
+    trial2 = Trial(
+        iteration=1,
+        timestamp=pd.Timestamp.now(),
+        configuration=config2,
+        performance=5.0,
+    )
+
+    searcher.study.batch_append_trials([trial1, trial2])
+
+    # Test that get_best_params returns the config with the lowest performance
+    best_params = searcher.get_best_params()
+    assert best_params == config2
+
+
+def test_get_best_value(dummy_initialized_objective_conformal_searcher__gbm_mse):
+    # Setup a simple trial with some sample configurations
+    searcher = dummy_initialized_objective_conformal_searcher__gbm_mse
+    config1 = {"param1": 1, "param2": 2}
+    config2 = {"param1": 3, "param2": 4}
+
+    trial1 = Trial(
+        iteration=0,
+        timestamp=pd.Timestamp.now(),
+        configuration=config1,
+        performance=10.0,
+    )
+    trial2 = Trial(
+        iteration=1,
+        timestamp=pd.Timestamp.now(),
+        configuration=config2,
+        performance=5.0,
+    )
+
+    searcher.study.batch_append_trials([trial1, trial2])
+
+    # Test that get_best_value returns the lowest performance value
+    best_value = searcher.get_best_value()
+    assert best_value == 5.0
