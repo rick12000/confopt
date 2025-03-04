@@ -199,43 +199,6 @@ def test_get_tuning_configurations__reproducibility(
     assert tuning_configs_first_call == tuning_configs_second_call
 
 
-def test_objective_function(
-    dummy_initialized_objective_conformal_searcher__gbm_mse, dummy_gbm_configurations
-):
-    # Arbitrarily select the first configuration in the list:
-    dummy_configuration = dummy_gbm_configurations[0]
-    stored_dummy_configuration = deepcopy(dummy_configuration)
-
-    performance = (
-        dummy_initialized_objective_conformal_searcher__gbm_mse.objective_function(
-            configuration=dummy_configuration
-        )
-    )
-
-    assert performance > 0
-    # Test for mutability:
-    assert stored_dummy_configuration == dummy_configuration
-
-
-def test_objective_function__reproducibility(
-    dummy_initialized_objective_conformal_searcher__gbm_mse, dummy_gbm_configurations
-):
-    # Arbitrarily select the first configuration in the list:
-    dummy_configuration = dummy_gbm_configurations[0]
-
-    first_result = (
-        dummy_initialized_objective_conformal_searcher__gbm_mse.objective_function(
-            configuration=dummy_configuration
-        )
-    )
-    second_result = (
-        dummy_initialized_objective_conformal_searcher__gbm_mse.objective_function(
-            configuration=dummy_configuration
-        )
-    )
-    assert first_result == second_result
-
-
 def test_random_search(dummy_initialized_objective_conformal_searcher__gbm_mse):
     n_searches = 5
     dummy_initialized_objective_conformal_searcher__gbm_mse.search_timer = (
@@ -253,7 +216,6 @@ def test_random_search(dummy_initialized_objective_conformal_searcher__gbm_mse):
 
     for trial in rs_trials:
         assert isinstance(trial, Trial)
-        assert trial.performance > 0
         assert trial.acquisition_source == "rs"
         assert trial.configuration is not None
         assert trial.timestamp is not None

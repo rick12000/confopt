@@ -3,7 +3,6 @@ from typing import Dict
 
 import numpy as np
 import pytest
-from sklearn.ensemble import GradientBoostingRegressor
 
 from confopt.estimation import (
     MultiFitQuantileConformalSearcher,
@@ -30,6 +29,17 @@ DUMMY_PARAMETER_GRID: Dict = {
 DUMMY_GBM_PARAMETER_GRID: Dict = {
     "n_estimators": [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
     "learning_rate": [0.1, 0.2, 0.3, 0.4, 0.5],
+}
+
+# Define parameter search space:
+parameter_search_space = {
+    "param1": list(range(0, 100)),
+    "param2": list(range(0, 100)),
+    "param3": list(range(0, 100)),
+    "param4": list(range(0, 100)),
+    "param5": list(range(0, 100)),
+    "param6": list(range(0, 100)),
+    "param7": list(range(0, 100)),
 }
 
 
@@ -169,11 +179,6 @@ def dummy_initialized_objective_conformal_searcher__gbm_mse(
     def objective_function(configuration):
         generator = ObjectiveSurfaceGenerator(generator="rastrigin")
         return generator.predict(params=configuration)
-
-    objective_function = objective_function(
-        dummy_stationary_gaussian_dataset=dummy_stationary_gaussian_dataset,
-        model=GradientBoostingRegressor(random_state=DEFAULT_SEED),
-    )
 
     searcher = ObjectiveConformalSearcher(
         objective_function=objective_function,
