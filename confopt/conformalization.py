@@ -16,6 +16,48 @@ from confopt.estimation import (
 logger = logging.getLogger(__name__)
 
 
+class MedianEstimator:
+    """
+    Simple wrapper for a median estimator used in optimistic sampling.
+    """
+
+    def __init__(
+        self,
+        quantile_estimator_architecture: str,
+    ):
+        self.quantile_estimator_architecture = quantile_estimator_architecture
+        self.median_estimator = None
+
+    def fit(
+        self,
+        X: np.array,
+        y: np.array,
+        random_state: Optional[int] = None,
+    ):
+        """
+        Fit a median (50th percentile) estimator.
+        """
+        initialization_params = SEARCH_MODEL_DEFAULT_CONFIGURATIONS[
+            self.quantile_estimator_architecture
+        ].copy()
+
+        self.median_estimator = initialize_quantile_estimator(
+            estimator_architecture=self.quantile_estimator_architecture,
+            initialization_params=initialization_params,
+            pinball_loss_alpha=[0.5],
+            random_state=random_state,
+        )
+        self.median_estimator.fit(X, y)
+
+    def predict(self, X: np.array):
+        """
+        Predict median values.
+        """
+        if self.median_estimator is None:
+            raise ValueError("Median estimator is not initialized")
+        return np.array(self.median_estimator.predict(X)[:, 0])
+
+
 class LocallyWeightedConformalEstimator:
     """
     Base conformal estimator that fits point and variance estimators

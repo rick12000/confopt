@@ -9,7 +9,7 @@ from confopt.tuning import (
     process_and_split_estimation_data,
     normalize_estimation_data,
 )
-from confopt.estimation import (
+from confopt.acquisition import (
     LocallyWeightedConformalSearcher,
     UCBSampler,
 )

@@ -1,11 +1,9 @@
 # %%
-
-from sklearn.datasets import fetch_california_housing
 from confopt.tuning import ObjectiveConformalSearcher
 from confopt.acquisition import (
-    LocallyWeightedConformalSearcher,
+    # LocallyWeightedConformalSearcher,
     # MultiFitQuantileConformalSearcher,
-    # SingleFitQuantileConformalSearcher,
+    SingleFitQuantileConformalSearcher,
     UCBSampler,
     # ThompsonSampler,
 )
@@ -13,13 +11,6 @@ from confopt.acquisition import (
 import numpy as np
 from hashlib import sha256
 import random
-
-
-# Set up toy data:
-X, y = fetch_california_housing(return_X_y=True)
-split_idx = int(len(X) * 0.5)
-X_train, y_train = X[:split_idx, :], y[:split_idx]
-X_val, y_val = X[split_idx:, :], y[split_idx:]
 
 # Define parameter search space:
 parameter_search_space = {
@@ -100,19 +91,19 @@ for i in range(3):
     # sampler = ThompsonSampler(
     #     n_quantiles=4, adapter_framework=None, enable_optimistic_sampling=True
     # )
-    searcher = LocallyWeightedConformalSearcher(
-        point_estimator_architecture="kr",
-        variance_estimator_architecture="kr",
-        sampler=sampler,
-    )
+    # searcher = LocallyWeightedConformalSearcher(
+    #     point_estimator_architecture="kr",
+    #     variance_estimator_architecture="kr",
+    #     sampler=sampler,
+    # )
     # searcher = MultiFitQuantileConformalSearcher(
     #     quantile_estimator_architecture="qgbm",
     #     sampler=sampler,
     # )
-    # searcher = SingleFitQuantileConformalSearcher(
-    #     quantile_estimator_architecture="qknn",
-    #     sampler=sampler,
-    # )
+    searcher = SingleFitQuantileConformalSearcher(
+        quantile_estimator_architecture="qknn",
+        sampler=sampler,
+    )
 
     conformal_searcher.search(
         searcher=searcher,
