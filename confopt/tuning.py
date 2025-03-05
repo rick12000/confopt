@@ -11,7 +11,7 @@ import inspect
 from confopt.preprocessing import train_val_split, remove_iqr_outliers
 from confopt.utils import get_tuning_configurations, tabularize_configurations
 from confopt.tracking import Trial, Study, RuntimeTracker, derive_optimal_tuning_count
-from confopt.estimation import (
+from confopt.acquisition import (
     LocallyWeightedConformalSearcher,
     MultiFitQuantileConformalSearcher,
     UCBSampler,

@@ -2,7 +2,7 @@
 
 from sklearn.datasets import fetch_california_housing
 from confopt.tuning import ObjectiveConformalSearcher
-from confopt.estimation import (
+from confopt.acquisition import (
     LocallyWeightedConformalSearcher,
     # MultiFitQuantileConformalSearcher,
     # SingleFitQuantileConformalSearcher,
