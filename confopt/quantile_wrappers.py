@@ -95,7 +95,9 @@ class QuantileGBM(BaseQuantileEstimator):
         min_samples_split: Union[float, int],
         min_samples_leaf: Union[float, int],
         max_depth: int,
-        random_state: int,
+        subsample: float = 1.0,
+        max_features: Union[str, float, int] = None,
+        random_state: int = None,
     ):
         """
         Initializes the QuantileGBM with GBM-specific hyperparameters.
@@ -114,6 +116,10 @@ class QuantileGBM(BaseQuantileEstimator):
             Minimum number of samples required to be at a leaf node.
         max_depth: int
             Maximum depth of the individual regression estimators.
+        subsample: float
+            The fraction of samples to be used for fitting the individual base learners.
+        max_features: Union[str, float, int]
+            The number of features to consider when looking for the best split.
         random_state: int
             Seed for random number generation.
         """
@@ -123,9 +129,13 @@ class QuantileGBM(BaseQuantileEstimator):
             "min_samples_split": min_samples_split,
             "min_samples_leaf": min_samples_leaf,
             "max_depth": max_depth,
+            "subsample": subsample,
+            "max_features": max_features,
             "random_state": random_state,
             "loss": "quantile",
         }
+        # Remove None values
+        model_params = {k: v for k, v in model_params.items() if v is not None}
         super().__init__(
             quantiles=quantiles,
             model_class=GradientBoostingRegressor,
