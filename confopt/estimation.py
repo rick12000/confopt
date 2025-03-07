@@ -94,8 +94,7 @@ SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
         "bootstrap": [True, False],
     },
     QKNN_NAME: {
-        "n_neighbors": [3, 5, 7],
-        "weights": ["uniform", "distance"],
+        "n_neighbors": [3, 5, 7, 10],
     },
     QL_NAME: {
         "alpha": [0.1, 0.5, 1.0],
@@ -181,7 +180,6 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
     },
     QKNN_NAME: {
         "n_neighbors": 5,
-        "weights": "distance",
     },
     QL_NAME: {
         "alpha": 0.5,

@@ -419,17 +419,24 @@ class ObjectiveConformalSearcher:
                     )
                 elif max_iter is not None:
                     search_progress_bar.update(1)
+
+            def _dict_to_tuple(configuration: dict) -> tuple:
+                return tuple(sorted(configuration.items()))
+
+            searched_configs_set = {
+                _dict_to_tuple(c) for c in self.study.get_searched_configurations()
+            }
             searchable_configurations = [
-                configuration
-                for configuration in self.tuning_configurations
-                if configuration not in self.study.get_searched_configurations()
+                c
+                for c in self.tuning_configurations
+                if _dict_to_tuple(c) not in searched_configs_set
             ]
             (
                 tabularized_searchable_configurations,
                 tabularized_searched_configurations,
             ) = tabularize_configurations(
                 searchable_configurations=searchable_configurations,
-                searched_configurations=self.study.get_searched_configurations().copy(),
+                searched_configurations=self.study.get_searched_configurations(),
             )
             (
                 tabularized_searchable_configurations,
@@ -491,7 +498,7 @@ class ObjectiveConformalSearcher:
                         search_to_baseline_runtime_ratio=0.3,
                     )
                 elif searcher_tuning_framework == "fixed":
-                    search_model_tuning_count = 3
+                    search_model_tuning_count = 10
             else:
                 search_model_tuning_count = 0
 
