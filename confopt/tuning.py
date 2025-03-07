@@ -7,6 +7,7 @@ from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 from datetime import datetime
 import inspect
+import pandas as pd
 
 from confopt.preprocessing import train_val_split, remove_iqr_outliers
 from confopt.utils import get_tuning_configurations, tabularize_configurations
@@ -160,14 +161,24 @@ class ObjectiveConformalSearcher:
             Dictionary mapping parameter names to possible parameter
             values they can take.
         """
-
         self.objective_function = objective_function
         self._check_objective_function()
+
         self.search_space = search_space
         self.metric_optimization = metric_optimization
         self.n_candidate_configurations = n_candidate_configurations
 
         self.tuning_configurations = self._get_tuning_configurations()
+
+        # Pre-tabularize all configurations for efficiency
+        self.tabularized_configs_df = self._pre_tabularize_configurations()
+        self.tabularized_configs = self.tabularized_configs_df.to_numpy()
+
+        # Create efficient index tracking
+        self.available_indices = np.arange(len(self.tuning_configurations))
+        self.searched_indices = np.array([], dtype=int)
+        self.searched_configs = []
+        self.searched_performances = np.array([])
 
         self.study = Study()
 
@@ -207,6 +218,15 @@ class ObjectiveConformalSearcher:
         )
         return tuning_configurations
 
+    def _pre_tabularize_configurations(self) -> pd.DataFrame:
+        """Pre-tabularize all configurations to avoid repeated conversions."""
+        # Use tabularize_configurations with empty searched_configurations
+        tabularized_configs, _ = tabularize_configurations(
+            searchable_configurations=self.tuning_configurations,
+            searched_configurations=[],
+        )
+        return tabularized_configs
+
     def _random_search(
         self,
         n_searches: int,
@@ -244,24 +264,30 @@ class ObjectiveConformalSearcher:
             across configurations, in seconds.
         """
         rs_trials = []
-
         skipped_configuration_counter = 0
 
-        # Replace global random.shuffle with numpy permutation for reproducibility:
-        shuffled_tuning_configurations = np.random.permutation(
-            self.tuning_configurations
-        ).tolist()
-        randomly_sampled_configurations = shuffled_tuning_configurations[
-            : min(n_searches, len(self.tuning_configurations))
-        ]
+        # Use numpy for faster sampling without replacement
+        n_sample = min(n_searches, len(self.available_indices))
+        random_indices = np.random.choice(
+            self.available_indices, size=n_sample, replace=False
+        )
+
+        # Update available indices immediately
+        self.available_indices = np.setdiff1d(
+            self.available_indices, random_indices, assume_unique=True
+        )
+
+        # Store sampled configurations
+        randomly_sampled_indices = random_indices.tolist()
 
         if verbose:
-            randomly_sampled_configurations = tqdm(
-                randomly_sampled_configurations, desc="Random search: "
-            )
-        for config_idx, hyperparameter_configuration in enumerate(
-            randomly_sampled_configurations
-        ):
+            iterator = tqdm(randomly_sampled_indices, desc="Random search: ")
+        else:
+            iterator = randomly_sampled_indices
+
+        for config_idx, idx in enumerate(iterator):
+            hyperparameter_configuration = self.tuning_configurations[idx]
+
             training_time_tracker = RuntimeTracker()
             validation_performance = self.objective_function(
                 configuration=hyperparameter_configuration
@@ -274,6 +300,13 @@ class ObjectiveConformalSearcher:
                     "Obtained non-numerical performance, skipping configuration."
                 )
                 continue
+
+            # Track this as a searched index
+            self.searched_indices = np.append(self.searched_indices, idx)
+            self.searched_configs.append(hyperparameter_configuration)
+            self.searched_performances = np.append(
+                self.searched_performances, validation_performance
+            )
 
             rs_trials.append(
                 Trial(
@@ -306,6 +339,14 @@ class ObjectiveConformalSearcher:
         else:
             validation_split = 0.20
         return validation_split
+
+    def _dict_to_hashable(self, configuration: dict) -> tuple:
+        """Convert a configuration dictionary to a hashable representation efficiently.
+
+        Uses sorted frozensets for better hashing performance and memory usage.
+        """
+        # For small dictionaries, this is faster than complex transformations
+        return frozenset(configuration.items())
 
     def search(
         self,
@@ -396,12 +437,13 @@ class ObjectiveConformalSearcher:
             max_runtime=runtime_budget,
             verbose=verbose,
         )
-
         self.study.batch_append_trials(trials=rs_trials)
 
+        # Pre-allocate storage for efficiency
         search_model_tuning_count = 0
+        scaler = StandardScaler()
 
-        search_idx_range = range(len(self.tuning_configurations) - n_random_searches)
+        # Setup progress bar
         if verbose:
             if runtime_budget is not None:
                 search_progress_bar = tqdm(
@@ -411,7 +453,18 @@ class ObjectiveConformalSearcher:
                 search_progress_bar = tqdm(
                     total=max_iter - n_random_searches, desc="Conformal search: "
                 )
-        for config_idx in search_idx_range:
+
+        # Get initial searched configurations in tabular form once
+        tabularized_searched_configurations = self.tabularized_configs[
+            self.searched_indices
+        ]
+
+        # Main search loop
+        max_iterations = min(
+            len(self.available_indices),
+            len(self.tuning_configurations) - n_random_searches,
+        )
+        for config_idx in range(max_iterations):
             if verbose:
                 if runtime_budget is not None:
                     search_progress_bar.update(
@@ -420,37 +473,25 @@ class ObjectiveConformalSearcher:
                 elif max_iter is not None:
                     search_progress_bar.update(1)
 
-            def _dict_to_tuple(configuration: dict) -> tuple:
-                return tuple(sorted(configuration.items()))
+            # Check if we've exhausted all configurations
+            if len(self.available_indices) == 0:
+                logger.info("All configurations have been searched. Stopping early.")
+                break
 
-            searched_configs_set = {
-                _dict_to_tuple(c) for c in self.study.get_searched_configurations()
-            }
-            searchable_configurations = [
-                c
-                for c in self.tuning_configurations
-                if _dict_to_tuple(c) not in searched_configs_set
+            # Get tabularized searchable configurations more efficiently
+            # We can index the pre-tabularized configurations directly
+            tabularized_searchable_configurations = self.tabularized_configs[
+                self.available_indices
             ]
-            (
-                tabularized_searchable_configurations,
-                tabularized_searched_configurations,
-            ) = tabularize_configurations(
-                searchable_configurations=searchable_configurations,
-                searched_configurations=self.study.get_searched_configurations(),
-            )
-            (
-                tabularized_searchable_configurations,
-                tabularized_searched_configurations,
-            ) = (
-                tabularized_searchable_configurations.to_numpy(),
-                tabularized_searched_configurations.to_numpy(),
-            )
 
+            # Calculate validation split based on number of searched configurations
             validation_split = (
                 ObjectiveConformalSearcher._set_conformal_validation_split(
                     tabularized_searched_configurations
                 )
             )
+
+            # Process data and normalize
             (
                 X_train_conformal,
                 y_train_conformal,
@@ -458,21 +499,20 @@ class ObjectiveConformalSearcher:
                 y_val_conformal,
             ) = process_and_split_estimation_data(
                 searched_configurations=tabularized_searched_configurations,
-                searched_performances=np.array(self.study.get_searched_performances()),
+                searched_performances=self.searched_performances,
                 train_split=(1 - validation_split),
                 filter_outliers=False,
             )
 
-            (
-                X_train_conformal,
-                X_val_conformal,
-                tabularized_searchable_configurations,
-            ) = normalize_estimation_data(
-                training_searched_configurations=X_train_conformal,
-                validation_searched_configurations=X_val_conformal,
-                searchable_configurations=tabularized_searchable_configurations,
+            # Fit scaler on training data and transform all datasets
+            scaler.fit(X_train_conformal)
+            X_train_conformal = scaler.transform(X_train_conformal)
+            X_val_conformal = scaler.transform(X_val_conformal)
+            tabularized_searchable_configurations = scaler.transform(
+                tabularized_searchable_configurations
             )
 
+            # Handle model retraining
             hit_retraining_interval = config_idx % conformal_retraining_frequency == 0
             if config_idx == 0 or hit_retraining_interval:
                 runtime_tracker = RuntimeTracker()
@@ -482,13 +522,13 @@ class ObjectiveConformalSearcher:
                     X_val=X_val_conformal,
                     y_val=y_val_conformal,
                     tuning_iterations=search_model_tuning_count,
-                    # random_state=random_state,
                 )
                 searcher_runtime = runtime_tracker.return_runtime()
 
                 if config_idx == 0:
                     first_searcher_runtime = searcher_runtime
 
+            # Determine tuning count if necessary
             if searcher_tuning_framework is not None:
                 if searcher_tuning_framework == "runtime":
                     search_model_tuning_count = derive_optimal_tuning_count(
@@ -502,22 +542,30 @@ class ObjectiveConformalSearcher:
             else:
                 search_model_tuning_count = 0
 
+            # Get performance predictions for searchable configurations
             parameter_performance_bounds = searcher.predict(
                 X=tabularized_searchable_configurations
             )
 
-            minimal_idx = np.argmin(parameter_performance_bounds)
-            minimal_parameter = searchable_configurations[minimal_idx].copy()
+            # Find minimum performing configuration
+            minimal_local_idx = np.argmin(parameter_performance_bounds)
+            global_idx = self.available_indices[minimal_local_idx]
+            minimal_parameter = self.tuning_configurations[global_idx].copy()
+
+            # Evaluate with objective function
             validation_performance = self.objective_function(
                 configuration=minimal_parameter
             )
-            # TODO: fix this
+
+            # Update intervals if needed
             if hasattr(searcher.sampler, "adapter") or hasattr(
                 searcher.sampler, "adapters"
             ):
                 searcher.update_interval_width(
-                    sampled_idx=minimal_idx, sampled_performance=validation_performance
+                    sampled_idx=minimal_local_idx,
+                    sampled_performance=validation_performance,
                 )
+
             logger.debug(
                 f"Conformal search iter {config_idx} performance: {validation_performance}"
             )
@@ -525,12 +573,12 @@ class ObjectiveConformalSearcher:
             if np.isnan(validation_performance):
                 continue
 
-            # TODO: TEMP
+            # Handle UCBSampler breach calculation
             if isinstance(searcher.sampler, UCBSampler):
                 if (
-                    searcher.predictions_per_interval[0][minimal_idx][0]
+                    searcher.predictions_per_interval[0][minimal_local_idx][0]
                     <= validation_performance
-                    <= searcher.predictions_per_interval[0][minimal_idx][1]
+                    <= searcher.predictions_per_interval[0][minimal_local_idx][1]
                 ):
                     breach = 0
                 else:
@@ -539,8 +587,28 @@ class ObjectiveConformalSearcher:
                 breach = None
 
             estimator_error = searcher.primary_estimator_error
-            # TODO: END OF TEMP
 
+            # Update indices efficiently
+            # Remove the global index from available indices
+            self.available_indices = self.available_indices[
+                self.available_indices != global_idx
+            ]
+            # Add to searched indices
+            self.searched_indices = np.append(self.searched_indices, global_idx)
+            # Add the configuration and performance to our tracking
+            self.searched_configs.append(minimal_parameter)
+            self.searched_performances = np.append(
+                self.searched_performances, validation_performance
+            )
+            # Update the tabularized searched configurations for next iteration
+            tabularized_searched_configurations = np.vstack(
+                [
+                    tabularized_searched_configurations,
+                    self.tabularized_configs[global_idx : global_idx + 1],
+                ]
+            )
+
+            # Add trial to study
             self.study.append_trial(
                 Trial(
                     iteration=config_idx,
@@ -554,6 +622,7 @@ class ObjectiveConformalSearcher:
                 )
             )
 
+            # Check stopping criteria
             if runtime_budget is not None:
                 if self.search_timer.return_runtime() > runtime_budget:
                     if verbose:
