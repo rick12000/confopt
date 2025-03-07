@@ -148,6 +148,7 @@ class ObjectiveConformalSearcher:
         objective_function: callable,
         search_space: Dict,
         metric_optimization: Literal["direct", "inverse"],
+        n_candidate_configurations: int = 10000,
     ):
         """
         Create a conformal searcher instance.
@@ -164,6 +165,7 @@ class ObjectiveConformalSearcher:
         self._check_objective_function()
         self.search_space = search_space
         self.metric_optimization = metric_optimization
+        self.n_candidate_configurations = n_candidate_configurations
 
         self.tuning_configurations = self._get_tuning_configurations()
 
@@ -199,7 +201,9 @@ class ObjectiveConformalSearcher:
     def _get_tuning_configurations(self):
         logger.debug("Creating hyperparameter space...")
         tuning_configurations = get_tuning_configurations(
-            parameter_grid=self.search_space, n_configurations=10000, random_state=1234
+            parameter_grid=self.search_space,
+            n_configurations=self.n_candidate_configurations,
+            random_state=1234,
         )
         return tuning_configurations
 

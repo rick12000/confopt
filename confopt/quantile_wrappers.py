@@ -154,6 +154,12 @@ class QuantileLightGBM(BaseQuantileEstimator):
         learning_rate: float,
         n_estimators: int,
         max_depth: Optional[int] = None,
+        min_child_samples: Optional[int] = None,
+        subsample: Optional[float] = None,
+        colsample_bytree: Optional[float] = None,
+        reg_alpha: Optional[float] = None,
+        reg_lambda: Optional[float] = None,
+        min_child_weight: Optional[int] = None,
         random_state: Optional[int] = None,
         **kwargs,
     ):
@@ -170,6 +176,18 @@ class QuantileLightGBM(BaseQuantileEstimator):
             The number of boosting iterations (equivalent to max_iter).
         max_depth : int, optional
             The maximum depth of the individual trees.
+        min_child_samples : int, optional
+            Minimum number of data needed in a leaf.
+        subsample : float, optional
+            Fraction of samples used for training trees.
+        colsample_bytree : float, optional
+            Fraction of features used for training each tree.
+        reg_alpha : float, optional
+            L1 regularization term.
+        reg_lambda : float, optional
+            L2 regularization term.
+        min_child_weight : int, optional
+            Minimum sum of instance weight needed in a child.
         random_state : int, optional
             Seed for random number generation.
         **kwargs :
@@ -181,12 +199,20 @@ class QuantileLightGBM(BaseQuantileEstimator):
             "learning_rate": learning_rate,
             "n_estimators": n_estimators,
             "max_depth": max_depth,
+            "min_child_samples": min_child_samples,
+            "subsample": subsample,
+            "colsample_bytree": colsample_bytree,
+            "reg_alpha": reg_alpha,
+            "reg_lambda": reg_lambda,
+            "min_child_weight": min_child_weight,
             "random_state": random_state,
             "objective": "quantile",
             "metric": "quantile",
             "verbose": -1,
             **kwargs,
         }
+        # Clean None values from parameters
+        model_params = {k: v for k, v in model_params.items() if v is not None}
         super().__init__(
             quantiles=quantiles,
             model_class=LGBMRegressor,
@@ -411,7 +437,12 @@ class QuantileKNN(BaseSingleFitQuantileEstimator):
         """
         self.X_train = X
         self.y_train = y
-        self.nn_model = NearestNeighbors(n_neighbors=self.n_neighbors)
+
+        # Use ball_tree algorithm which is generally faster for high dimensions
+        # and specify a larger leaf size for better performance
+        self.nn_model = NearestNeighbors(
+            n_neighbors=self.n_neighbors, algorithm="ball_tree", leaf_size=40
+        )
         self.nn_model.fit(X)
 
     def _get_submodel_predictions(self, X: np.ndarray) -> np.ndarray:
