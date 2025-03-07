@@ -394,7 +394,15 @@ class QuantileForest(BaseSingleFitQuantileEstimator):
     individual sub-models (e.g., trees).
     """
 
-    def __init__(self, **rf_kwargs):
+    def __init__(
+        self,
+        n_estimators: int = 25,
+        max_depth: int = 5,
+        max_features: float = 0.8,
+        min_samples_split: int = 2,
+        bootstrap: bool = True,
+        **rf_kwargs,
+    ):
         """
         Parameters
         ----------
@@ -402,7 +410,14 @@ class QuantileForest(BaseSingleFitQuantileEstimator):
             Additional keyword arguments to pass to RandomForestRegressor.
         """
         super().__init__()
-        self.rf_kwargs = rf_kwargs
+        self.rf_kwargs = {
+            "n_estimators": n_estimators,
+            "max_depth": max_depth,
+            "max_features": max_features,
+            "min_samples_split": min_samples_split,
+            "bootstrap": bootstrap,
+        }
+        super().__init__()
 
     def fit(self, X: np.ndarray, y: np.ndarray):
         """

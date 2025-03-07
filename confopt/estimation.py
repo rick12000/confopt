@@ -73,7 +73,13 @@ SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
     },
     GP_NAME: {"kernel": [RBF(), RationalQuadratic()]},
     KR_NAME: {"alpha": [0.001, 0.1, 1, 10], "kernel": ["linear", "rbf", "polynomial"]},
-    QRF_NAME: {"n_estimators": [25, 50, 100, 150, 200]},
+    QRF_NAME: {
+        "n_estimators": [10, 25, 50],
+        "max_depth": [3, 5],
+        "max_features": [0.6, 0.8],
+        "min_samples_split": [2, 3],
+        "bootstrap": [True, False],
+    },
     QKNN_NAME: {"n_neighbors": [5]},
     QL_NAME: {
         "alpha": [0.01, 0.1, 1.0],
@@ -133,7 +139,13 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
     },
     GP_NAME: {"kernel": RBF()},
     KR_NAME: {"alpha": 0.1, "kernel": "rbf"},
-    QRF_NAME: {"n_estimators": 50},
+    QRF_NAME: {
+        "n_estimators": 25,
+        "max_depth": 5,
+        "max_features": 0.8,
+        "min_samples_split": 2,
+        "bootstrap": True,
+    },
     QKNN_NAME: {"n_neighbors": 5},
     QL_NAME: {
         "alpha": 0.1,
