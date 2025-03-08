@@ -1,191 +1,220 @@
 import logging
 import random
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Any
+import math
 
 import numpy as np
 import pandas as pd
+from confopt.ranges import IntRange, FloatRange, CategoricalRange, ParameterRange
 
 logger = logging.getLogger(__name__)
 
 
 def get_tuning_configurations(
-    parameter_grid: Dict, n_configurations: int, random_state: Optional[int] = None
+    parameter_grid: Dict[str, ParameterRange],
+    n_configurations: int,
+    random_state: Optional[int] = None,
+    warm_start_configs: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict]:
     """
     Randomly sample list of unique hyperparameter configurations.
 
-    Each configuration is constructed from a broader parameter grid of
-    possible parameter values.
+    Each configuration is constructed from parameter ranges defined in the parameter grid.
+    If warm start configurations are provided, they are included in the output.
 
     Parameters
     ----------
     parameter_grid :
-        Dictionary of parameter names to possible ranged parameter values.
+        Dictionary of parameter names to their range definitions.
     n_configurations :
-        Number of desired configurations to randomly construct from the
-        raw parameter grid.
+        Number of desired configurations to randomly construct.
     random_state :
         Random seed.
+    warm_start_configs :
+        Optional list of pre-defined configurations to include in the output.
 
     Returns
     -------
     configurations :
-        Unique randomly constructed hyperparameter configurations.
+        Unique randomly constructed hyperparameter configurations including warm starts.
     """
-    random.seed(random_state)
+    if random_state is not None:
+        random.seed(random_state)
+        np.random.seed(random_state)
 
-    configurations_set = set()
-    configurations = []
+    # Initialize with warm start configurations if provided
+    if warm_start_configs:
+        configurations = warm_start_configs.copy()
+        # Create a set of hashable configurations for deduplication
+        configurations_set = {
+            tuple(
+                sorted(
+                    (k, str(v) if isinstance(v, (list, dict, set)) else v)
+                    for k, v in config.items()
+                )
+            )
+            for config in warm_start_configs
+        }
+    else:
+        configurations = []
+        configurations_set = set()
 
-    for _ in range(n_configurations):
+    # Calculate how many additional configurations we need
+    n_additional = max(0, n_configurations - len(configurations))
+
+    attempts = 0
+    max_attempts = n_additional * 10  # Prevent infinite loops
+
+    while len(configurations) < n_configurations and attempts < max_attempts:
         configuration = {}
-        for parameter_name in parameter_grid:
-            parameter_value = random.choice(parameter_grid[parameter_name])
-            configuration[parameter_name] = parameter_value
+        for parameter_name, parameter_range in parameter_grid.items():
+            if isinstance(parameter_range, IntRange):
+                # Sample integer from range
+                value = random.randint(
+                    parameter_range.min_value, parameter_range.max_value
+                )
+            elif isinstance(parameter_range, FloatRange):
+                # Sample float from range, with optional log scaling
+                if parameter_range.log_scale:
+                    log_min = math.log(max(parameter_range.min_value, 1e-10))
+                    log_max = math.log(parameter_range.max_value)
+                    value = math.exp(random.uniform(log_min, log_max))
+                else:
+                    value = random.uniform(
+                        parameter_range.min_value, parameter_range.max_value
+                    )
+            elif isinstance(parameter_range, CategoricalRange):
+                # Sample from categorical choices
+                value = random.choice(parameter_range.choices)
+            else:
+                raise TypeError(
+                    f"Unsupported parameter range type: {type(parameter_range)}"
+                )
 
-        # Convert the configuration dictionary to a tuple of sorted items
-        configuration_tuple = tuple(sorted(configuration.items()))
+            configuration[parameter_name] = value
 
-        if configuration_tuple not in configurations_set:
-            configurations_set.add(configuration_tuple)
+        # Convert configuration to hashable representation for deduplication
+        config_tuple = tuple(
+            sorted(
+                (k, str(v) if isinstance(v, (list, dict, set)) else v)
+                for k, v in configuration.items()
+            )
+        )
+
+        if config_tuple not in configurations_set:
+            configurations_set.add(config_tuple)
             configurations.append(configuration)
+
+        attempts += 1
+
+    if len(configurations) < n_configurations:
+        logger.warning(
+            f"Could only generate {len(configurations)} unique configurations "
+            f"out of {n_configurations} requested after {max_attempts} attempts."
+        )
 
     return configurations
 
 
-def tabularize_configurations(
-    searchable_configurations: List[Dict], searched_configurations: List[Dict]
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+class ConfigurationEncoder:
     """
-    Transform list of configuration dictionaries into tabular training data.
+    Handles encoding and transformation of hyperparameter configurations.
 
-    Configurations are type transformed, one hot encoded and wrapped in a
-    pandas dataframe to enable regression tasks.
+    Maintains mappings for categorical features to ensure consistent one-hot encoding.
+    """
+
+    def __init__(self):
+        self.categorical_mappings = {}  # {param_name: {value: column_index}}
+        self.column_names = []
+
+    def fit(self, configurations: List[Dict]) -> None:
+        """Build mappings from a list of configurations."""
+        # First pass: identify categorical parameters and their unique values
+        categorical_values = {}
+
+        for config in configurations:
+            for param_name, value in config.items():
+                if not isinstance(value, (int, float, bool)):
+                    if param_name not in categorical_values:
+                        categorical_values[param_name] = set()
+                    categorical_values[param_name].add(value)
+
+        # Create mappings for categorical features
+        col_idx = 0
+        for param_name in sorted(configurations[0].keys()):
+            if param_name in categorical_values:
+                # Categorical parameter
+                self.categorical_mappings[param_name] = {}
+                sorted_values = sorted(categorical_values[param_name], key=str)
+                for value in sorted_values:
+                    column_name = f"{param_name}_{value}"
+                    self.categorical_mappings[param_name][value] = col_idx
+                    self.column_names.append(column_name)
+                    col_idx += 1
+            else:
+                # Numeric parameter
+                self.column_names.append(param_name)
+                col_idx += 1
+
+    def transform(self, configurations: List[Dict]) -> pd.DataFrame:
+        """Transform configurations into a tabular format with proper encoding."""
+        if not self.column_names:
+            self.fit(configurations)
+
+        n_samples = len(configurations)
+        n_features = len(self.column_names)
+        X = np.zeros((n_samples, n_features))
+
+        # Fill in the feature matrix
+        for i, config in enumerate(configurations):
+            col_idx = 0
+            for param_name in sorted(config.keys()):
+                value = config[param_name]
+
+                if param_name in self.categorical_mappings:
+                    # Handle categorical parameter with one-hot encoding
+                    if value in self.categorical_mappings[param_name]:
+                        one_hot_idx = self.categorical_mappings[param_name][value]
+                        X[i, one_hot_idx] = 1
+                    else:
+                        # Handle unseen categorical value - could raise error or skip
+                        logger.warning(
+                            f"Unseen categorical value {value} for parameter {param_name}"
+                        )
+
+                    # Skip ahead by the number of categories for this parameter
+                    col_idx += len(self.categorical_mappings[param_name])
+                else:
+                    # Handle numeric parameter
+                    X[i, col_idx] = value
+                    col_idx += 1
+
+        return pd.DataFrame(X, columns=self.column_names)
+
+
+def tabularize_configurations(configurations: List[Dict]) -> pd.DataFrame:
+    """
+    Transform list of configuration dictionaries into tabular format.
+
+    Configurations are encoded with numeric parameters preserved and
+    categorical parameters one-hot encoded consistently.
 
     Parameters
     ----------
-    searchable_configurations :
-        List of hyperparameter configurations to tabularize.
-    searched_configurations :
+    configurations :
         List of hyperparameter configurations to tabularize.
 
     Returns
     -------
     tabularized_configurations :
-        Tabularized hyperparameter configurations (hyperparameter names
-        as columns and hyperparameter values as rows).
+        Tabularized hyperparameter configurations.
     """
-    configurations = searchable_configurations + searched_configurations
-
     logger.debug(f"Received {len(configurations)} configurations to tabularize.")
 
-    # Get maximum length of any list or tuple parameter in configuration (this is
-    # important for configuration inputs where lists and tuples can be of variable
-    # length depending on the parameter values passed):
-    max_tuple_or_list_lens_per_parameter = {}
-    for configuration in configurations:
-        for parameter_name, parameter in configuration.items():
-            if isinstance(parameter, (tuple, list)):
-                if parameter_name not in max_tuple_or_list_lens_per_parameter:
-                    max_tuple_or_list_lens_per_parameter[parameter_name] = len(
-                        parameter
-                    )
-                elif (
-                    len(parameter)
-                    > max_tuple_or_list_lens_per_parameter[parameter_name]
-                ):
-                    max_tuple_or_list_lens_per_parameter[parameter_name] = len(
-                        parameter
-                    )
+    if not configurations:
+        return pd.DataFrame()
 
-    # Create new configurations with flattened list/tuple parameter inputs:
-    expanded_configurations = []
-    for configuration in configurations:
-        expanded_record = {}
-        for parameter_name, parameter in configuration.items():
-            if isinstance(parameter, (tuple, list)):
-                for i in range(max_tuple_or_list_lens_per_parameter[parameter_name]):
-                    if i < len(parameter):
-                        expanded_record[f"{parameter_name}_{i}"] = parameter[i]
-                    else:
-                        # Below assumes that missing dimensions are equivalent to 0 entries
-                        # (This works for eg. for the tuple layer sizes of an MLPRegressor)
-                        expanded_record[f"{parameter_name}_{i}"] = 0
-            else:
-                expanded_record[parameter_name] = parameter
-
-        expanded_configurations.append(expanded_record)
-
-    logger.debug(
-        f"Expanded configuration list's first element: {expanded_configurations[0]}"
-    )
-
-    # NOTE: None values are converted to np.nan during pandas ingestion.
-    # NOTE: Order of list of dicts must be preserved during pandas ingestion, if
-    # this ever changes in future versions, return to this:
-    tabularized_configurations = pd.DataFrame(expanded_configurations).replace(
-        {np.nan: None}
-    )
-
-    categorical_columns = []
-    column_types = list(tabularized_configurations.dtypes)
-    # Loop through each column type in the tabular data and wherever an
-    # object column is present (due to None parameter values being mixed
-    # in with other types) check whether the column is a None + str mix
-    # or a None + float/int mix.
-    # For inference purposes, the None values in an otherwise str filled
-    # column should be considered another category, and are thus set to
-    # "None", while in the None + numericals case they are assumed to mean
-    # zero (this last conversion is not accurate for all parameters,
-    # eg. the maximum number of leaves in a random forest algorithm,
-    # TODO: consider turning the None + numerical columns to categoricals).
-    for original_column_idx, column_type in enumerate(column_types):
-        if str(column_type) == "object":
-            types = []
-            column_name = tabularized_configurations.columns[original_column_idx]
-            for element in list(tabularized_configurations[column_name]):
-                if type(element) not in types:
-                    types.append(type(element))
-            if str in types:
-                tabularized_configurations[column_name] = (
-                    tabularized_configurations[column_name]
-                    # .infer_objects(copy=False)
-                    .fillna("None")
-                )
-                categorical_columns.append(column_name)
-            elif float in types or int in types:
-                tabularized_configurations[column_name] = (
-                    tabularized_configurations[column_name]
-                    # .infer_objects(copy=False)
-                    .fillna(0)
-                )
-            else:
-                raise ValueError(
-                    "Type other than 'str', 'int', 'float' was detected in 'None' handling."
-                )
-
-    # One hot encode categorical columns (parameters) in tabularized dataset:
-    for column_name in categorical_columns:
-        tabularized_configurations = pd.concat(
-            [
-                tabularized_configurations,
-                pd.get_dummies(tabularized_configurations[column_name]),
-            ],
-            axis=1,
-        )
-        tabularized_configurations = tabularized_configurations.drop(
-            [column_name], axis=1
-        )
-
-    logger.debug(
-        f"Tabularized configuration dataframe shape: {tabularized_configurations.shape}"
-    )
-
-    tabularized_searchable_configurations = tabularized_configurations.iloc[
-        : len(searchable_configurations), :
-    ]
-    tabularized_searched_configurations = tabularized_configurations.iloc[
-        len(searchable_configurations) :, :
-    ]
-
-    return tabularized_searchable_configurations, tabularized_searched_configurations
+    # Use the ConfigurationEncoder to process configurations
+    encoder = ConfigurationEncoder()
+    encoder.fit(configurations)
+    return encoder.transform(configurations)

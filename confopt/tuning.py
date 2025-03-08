@@ -1,13 +1,12 @@
 import logging
 import random
-from typing import Optional, Dict, Tuple, get_type_hints, Literal, Union
+from typing import Optional, Dict, Tuple, get_type_hints, Literal, Union, List
 
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 from datetime import datetime
 import inspect
-import pandas as pd
 
 from confopt.preprocessing import train_val_split, remove_iqr_outliers
 from confopt.utils import get_tuning_configurations, tabularize_configurations
@@ -17,6 +16,7 @@ from confopt.acquisition import (
     MultiFitQuantileConformalSearcher,
     UCBSampler,
 )
+from confopt.ranges import ParameterRange
 
 logger = logging.getLogger(__name__)
 
@@ -147,19 +147,31 @@ class ObjectiveConformalSearcher:
     def __init__(
         self,
         objective_function: callable,
-        search_space: Dict,
+        search_space: Dict[str, ParameterRange],
         metric_optimization: Literal["direct", "inverse"],
         n_candidate_configurations: int = 10000,
+        warm_start_configurations: Optional[List[Tuple[Dict, float]]] = None,
     ):
         """
         Create a conformal searcher instance.
 
         Parameters
         ----------
-        # TODO
-        search_space :
-            Dictionary mapping parameter names to possible parameter
-            values they can take.
+        objective_function : callable
+            Function that evaluates a configuration and returns a performance metric.
+        search_space : Dict[str, ParameterRange]
+            Dictionary mapping parameter names to their range definitions:
+            - IntRange: For integer parameters with min/max values
+            - FloatRange: For float parameters with min/max values
+            - CategoricalRange: For categorical parameters with a list of choices
+        metric_optimization : Literal["direct", "inverse"]
+            Whether the metric should be maximized ("direct") or minimized ("inverse").
+        n_candidate_configurations : int, default=10000
+            Number of candidate configurations to generate for the search space.
+        warm_start_configurations : List[Tuple[Dict, float]], optional
+            List of tuples where each tuple contains a configuration dictionary
+            and its corresponding performance value.
+            These configurations will be added to the search history without re-evaluation.
         """
         self.objective_function = objective_function
         self._check_objective_function()
@@ -168,19 +180,32 @@ class ObjectiveConformalSearcher:
         self.metric_optimization = metric_optimization
         self.n_candidate_configurations = n_candidate_configurations
 
+        # Extract warm start configs if provided
+        self.warm_start_configs = []
+        self.warm_start_performances = []
+        if warm_start_configurations:
+            for config, perf in warm_start_configurations:
+                self.warm_start_configs.append(config)
+                self.warm_start_performances.append(perf)
+
+        # Generate tuning configurations including warm starts
         self.tuning_configurations = self._get_tuning_configurations()
 
         # Pre-tabularize all configurations for efficiency
-        self.tabularized_configs_df = self._pre_tabularize_configurations()
-        self.tabularized_configs = self.tabularized_configs_df.to_numpy()
+        self.tabularized_configurations = tabularize_configurations(
+            configurations=self.tuning_configurations,
+        ).to_numpy()
 
         # Create efficient index tracking
         self.available_indices = np.arange(len(self.tuning_configurations))
         self.searched_indices = np.array([], dtype=int)
-        self.searched_configs = []
         self.searched_performances = np.array([])
 
         self.study = Study()
+
+        # Process warm start configurations
+        if warm_start_configurations:
+            self._process_warm_start_configurations()
 
     def _check_objective_function(self):
         signature = inspect.signature(self.objective_function)
@@ -215,17 +240,9 @@ class ObjectiveConformalSearcher:
             parameter_grid=self.search_space,
             n_configurations=self.n_candidate_configurations,
             random_state=1234,
+            warm_start_configs=self.warm_start_configs,
         )
         return tuning_configurations
-
-    def _pre_tabularize_configurations(self) -> pd.DataFrame:
-        """Pre-tabularize all configurations to avoid repeated conversions."""
-        # Use tabularize_configurations with empty searched_configurations
-        tabularized_configs, _ = tabularize_configurations(
-            searchable_configurations=self.tuning_configurations,
-            searched_configurations=[],
-        )
-        return tabularized_configs
 
     def _random_search(
         self,
@@ -303,7 +320,6 @@ class ObjectiveConformalSearcher:
 
             # Track this as a searched index
             self.searched_indices = np.append(self.searched_indices, idx)
-            self.searched_configs.append(hyperparameter_configuration)
             self.searched_performances = np.append(
                 self.searched_performances, validation_performance
             )
@@ -347,6 +363,77 @@ class ObjectiveConformalSearcher:
         """
         # For small dictionaries, this is faster than complex transformations
         return frozenset(configuration.items())
+
+    def _process_warm_start_configurations(self):
+        """
+        Process warm start configurations and add them to the search history.
+        This method assumes warm start configurations have been included in
+        tuning_configurations during initialization.
+        """
+        if not self.warm_start_configs:
+            return
+
+        # Find the indices of warm start configurations in tuning_configurations
+        warm_start_trials = []
+        warm_start_indices = []
+
+        # Create a function to compare configurations
+        def configs_equal(config1, config2):
+            if set(config1.keys()) != set(config2.keys()):
+                return False
+            for key in config1:
+                if config1[key] != config2[key]:
+                    return False
+            return True
+
+        # Identify each warm start configuration in tuning_configurations
+        for i, (config, performance) in enumerate(
+            zip(self.warm_start_configs, self.warm_start_performances)
+        ):
+            # Find the index of this warm start config in tuning_configurations
+            for idx, tuning_config in enumerate(self.tuning_configurations):
+                if configs_equal(config, tuning_config):
+                    warm_start_indices.append(idx)
+
+                    # Create a trial for this configuration
+                    warm_start_trials.append(
+                        Trial(
+                            iteration=i,
+                            timestamp=datetime.now(),
+                            configuration=config.copy(),
+                            performance=performance,
+                            acquisition_source="warm_start",
+                        )
+                    )
+                    break
+            else:
+                logger.warning(
+                    f"Could not locate warm start configuration in tuning configurations: {config}"
+                )
+
+        # Convert to numpy array for efficient operations
+        warm_start_indices = np.array(warm_start_indices)
+        warm_start_perfs = np.array(
+            self.warm_start_performances[: len(warm_start_indices)]
+        )
+
+        # Update indices and performances
+        self.searched_indices = np.append(self.searched_indices, warm_start_indices)
+        self.searched_performances = np.append(
+            self.searched_performances, warm_start_perfs
+        )
+
+        # Remove these configurations from available indices
+        self.available_indices = np.setdiff1d(
+            self.available_indices, warm_start_indices, assume_unique=True
+        )
+
+        # Add trials to study
+        self.study.batch_append_trials(trials=warm_start_trials)
+
+        logger.debug(
+            f"Added {len(warm_start_trials)} warm start configurations to search history"
+        )
 
     def search(
         self,
@@ -455,7 +542,7 @@ class ObjectiveConformalSearcher:
                 )
 
         # Get initial searched configurations in tabular form once
-        tabularized_searched_configurations = self.tabularized_configs[
+        tabularized_searched_configurations = self.tabularized_configurations[
             self.searched_indices
         ]
 
@@ -480,7 +567,7 @@ class ObjectiveConformalSearcher:
 
             # Get tabularized searchable configurations more efficiently
             # We can index the pre-tabularized configurations directly
-            tabularized_searchable_configurations = self.tabularized_configs[
+            tabularized_searchable_configurations = self.tabularized_configurations[
                 self.available_indices
             ]
 
@@ -595,8 +682,6 @@ class ObjectiveConformalSearcher:
             ]
             # Add to searched indices
             self.searched_indices = np.append(self.searched_indices, global_idx)
-            # Add the configuration and performance to our tracking
-            self.searched_configs.append(minimal_parameter)
             self.searched_performances = np.append(
                 self.searched_performances, validation_performance
             )
@@ -604,7 +689,7 @@ class ObjectiveConformalSearcher:
             tabularized_searched_configurations = np.vstack(
                 [
                     tabularized_searched_configurations,
-                    self.tabularized_configs[global_idx : global_idx + 1],
+                    self.tabularized_configurations[global_idx : global_idx + 1],
                 ]
             )
 
