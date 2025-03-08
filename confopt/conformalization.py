@@ -500,10 +500,10 @@ class MultiFitQuantileConformalEstimator:
                 self.nonconformity_scores,
                 self.interval.upper_quantile - self.interval.lower_quantile,
             )
-            lower_interval_bound = np.array(prediction[:, 0]) - score
-            upper_interval_bound = np.array(prediction[:, 1]) + score
+            lower_interval = np.array(prediction[:, 0]) - score
+            upper_interval = np.array(prediction[:, 1]) + score
         else:
-            lower_interval_bound = np.array(prediction[:, 0])
-            upper_interval_bound = np.array(prediction[:, 1])
+            lower_interval = np.array(prediction[:, 0])
+            upper_interval = np.array(prediction[:, 1])
 
-        return lower_interval_bound, upper_interval_bound
+        return lower_interval, upper_interval

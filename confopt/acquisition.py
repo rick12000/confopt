@@ -19,17 +19,16 @@ class UCBSampler:
     def __init__(
         self,
         beta_decay: str = "logarithmic_decay",
-        beta: float = 1,
         c: float = 1,
-        interval_width: float = 0.2,
+        interval_width: float = 0.8,
         adapter_framework: Optional[str] = None,
     ):
         self.beta_decay = beta_decay
-        self.beta = beta
         self.c = c
         self.interval_width = interval_width
         self.alpha = 1 - interval_width
         self.t = 1
+        self.beta = 1
 
         # Initialize adapter if specified
         self.adapter = self._initialize_adapter(adapter_framework)
@@ -66,6 +65,60 @@ class UCBSampler:
         elif self.beta_decay == "logarithmic_growth":
             self.beta = 2 * np.log(self.t + 1)
         self.t += 1
+
+    def update_interval_width(self, breaches: list[int]):
+        if isinstance(self.adapter, ACI):
+            if len(breaches) != 1:
+                raise ValueError("ACI adapter requires a single breach indicator.")
+            self.alpha = self.adapter.update(breach_indicator=breaches[0])
+            self.quantiles = self._calculate_quantiles()
+        elif isinstance(self.adapter, DtACI):
+            self.alpha = self.adapter.update(breach_indicators=breaches)
+            self.quantiles = self._calculate_quantiles()
+
+
+class PessimisticLowerBoundSampler:
+    def __init__(
+        self,
+        interval_width: float = 0.8,
+        adapter_framework: Optional[str] = None,
+    ):
+        self.interval_width = interval_width
+        self.alpha = 1 - interval_width
+
+        # Initialize adapter if specified
+        self.adapter = self._initialize_adapter(adapter_framework)
+        self.quantiles = self._calculate_quantiles()
+
+    def _initialize_adapter(self, framework: Optional[str]):
+        if framework == "ACI":
+            adapter = ACI(alpha=self.alpha)
+        elif framework == "DtACI":
+            adapter = DtACI(alpha=self.alpha)
+            self.expert_alphas = adapter.alpha_t_values
+        else:
+            adapter = None
+        return adapter
+
+    def _calculate_quantiles(self) -> QuantileInterval:
+        return QuantileInterval(
+            lower_quantile=self.alpha / 2, upper_quantile=1 - (self.alpha / 2)
+        )
+
+    def fetch_alpha(self) -> float:
+        return self.alpha
+
+    def fetch_expert_alphas(self) -> List[float]:
+        if hasattr(self, "expert_alphas"):
+            return self.expert_alphas
+        return [self.alpha]
+
+    def fetch_interval(self) -> QuantileInterval:
+        return self.quantiles
+
+    def update_exploration_step(self):
+        # No exploration parameter to update for pessimistic sampler
+        pass
 
     def update_interval_width(self, breaches: list[int]):
         if isinstance(self.adapter, ACI):
@@ -149,7 +202,7 @@ class LocallyWeightedConformalSearcher:
         self,
         point_estimator_architecture: str,
         variance_estimator_architecture: str,
-        sampler: Union[UCBSampler, ThompsonSampler],
+        sampler: Union[UCBSampler, ThompsonSampler, PessimisticLowerBoundSampler],
     ):
         self.conformal_estimator = LocallyWeightedConformalEstimator(
             point_estimator_architecture=point_estimator_architecture,
@@ -190,17 +243,25 @@ class LocallyWeightedConformalSearcher:
             return self._predict_with_ucb(X)
         elif isinstance(self.sampler, ThompsonSampler):
             return self._predict_with_thompson(X)
+        elif isinstance(self.sampler, PessimisticLowerBoundSampler):
+            return self._predict_with_pessimistic_lower_bound(X)
 
     def _predict_with_ucb(self, X: np.array):
         """
         Predict using UCB sampling strategy.
         """
+        point_estimate = self.conformal_estimator.pe_estimator.predict(X=X)
         if isinstance(self.sampler.adapter, DtACI):
             self.predictions_per_interval = []
             for alpha in self.sampler.fetch_expert_alphas():
                 lower_bound, upper_bound = self.conformal_estimator.predict_interval(
-                    X=X, alpha=alpha, beta=self.sampler.beta
+                    X=X, alpha=alpha
                 )
+                # Apply beta scaling for exploration to the lower bound
+                lower_bound = point_estimate + self.sampler.beta * (
+                    upper_bound - lower_bound
+                )
+
                 self.predictions_per_interval.append(
                     np.hstack([lower_bound, upper_bound])
                 )
@@ -210,8 +271,13 @@ class LocallyWeightedConformalSearcher:
         else:
             alpha = self.sampler.fetch_alpha()
             lower_bound, upper_bound = self.conformal_estimator.predict_interval(
-                X=X, alpha=alpha, beta=self.sampler.beta
+                X=X, alpha=alpha
             )
+            # Apply beta scaling for exploration to the lower bound
+            lower_bound = point_estimate + self.sampler.beta * (
+                upper_bound - lower_bound
+            )
+
             self.predictions_per_interval = [np.hstack([lower_bound, upper_bound])]
             result_lower_bound = lower_bound
 
@@ -242,6 +308,32 @@ class LocallyWeightedConformalSearcher:
 
         return lower_bound
 
+    def _predict_with_pessimistic_lower_bound(self, X: np.array):
+        """
+        Predict using Pessimistic Lower Bound sampling strategy.
+        """
+        if isinstance(self.sampler.adapter, DtACI):
+            self.predictions_per_interval = []
+            for alpha in self.sampler.fetch_expert_alphas():
+                lower_bound, upper_bound = self.conformal_estimator.predict_interval(
+                    X=X, alpha=alpha
+                )
+                self.predictions_per_interval.append(
+                    np.hstack([lower_bound, upper_bound])
+                )
+                # Use the current best alpha as the bound
+                if self.sampler.fetch_alpha() == alpha:
+                    result_lower_bound = lower_bound
+        else:
+            alpha = self.sampler.fetch_alpha()
+            lower_bound, upper_bound = self.conformal_estimator.predict_interval(
+                X=X, alpha=alpha
+            )
+            self.predictions_per_interval = [np.hstack([lower_bound, upper_bound])]
+            result_lower_bound = lower_bound
+
+        return result_lower_bound
+
     def update_interval_width(self, sampled_idx: int, sampled_performance: float):
         breaches = []
         for predictions in self.predictions_per_interval:
@@ -269,7 +361,7 @@ class SingleFitQuantileConformalSearcher:
     def __init__(
         self,
         quantile_estimator_architecture: Literal["qknn", "qrf"],
-        sampler: Union[UCBSampler, ThompsonSampler],
+        sampler: Union[UCBSampler, ThompsonSampler, PessimisticLowerBoundSampler],
         n_pre_conformal_trials: int = 20,
     ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
@@ -342,6 +434,8 @@ class SingleFitQuantileConformalSearcher:
             return self._predict_with_ucb(X)
         elif isinstance(self.sampler, ThompsonSampler):
             return self._predict_with_thompson(X)
+        elif isinstance(self.sampler, PessimisticLowerBoundSampler):
+            return self._predict_with_pessimistic_lower_bound(X)
 
     def _predict_with_ucb(self, X: np.array):
         """
@@ -411,6 +505,26 @@ class SingleFitQuantileConformalSearcher:
 
         return lower_bounds
 
+    def _predict_with_pessimistic_lower_bound(self, X: np.array):
+        """
+        Predict using Pessimistic Lower Bound sampling strategy with a single estimator.
+        """
+        # Get the interval from the pessimistic sampler
+        interval = self.sampler.fetch_interval()
+
+        # Predict interval using the single estimator
+        (
+            lower_interval_bound,
+            upper_interval_bound,
+        ) = self.conformal_estimator.predict_interval(X=X, interval=interval)
+
+        # Store predictions for later breach checking
+        self.predictions_per_interval = [
+            np.column_stack((lower_interval_bound, upper_interval_bound))
+        ]
+
+        return lower_interval_bound
+
     def update_interval_width(self, sampled_idx: int, sampled_performance: float):
         """
         Update interval width based on performance.
@@ -439,7 +553,7 @@ class MultiFitQuantileConformalSearcher:
     def __init__(
         self,
         quantile_estimator_architecture: str,
-        sampler: Union[UCBSampler, ThompsonSampler],
+        sampler: Union[UCBSampler, ThompsonSampler, PessimisticLowerBoundSampler],
         n_pre_conformal_trials: int = 20,
     ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
@@ -516,6 +630,8 @@ class MultiFitQuantileConformalSearcher:
             return self._predict_with_ucb(X)
         elif isinstance(self.sampler, ThompsonSampler):
             return self._predict_with_thompson(X)
+        elif isinstance(self.sampler, PessimisticLowerBoundSampler):
+            return self._predict_with_pessimistic_lower_bound(X)
 
     def _predict_with_ucb(self, X: np.array):
         """
@@ -575,6 +691,22 @@ class MultiFitQuantileConformalSearcher:
                 lower_bounds[i] = lower_bound_value
 
         return lower_bounds
+
+    def _predict_with_pessimistic_lower_bound(self, X: np.array):
+        """
+        Predict using Pessimistic Lower Bound sampling strategy.
+        """
+        # With pessimistic lower bound we use only one estimator
+        lower_interval_bound, upper_interval_bound = self.conformal_estimators[
+            0
+        ].predict_interval(X=X)
+
+        # Store predictions for later breach checking
+        self.predictions_per_interval = [
+            np.column_stack((lower_interval_bound, upper_interval_bound))
+        ]
+
+        return lower_interval_bound
 
     def update_interval_width(self, sampled_idx: int, sampled_performance: float):
         """
