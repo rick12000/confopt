@@ -20,19 +20,9 @@ from confopt.conformalization import (
     QuantileInterval,
 )
 from confopt.config import QGBM_NAME, GBM_NAME, QRF_NAME
+from confopt.ranges import FloatRange
 
 DEFAULT_SEED = 1234
-
-# Define parameter search space:
-DUMMY_PARAMETER_GRID = {
-    "param1": list(range(0, 100)),
-    "param2": list(range(0, 100)),
-    "param3": list(range(0, 100)),
-    "param4": list(range(0, 100)),
-    "param5": list(range(0, 100)),
-    "param6": list(range(0, 100)),
-    "param7": list(range(0, 100)),
-}
 
 
 def noisy_rastrigin(x, A=20, noise_seed=42, noise=0):
@@ -120,22 +110,21 @@ def dummy_configuration_performance_bounds():
 
 @pytest.fixture
 def dummy_parameter_grid():
-    return DUMMY_PARAMETER_GRID
+    """Create a parameter grid for testing using the new ParameterRange classes"""
+    return {
+        "param_1": FloatRange(min_value=0.01, max_value=100, log_scale=True),
+        "param_2": FloatRange(min_value=0.01, max_value=100, log_scale=True),
+        "param_3": FloatRange(min_value=0.01, max_value=100, log_scale=True),
+    }
 
 
 @pytest.fixture
 def dummy_configurations(dummy_parameter_grid):
-    """
-    Samples unique configurations from broader
-    possible values in dummy hyperparameter search space.
-    """
-    max_configurations = 100
-    tuning_configurations = get_tuning_configurations(
-        parameter_grid=dummy_parameter_grid,
-        n_configurations=max_configurations,
-        random_state=DEFAULT_SEED,
+    """Create dummy configurations for testing"""
+
+    return get_tuning_configurations(
+        parameter_grid=dummy_parameter_grid, n_configurations=50, random_state=42
     )
-    return tuning_configurations
 
 
 @pytest.fixture

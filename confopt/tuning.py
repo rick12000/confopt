@@ -189,7 +189,12 @@ class ObjectiveConformalSearcher:
                 self.warm_start_performances.append(perf)
 
         # Generate tuning configurations including warm starts
-        self.tuning_configurations = self._get_tuning_configurations()
+        self.tuning_configurations = get_tuning_configurations(
+            parameter_grid=self.search_space,
+            n_configurations=self.n_candidate_configurations,
+            random_state=1234,
+            warm_start_configs=self.warm_start_configs,
+        )
 
         # Pre-tabularize all configurations for efficiency
         self.tabularized_configurations = tabularize_configurations(
@@ -233,16 +238,6 @@ class ObjectiveConformalSearcher:
             raise TypeError(
                 "The return type of the objective function must be numeric (int, float, or np.number)."
             )
-
-    def _get_tuning_configurations(self):
-        logger.debug("Creating hyperparameter space...")
-        tuning_configurations = get_tuning_configurations(
-            parameter_grid=self.search_space,
-            n_configurations=self.n_candidate_configurations,
-            random_state=1234,
-            warm_start_configs=self.warm_start_configs,
-        )
-        return tuning_configurations
 
     def _random_search(
         self,
@@ -355,14 +350,6 @@ class ObjectiveConformalSearcher:
         else:
             validation_split = 0.20
         return validation_split
-
-    def _dict_to_hashable(self, configuration: dict) -> tuple:
-        """Convert a configuration dictionary to a hashable representation efficiently.
-
-        Uses sorted frozensets for better hashing performance and memory usage.
-        """
-        # For small dictionaries, this is faster than complex transformations
-        return frozenset(configuration.items())
 
     def _process_warm_start_configurations(self):
         """

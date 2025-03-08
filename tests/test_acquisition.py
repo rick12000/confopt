@@ -4,6 +4,7 @@ import pytest
 from confopt.acquisition import (
     UCBSampler,
     ThompsonSampler,
+    PessimisticLowerBoundSampler,
     LocallyWeightedConformalSearcher,
     SingleFitQuantileConformalSearcher,
     MultiFitQuantileConformalSearcher,
@@ -51,7 +52,7 @@ def sample_data():
 @pytest.fixture
 def fitted_locally_weighted_searcher(sample_data):
     """Create a fitted locally weighted conformal searcher"""
-    sampler = UCBSampler(beta=1.0, c=2.0, interval_width=0.2)
+    sampler = UCBSampler(c=2.0, interval_width=0.2)  # Removed beta parameter
     searcher = LocallyWeightedConformalSearcher(
         point_estimator_architecture=GBM_NAME,
         variance_estimator_architecture=GBM_NAME,
@@ -70,7 +71,7 @@ def fitted_locally_weighted_searcher(sample_data):
 @pytest.fixture
 def fitted_single_fit_searcher(sample_data):
     """Create a fitted single-fit quantile conformal searcher"""
-    sampler = UCBSampler(beta=1.0, c=2.0, interval_width=0.2)
+    sampler = UCBSampler(c=2.0, interval_width=0.2)  # Removed beta parameter
     searcher = SingleFitQuantileConformalSearcher(
         quantile_estimator_architecture="qrf", sampler=sampler
     )
@@ -87,7 +88,7 @@ def fitted_single_fit_searcher(sample_data):
 @pytest.fixture
 def fitted_multi_fit_searcher(sample_data):
     """Create a fitted multi-fit quantile conformal searcher"""
-    sampler = UCBSampler(beta=1.0, c=2.0, interval_width=0.2)
+    sampler = UCBSampler(c=2.0, interval_width=0.2)  # Removed beta parameter
     searcher = MultiFitQuantileConformalSearcher(
         quantile_estimator_architecture=QGBM_NAME, sampler=sampler
     )
@@ -115,17 +116,17 @@ class TestUCBSampler:
         assert hasattr(sampler2, "expert_alphas")
 
         # Invalid adapter
-        with pytest.raises(ValueError):
-            UCBSampler(adapter_framework="InvalidAdapter")._initialize_adapter(
-                "InvalidAdapter"
-            )
+        with pytest.raises(ValueError, match="Unknown adapter framework:"):
+            UCBSampler(adapter_framework="InvalidAdapter")
 
     def test_update_exploration_step(self):
         """Test beta updating with different decay strategies"""
         # Test logarithmic decay
-        sampler1 = UCBSampler(beta_decay="logarithmic_decay", beta=1.0, c=2.0)
+        sampler1 = UCBSampler(
+            beta_decay="logarithmic_decay", c=2.0
+        )  # Removed beta parameter
         assert sampler1.t == 1
-        assert sampler1.beta == 1.0
+        assert sampler1.beta == 1.0  # Default beta value
 
         sampler1.update_exploration_step()
         assert sampler1.t == 2
@@ -136,9 +137,9 @@ class TestUCBSampler:
         assert sampler1.beta == 2.0 * np.log(2) / 2  # c * log(t) / t
 
         # Test logarithmic growth
-        sampler2 = UCBSampler(beta_decay="logarithmic_growth", beta=1.0)
+        sampler2 = UCBSampler(beta_decay="logarithmic_growth")  # Removed beta parameter
         assert sampler2.t == 1
-        assert sampler2.beta == 1.0
+        assert sampler2.beta == 1.0  # Default beta value
 
         sampler2.update_exploration_step()
         assert sampler2.t == 2
@@ -171,8 +172,12 @@ class TestUCBSampler:
         sampler2 = UCBSampler(adapter_framework="DtACI")
         initial_alpha = sampler2.alpha
 
-        # Mock breaches
-        sampler2.update_interval_width([1, 1, 0])  # mixed breaches
+        # Get the correct number of experts from the adapter
+        num_experts = len(sampler2.expert_alphas)
+
+        # Mock breaches - use the correct number of breach indicators
+        breaches = [1] * (num_experts - 1) + [0]  # One success, others breach
+        sampler2.update_interval_width(breaches)  # Provide correct number of indicators
         assert sampler2.alpha != initial_alpha  # Alpha should adjust
 
         # Verify quantiles are recalculated
@@ -227,6 +232,64 @@ class TestThompsonSampler:
         # Verify quantiles are updated correctly
         assert sampler.quantiles[0].lower_quantile == sampler.alphas[0] / 2
         assert sampler.quantiles[0].upper_quantile == 1 - (sampler.alphas[0] / 2)
+
+
+class TestPessimisticLowerBoundSampler:
+    def test_initialization(self):
+        """Test initialization with different adapter frameworks"""
+        # Default initialization
+        sampler = PessimisticLowerBoundSampler()
+        assert sampler.interval_width == 0.8
+        assert pytest.approx(sampler.alpha) == 0.2
+        assert sampler.adapter is None
+
+        # ACI adapter
+        sampler_aci = PessimisticLowerBoundSampler(adapter_framework="ACI")
+        assert isinstance(sampler_aci.adapter, ACI)
+        assert sampler_aci.adapter.alpha == sampler_aci.alpha
+
+        # DtACI adapter
+        sampler_dtaci = PessimisticLowerBoundSampler(adapter_framework="DtACI")
+        assert isinstance(sampler_dtaci.adapter, DtACI)
+        assert hasattr(sampler_dtaci, "expert_alphas")
+
+        # Invalid adapter
+        with pytest.raises(ValueError):
+            PessimisticLowerBoundSampler(adapter_framework="InvalidAdapter")
+
+    def test_fetch_interval(self):
+        """Test fetch_interval returns correct quantile interval"""
+        sampler = PessimisticLowerBoundSampler(interval_width=0.9)
+        interval = sampler.fetch_interval()
+        assert pytest.approx(interval.lower_quantile) == 0.05
+        assert pytest.approx(interval.upper_quantile) == 0.95
+
+    def test_update_interval_width(self):
+        """Test interval width updating with adapters"""
+        # Test ACI adapter
+        sampler = PessimisticLowerBoundSampler(adapter_framework="ACI")
+        initial_alpha = sampler.alpha
+
+        # Mock a breach
+        sampler.update_interval_width([1])  # breach
+        assert sampler.alpha < initial_alpha  # Alpha should decrease after breach
+
+        # Mock no breach
+        adjusted_alpha = sampler.alpha
+        sampler.update_interval_width([0])  # no breach
+        assert sampler.alpha > adjusted_alpha  # Alpha should increase after no breach
+
+        # Test DtACI adapter
+        sampler2 = PessimisticLowerBoundSampler(adapter_framework="DtACI")
+        initial_alpha = sampler2.alpha
+
+        # Get the correct number of experts from the adapter
+        num_experts = len(sampler2.expert_alphas)
+
+        # Mock breaches with correct number of indicators
+        breaches = [0] * num_experts  # all no breach
+        sampler2.update_interval_width(breaches)  # mixed breaches
+        assert sampler2.alpha != initial_alpha  # Alpha should adjust
 
 
 class TestLocallyWeightedConformalSearcher:
@@ -341,6 +404,35 @@ class TestLocallyWeightedConformalSearcher:
         # Alpha should increase after no breach with ACI
         if isinstance(searcher.sampler.adapter, ACI):
             assert searcher.sampler.alpha > adjusted_alpha
+
+    def test_predict_with_pessimistic_lower_bound(self, sample_data):
+        """Test prediction with pessimistic lower bound strategy"""
+        sampler = PessimisticLowerBoundSampler()
+        searcher = LocallyWeightedConformalSearcher(
+            point_estimator_architecture=GBM_NAME,
+            variance_estimator_architecture=GBM_NAME,
+            sampler=sampler,
+        )
+
+        # Fit the searcher
+        searcher.fit(
+            X_train=sample_data["X_train"],
+            y_train=sample_data["y_train"],
+            X_val=sample_data["X_val"],
+            y_val=sample_data["y_val"],
+            random_state=42,
+        )
+
+        # Make predictions
+        X_test = sample_data["X_test"]
+        predictions = searcher.predict(X_test)
+
+        # Check prediction shape
+        assert predictions.shape[0] == X_test.shape[0]
+
+        # Check that predictions_per_interval is updated
+        assert searcher.predictions_per_interval is not None
+        assert len(searcher.predictions_per_interval) == 1
 
 
 class TestSingleFitQuantileConformalSearcher:
@@ -467,6 +559,33 @@ class TestSingleFitQuantileConformalSearcher:
         if isinstance(searcher.sampler.adapter, ACI):
             assert searcher.sampler.alpha < initial_alpha
 
+    def test_predict_with_pessimistic_lower_bound(self, sample_data):
+        """Test prediction with pessimistic lower bound strategy"""
+        sampler = PessimisticLowerBoundSampler()
+        searcher = SingleFitQuantileConformalSearcher(
+            quantile_estimator_architecture="qrf", sampler=sampler
+        )
+
+        # Fit the searcher
+        searcher.fit(
+            X_train=sample_data["X_train"],
+            y_train=sample_data["y_train"],
+            X_val=sample_data["X_val"],
+            y_val=sample_data["y_val"],
+            random_state=42,
+        )
+
+        # Make predictions
+        X_test = sample_data["X_test"]
+        predictions = searcher.predict(X_test)
+
+        # Check prediction shape
+        assert predictions.shape[0] == X_test.shape[0]
+
+        # Check that predictions_per_interval is updated
+        assert searcher.predictions_per_interval is not None
+        assert len(searcher.predictions_per_interval) == 1
+
 
 class TestMultiFitQuantileConformalSearcher:
     def test_fit_with_ucb_sampler(self, sample_data):
@@ -567,3 +686,34 @@ class TestMultiFitQuantileConformalSearcher:
         assert len(searcher.predictions_per_interval) == len(
             searcher.conformal_estimators
         )
+
+    def test_predict_with_pessimistic_lower_bound(self, sample_data):
+        """Test prediction with pessimistic lower bound strategy"""
+        sampler = PessimisticLowerBoundSampler()
+        searcher = MultiFitQuantileConformalSearcher(
+            quantile_estimator_architecture=QGBM_NAME, sampler=sampler
+        )
+
+        # Fit the searcher
+        searcher.fit(
+            X_train=sample_data["X_train"],
+            y_train=sample_data["y_train"],
+            X_val=sample_data["X_val"],
+            y_val=sample_data["y_val"],
+            random_state=42,
+        )
+
+        # Make predictions
+        X_test = sample_data["X_test"]
+        predictions = searcher.predict(X_test)
+
+        # Check prediction shape
+        assert predictions.shape[0] == X_test.shape[0]
+
+        # Check that predictions_per_interval is updated
+        assert searcher.predictions_per_interval is not None
+        assert len(searcher.predictions_per_interval) == 1
+
+        # Check that the predictions are actually the lower bounds from the interval
+        lower_bound = searcher.predictions_per_interval[0][:, 0]
+        assert np.array_equal(predictions, lower_bound)
