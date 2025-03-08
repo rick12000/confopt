@@ -58,6 +58,47 @@ class MedianEstimator:
         return np.array(self.median_estimator.predict(X)[:, 0])
 
 
+class PointEstimator:
+    """
+    Simple wrapper for a point estimator used in optimistic sampling.
+    """
+
+    def __init__(
+        self,
+        point_estimator_architecture: str,
+    ):
+        self.point_estimator_architecture = point_estimator_architecture
+        self.point_estimator = None
+
+    def fit(
+        self,
+        X: np.array,
+        y: np.array,
+        random_state: Optional[int] = None,
+    ):
+        """
+        Fit a point estimator.
+        """
+        initialization_params = SEARCH_MODEL_DEFAULT_CONFIGURATIONS[
+            self.point_estimator_architecture
+        ].copy()
+
+        self.point_estimator = initialize_point_estimator(
+            estimator_architecture=self.point_estimator_architecture,
+            initialization_params=initialization_params,
+            random_state=random_state,
+        )
+        self.point_estimator.fit(X, y)
+
+    def predict(self, X: np.array):
+        """
+        Predict point values.
+        """
+        if self.point_estimator is None:
+            raise ValueError("Point estimator is not initialized")
+        return np.array(self.point_estimator.predict(X))
+
+
 class LocallyWeightedConformalEstimator:
     """
     Base conformal estimator that fits point and variance estimators
@@ -168,9 +209,7 @@ class LocallyWeightedConformalEstimator:
             self.pe_estimator.predict(X=X_val), y_val
         )
 
-    def predict_interval(
-        self, X: np.array, alpha: float, beta: float = 1.0
-    ) -> Tuple[np.array, np.array]:
+    def predict_interval(self, X: np.array, alpha: float) -> Tuple[np.array, np.array]:
         """
         Predict conformal intervals for a given confidence level.
 
@@ -180,8 +219,6 @@ class LocallyWeightedConformalEstimator:
             Input features
         alpha : float
             Confidence level (between 0 and 1)
-        beta : float
-            Scaling factor for the interval width
 
         Returns
         -------
@@ -198,8 +235,8 @@ class LocallyWeightedConformalEstimator:
         score_quantile = np.quantile(self.nonconformity_scores, 1 - alpha)
         scaled_score = score_quantile * var_pred
 
-        lower_bound = y_pred - beta * scaled_score
-        upper_bound = y_pred + beta * scaled_score
+        lower_bound = y_pred - scaled_score
+        upper_bound = y_pred + scaled_score
 
         return lower_bound, upper_bound
 

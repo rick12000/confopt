@@ -10,6 +10,7 @@ from confopt.conformalization import (
     SingleFitQuantileConformalEstimator,
     MultiFitQuantileConformalEstimator,
     MedianEstimator,
+    PointEstimator,
 )
 
 logger = logging.getLogger(__name__)
@@ -429,9 +430,7 @@ class SingleFitQuantileConformalSearcher:
             isinstance(self.sampler, ThompsonSampler)
             and self.sampler.enable_optimistic_sampling
         ):
-            self.median_estimator = MedianEstimator(
-                self.quantile_estimator_architecture
-            )
+            self.median_estimator = PointEstimator("gbm")
             self.median_estimator.fit(
                 X=np.vstack((X_train, X_val)),
                 y=np.concatenate((y_train, y_val)),
@@ -597,7 +596,6 @@ class MultiFitQuantileConformalSearcher:
             self.sampler.quantiles = self.sampler._calculate_quantiles()
         self.n_pre_conformal_trials = n_pre_conformal_trials
 
-        self.conformal_estimators = []
         self.median_estimator = None
         self.training_time = None
         self.primary_estimator_error = None
@@ -616,6 +614,7 @@ class MultiFitQuantileConformalSearcher:
         Fit the conformal estimators.
         """
         training_time_tracker = RuntimeTracker()
+        self.conformal_estimators = []
 
         # Initialize and fit optimistic estimator if needed
         if (
