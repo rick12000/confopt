@@ -320,17 +320,20 @@ class LocallyWeightedConformalSearcher:
             )
             self.predictions_per_interval.append(np.hstack([lower_bound, upper_bound]))
 
-        # For each data point, randomly select one interval
+        # Vectorized approach for sampling
         n_samples = X.shape[0]
         n_intervals = len(intervals)
 
-        lower_bounds = np.zeros(n_samples)
-        for i in range(n_samples):
-            # Randomly select an interval
-            interval_idx = np.random.choice(n_intervals)
+        # Generate random indices for all samples at once
+        interval_indices = np.random.choice(n_intervals, size=n_samples)
 
-            # Get the lower bound from this interval
-            lower_bounds[i] = self.predictions_per_interval[interval_idx][i, 0]
+        # Extract the lower bounds using vectorized operations
+        lower_bounds = np.array(
+            [
+                self.predictions_per_interval[idx][i, 0]
+                for i, idx in enumerate(interval_indices)
+            ]
+        )
 
         return lower_bounds
 
@@ -510,27 +513,29 @@ class SingleFitQuantileConformalSearcher:
                 np.column_stack((lower_bound, upper_bound))
             )
 
-        # For each data point, randomly select one interval's lower bound
+        # Vectorized approach for sampling
         n_samples = X.shape[0]
         n_intervals = len(intervals)
 
-        lower_bounds = np.zeros(n_samples)
-        for i in range(n_samples):
-            # Randomly select an interval
-            interval_idx = np.random.choice(n_intervals)
+        # Generate random indices for all samples at once
+        interval_indices = np.random.choice(n_intervals, size=n_samples)
 
-            # Get the lower bound from this interval
-            lower_bound_value = self.predictions_per_interval[interval_idx][i, 0]
+        # Extract the lower bounds using vectorized operations
+        lower_bounds = np.array(
+            [
+                self.predictions_per_interval[idx][i, 0]
+                for i, idx in enumerate(interval_indices)
+            ]
+        )
 
-            # Apply optimistic sampling if enabled
-            if (
-                self.sampler.enable_optimistic_sampling
-                and self.median_estimator is not None
-            ):
-                median_prediction = self.median_estimator.predict(X[i : i + 1])[0]
-                lower_bounds[i] = min(lower_bound_value, median_prediction)
-            else:
-                lower_bounds[i] = lower_bound_value
+        # Apply optimistic sampling if enabled - do it once for all samples
+        if (
+            self.sampler.enable_optimistic_sampling
+            and self.median_estimator is not None
+        ):
+            # Get all median predictions in one call
+            median_predictions = self.median_estimator.predict(X)
+            lower_bounds = np.minimum(lower_bounds, median_predictions)
 
         return lower_bounds
 
@@ -700,27 +705,29 @@ class MultiFitQuantileConformalSearcher:
                 np.column_stack((lower_bound, upper_bound))
             )
 
-        # For each data point, randomly select one interval's lower bound
+        # Vectorized approach for sampling
         n_samples = X.shape[0]
         n_intervals = len(self.conformal_estimators)
 
-        lower_bounds = np.zeros(n_samples)
-        for i in range(n_samples):
-            # Randomly select an interval
-            interval_idx = np.random.choice(n_intervals)
+        # Generate random indices for all samples at once
+        interval_indices = np.random.choice(n_intervals, size=n_samples)
 
-            # Get the lower bound from this interval
-            lower_bound_value = self.predictions_per_interval[interval_idx][i, 0]
+        # Extract the lower bounds using vectorized operations
+        lower_bounds = np.array(
+            [
+                self.predictions_per_interval[idx][i, 0]
+                for i, idx in enumerate(interval_indices)
+            ]
+        )
 
-            # Apply optimistic sampling if enabled
-            if (
-                self.sampler.enable_optimistic_sampling
-                and self.median_estimator is not None
-            ):
-                median_prediction = self.median_estimator.predict(X[i : i + 1])[0]
-                lower_bounds[i] = min(lower_bound_value, median_prediction)
-            else:
-                lower_bounds[i] = lower_bound_value
+        # Apply optimistic sampling if enabled - do it once for all samples
+        if (
+            self.sampler.enable_optimistic_sampling
+            and self.median_estimator is not None
+        ):
+            # Get all median predictions in one call
+            median_predictions = self.median_estimator.predict(X)
+            lower_bounds = np.minimum(lower_bounds, median_predictions)
 
         return lower_bounds
 
