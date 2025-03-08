@@ -303,29 +303,36 @@ class LocallyWeightedConformalSearcher:
         self.sampler.update_exploration_step()
         return tracked_lower_bound
 
-    def _predict_with_thompson(self, y_pred: np.array, var_pred: np.array):
+    def _predict_with_thompson(self, X: np.array):
+        """
+        Predict using Thompson sampling strategy with locally weighted conformal estimator.
+        """
         self.predictions_per_interval = []
-        for alpha in self.sampler.fetch_alphas():
-            score_quantile = np.quantile(self.nonconformity_scores, 1 - alpha)
-            scaled_score = score_quantile * var_pred
-            self.predictions_per_interval.append(
-                np.hstack([y_pred - scaled_score, y_pred + scaled_score])
+
+        # Get all intervals from the Thompson sampler
+        intervals = self.sampler.fetch_intervals()
+
+        # Get predictions for all intervals
+        for interval in intervals:
+            alpha = 1 - (interval.upper_quantile - interval.lower_quantile)
+            lower_bound, upper_bound = self.conformal_estimator.predict_interval(
+                X=X, alpha=alpha
             )
+            self.predictions_per_interval.append(np.hstack([lower_bound, upper_bound]))
 
-        predictions_per_quantile = np.hstack(self.predictions_per_interval)
-        lower_bound = []
-        for i in range(predictions_per_quantile.shape[0]):
-            # Use numpy's choice for reproducibility
-            ts_idx = np.random.choice(range(self.sampler.n_quantiles))
-            if self.sampler.enable_optimistic_sampling:
-                lower_bound.append(
-                    min(predictions_per_quantile[i, ts_idx], y_pred[i, 0])
-                )
-            else:
-                lower_bound.append(predictions_per_quantile[i, ts_idx])
-        lower_bound = np.array(lower_bound)
+        # For each data point, randomly select one interval
+        n_samples = X.shape[0]
+        n_intervals = len(intervals)
 
-        return lower_bound
+        lower_bounds = np.zeros(n_samples)
+        for i in range(n_samples):
+            # Randomly select an interval
+            interval_idx = np.random.choice(n_intervals)
+
+            # Get the lower bound from this interval
+            lower_bounds[i] = self.predictions_per_interval[interval_idx][i, 0]
+
+        return lower_bounds
 
     def _predict_with_pessimistic_lower_bound(self, X: np.array):
         """
