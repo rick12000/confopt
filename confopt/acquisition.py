@@ -22,11 +22,13 @@ class UCBSampler:
         c: float = 1,
         interval_width: float = 0.8,
         adapter_framework: Optional[str] = None,
+        upper_quantile_cap: Optional[float] = None,
     ):
         self.beta_decay = beta_decay
         self.c = c
         self.interval_width = interval_width
         self.alpha = 1 - interval_width
+        self.upper_quantile_cap = upper_quantile_cap
         self.t = 1
         self.beta = 1
 
@@ -46,9 +48,15 @@ class UCBSampler:
         return adapter
 
     def _calculate_quantiles(self) -> QuantileInterval:
-        return QuantileInterval(
-            lower_quantile=self.alpha / 2, upper_quantile=1 - (self.alpha / 2)
-        )
+        if self.upper_quantile_cap:
+            interval = QuantileInterval(
+                lower_quantile=self.alpha / 2, upper_quantile=self.upper_quantile_cap
+            )
+        else:
+            interval = QuantileInterval(
+                lower_quantile=self.alpha / 2, upper_quantile=1 - (self.alpha / 2)
+            )
+        return interval
 
     def fetch_alpha(self) -> float:
         return self.alpha
@@ -250,39 +258,50 @@ class LocallyWeightedConformalSearcher:
         """
         Predict using UCB sampling strategy.
         """
-        point_estimate = self.conformal_estimator.pe_estimator.predict(X=X)
+        point_estimate = np.array(
+            self.conformal_estimator.pe_estimator.predict(X)
+        ).reshape(-1, 1)
         if isinstance(self.sampler.adapter, DtACI):
             self.predictions_per_interval = []
             for alpha in self.sampler.fetch_expert_alphas():
-                lower_bound, upper_bound = self.conformal_estimator.predict_interval(
-                    X=X, alpha=alpha
-                )
+                (
+                    lower_quantile_value,
+                    upper_quantile_value,
+                ) = self.conformal_estimator.predict_interval(X=X, alpha=alpha)
                 # Apply beta scaling for exploration to the lower bound
-                lower_bound = point_estimate + self.sampler.beta * (
-                    upper_bound - lower_bound
+                lower_bound = (
+                    point_estimate
+                    + self.sampler.beta
+                    * (upper_quantile_value - lower_quantile_value)
+                    / 2
                 )
 
                 self.predictions_per_interval.append(
-                    np.hstack([lower_bound, upper_bound])
+                    np.hstack([lower_quantile_value, upper_quantile_value])
                 )
                 # Use the current best alpha as the bound
                 if self.sampler.fetch_alpha() == alpha:
-                    result_lower_bound = lower_bound
+                    tracked_lower_bound = lower_quantile_value
+
         else:
             alpha = self.sampler.fetch_alpha()
-            lower_bound, upper_bound = self.conformal_estimator.predict_interval(
-                X=X, alpha=alpha
-            )
+            (
+                lower_quantile_value,
+                upper_quantile_value,
+            ) = self.conformal_estimator.predict_interval(X=X, alpha=alpha)
             # Apply beta scaling for exploration to the lower bound
-            lower_bound = point_estimate + self.sampler.beta * (
-                upper_bound - lower_bound
+            lower_bound = (
+                point_estimate
+                + self.sampler.beta * (lower_quantile_value - upper_quantile_value) / 2
             )
 
-            self.predictions_per_interval = [np.hstack([lower_bound, upper_bound])]
-            result_lower_bound = lower_bound
+            self.predictions_per_interval = [
+                np.hstack([lower_quantile_value, upper_quantile_value])
+            ]
+            tracked_lower_bound = lower_bound
 
         self.sampler.update_exploration_step()
-        return result_lower_bound
+        return tracked_lower_bound
 
     def _predict_with_thompson(self, y_pred: np.array, var_pred: np.array):
         self.predictions_per_interval = []
@@ -366,6 +385,9 @@ class SingleFitQuantileConformalSearcher:
     ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
         self.sampler = sampler
+        if isinstance(self.sampler, UCBSampler):
+            self.sampler.upper_quantile_cap = 0.5
+            self.sampler.quantiles = self.sampler._calculate_quantiles()
         self.n_pre_conformal_trials = n_pre_conformal_trials
 
         # Use a single estimator for all intervals
@@ -446,18 +468,18 @@ class SingleFitQuantileConformalSearcher:
 
         # Predict interval using the single estimator
         (
-            lower_interval_bound,
-            upper_interval_bound,
+            lower_interval,
+            upper_interval,
         ) = self.conformal_estimator.predict_interval(X=X, interval=interval)
 
-        # Apply beta scaling for exploration
-        lower_bound = lower_interval_bound + self.sampler.beta * (
-            upper_interval_bound - lower_interval_bound
+        # Below upper interval needs to be median and lower bound is lower bound from desired CI
+        lower_bound = upper_interval - self.sampler.beta * (
+            upper_interval - lower_interval
         )
 
         # Store predictions for later breach checking
         self.predictions_per_interval = [
-            np.column_stack((lower_interval_bound, upper_interval_bound))
+            np.column_stack((lower_interval, upper_interval))
         ]
 
         self.sampler.update_exploration_step()
@@ -558,6 +580,9 @@ class MultiFitQuantileConformalSearcher:
     ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
         self.sampler = sampler
+        if isinstance(self.sampler, UCBSampler):
+            self.sampler.upper_quantile_cap = 0.5
+            self.sampler.quantiles = self.sampler._calculate_quantiles()
         self.n_pre_conformal_trials = n_pre_conformal_trials
 
         self.conformal_estimators = []
@@ -638,18 +663,18 @@ class MultiFitQuantileConformalSearcher:
         Predict using UCB sampling strategy.
         """
         # With UCB we use only one estimator
-        lower_interval_bound, upper_interval_bound = self.conformal_estimators[
-            0
-        ].predict_interval(X=X)
+        lower_quantile, upper_quantile = self.conformal_estimators[0].predict_interval(
+            X=X
+        )
 
         # Apply beta scaling for exploration
-        lower_bound = lower_interval_bound + self.sampler.beta * (
-            upper_interval_bound - lower_interval_bound
+        lower_bound = upper_quantile - self.sampler.beta * (
+            upper_quantile - lower_quantile
         )
 
         # Store predictions for later breach checking
         self.predictions_per_interval = [
-            np.column_stack((lower_interval_bound, upper_interval_bound))
+            np.column_stack((lower_quantile, upper_quantile))
         ]
 
         self.sampler.update_exploration_step()
@@ -697,16 +722,12 @@ class MultiFitQuantileConformalSearcher:
         Predict using Pessimistic Lower Bound sampling strategy.
         """
         # With pessimistic lower bound we use only one estimator
-        lower_interval_bound, upper_interval_bound = self.conformal_estimators[
-            0
-        ].predict_interval(X=X)
+        lower_bound, upper_bound = self.conformal_estimators[0].predict_interval(X=X)
 
         # Store predictions for later breach checking
-        self.predictions_per_interval = [
-            np.column_stack((lower_interval_bound, upper_interval_bound))
-        ]
+        self.predictions_per_interval = [np.column_stack((lower_bound, upper_bound))]
 
-        return lower_interval_bound
+        return lower_bound
 
     def update_interval_width(self, sampled_idx: int, sampled_performance: float):
         """
