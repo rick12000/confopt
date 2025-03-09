@@ -32,6 +32,7 @@ from confopt.quantile_wrappers import (
     QuantileForest,
     QuantileKNN,
     BaseSingleFitQuantileEstimator,
+    QuantileLasso,
 )
 from confopt.utils import get_tuning_configurations
 
@@ -97,9 +98,13 @@ SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
         "n_neighbors": [3, 5, 7, 10],
     },
     QL_NAME: {
-        "alpha": [0.1, 0.5, 1.0],
-        "max_iter": [200, 500],
-        "tol": [1e-3, 1e-4],
+        "alpha": [0.01, 0.05, 0.1, 0.3],  # Updated with lower values for small datasets
+        "max_iter": [100, 200, 500],  # Added a lower iteration count option
+        "p_tol": [
+            1e-3,
+            1e-4,
+            1e-5,
+        ],  # Renamed from 'tol' to 'p_tol' to match implementation
     },
     QGBM_NAME: {
         "learning_rate": [0.1, 0.2, 0.3],
@@ -182,9 +187,9 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
         "n_neighbors": 5,
     },
     QL_NAME: {
-        "alpha": 0.5,
-        "max_iter": 500,
-        "tol": 1e-3,
+        "alpha": 0.05,  # Lowered default for small datasets
+        "max_iter": 200,  # Reasonable default for small datasets
+        "p_tol": 1e-4,  # Renamed from 'tol' to 'p_tol' to match implementation
     },
     QGBM_NAME: {
         "learning_rate": 0.2,
@@ -289,7 +294,12 @@ def initialize_quantile_estimator(
             quantiles=pinball_loss_alpha,
             random_state=random_state,
         )
-
+    elif estimator_architecture == QL_NAME:
+        initialized_model = QuantileLasso(
+            **initialization_params,
+            quantiles=pinball_loss_alpha,  # Add the missing quantiles parameter
+            random_state=random_state,
+        )
     else:
         raise ValueError(
             f"{estimator_architecture} is not a valid estimator architecture."

@@ -18,6 +18,7 @@ QLGBM_NAME: str = "qlgbm"
 QUANTILE_ESTIMATOR_ARCHITECTURES: List[str] = [
     QGBM_NAME,
     QLGBM_NAME,
+    QL_NAME,  # Added QuantileLasso
 ]
 
 POINT_ESTIMATOR_ARCHITECTURES: List[str] = [
