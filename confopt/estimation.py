@@ -24,7 +24,8 @@ from confopt.config import (
     QL_NAME,
     QLGBM_NAME,
     LGBM_NAME,
-    QENS_NAME,  # Import the new ensemble model name
+    SFQENS_NAME,  # Import the new ensemble model name
+    MFENS_NAME,  # Import the new ensemble model name
     QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
 from confopt.quantile_wrappers import (
@@ -35,6 +36,11 @@ from confopt.quantile_wrappers import (
     BaseSingleFitQuantileEstimator,
     QuantileLasso,
 )
+from confopt.ensembling import (
+    SingleFitQuantileEnsembleEstimator,
+    MultiFitQuantileEnsembleEstimator,
+)
+
 from confopt.utils import get_tuning_configurations
 
 logger = logging.getLogger(__name__)
@@ -126,10 +132,10 @@ SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
         "reg_alpha": [0.1, 0.5, 1.0],
         "reg_lambda": [0.1, 0.5, 1.0],
     },
-    QENS_NAME: {
+    SFQENS_NAME: {
         # Ensemble parameters
         "cv": [2, 3],
-        "weighting_strategy": ["inverse_error", "rank", "uniform"],
+        "weighting_strategy": ["inverse_error", "rank", "uniform", "meta_learner"],
         # QRF parameters
         "qrf_n_estimators": [10, 25, 50],
         "qrf_max_depth": [3, 5],
@@ -138,6 +144,24 @@ SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
         "qrf_bootstrap": [True, False],
         # QKNN parameters
         "qknn_n_neighbors": [3, 5, 7, 10],
+    },
+    MFENS_NAME: {
+        # Ensemble parameters
+        "cv": [2, 3],
+        "weighting_strategy": ["inverse_error", "rank", "uniform", "meta_learner"],
+        # QLGBM parameters
+        "qlgbm_learning_rate": [0.05, 0.1, 0.2],
+        "qlgbm_n_estimators": [10, 20, 30],
+        "qlgbm_max_depth": [2, 3],
+        "qlgbm_min_child_samples": [3, 5, 7],
+        "qlgbm_subsample": [0.7, 0.8, 0.9],
+        "qlgbm_colsample_bytree": [0.6, 0.7, 0.8],
+        "qlgbm_reg_alpha": [0.1, 0.5],
+        "qlgbm_reg_lambda": [0.1, 0.5],
+        # QL parameters
+        "ql_alpha": [0.01, 0.05, 0.1],
+        "ql_max_iter": [100, 200, 500],
+        "ql_p_tol": [1e-3, 1e-4],
     },
 }
 
@@ -225,7 +249,7 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
         "reg_lambda": 0.1,
         "min_child_weight": 3,
     },
-    QENS_NAME: {
+    SFQENS_NAME: {
         # Ensemble parameters
         "cv": 3,
         "weighting_strategy": "inverse_error",
@@ -237,6 +261,24 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
         "qrf_bootstrap": True,
         # QKNN parameters
         "qknn_n_neighbors": 5,
+    },
+    MFENS_NAME: {
+        # Ensemble parameters
+        "cv": 3,
+        "weighting_strategy": "inverse_error",
+        # QLGBM parameters
+        "qlgbm_learning_rate": 0.1,
+        "qlgbm_n_estimators": 20,
+        "qlgbm_max_depth": 2,
+        "qlgbm_min_child_samples": 5,
+        "qlgbm_subsample": 0.8,
+        "qlgbm_colsample_bytree": 0.7,
+        "qlgbm_reg_alpha": 0.1,
+        "qlgbm_reg_lambda": 0.1,
+        # QL parameters
+        "ql_alpha": 0.05,
+        "ql_max_iter": 200,
+        "ql_p_tol": 1e-4,
     },
 }
 
@@ -327,6 +369,43 @@ def initialize_quantile_estimator(
             quantiles=pinball_loss_alpha,  # Add the missing quantiles parameter
             random_state=random_state,
         )
+    elif estimator_architecture == MFENS_NAME:
+        # Extract parameters for each model
+        params = initialization_params.copy()
+
+        qlgbm_params = {
+            "learning_rate": params.pop("qlgbm_learning_rate"),
+            "n_estimators": params.pop("qlgbm_n_estimators"),
+            "max_depth": params.pop("qlgbm_max_depth"),
+            "min_child_samples": params.pop("qlgbm_min_child_samples"),
+            "subsample": params.pop("qlgbm_subsample"),
+            "colsample_bytree": params.pop("qlgbm_colsample_bytree"),
+            "reg_alpha": params.pop("qlgbm_reg_alpha"),
+            "reg_lambda": params.pop("qlgbm_reg_lambda"),
+            "random_state": random_state,
+        }
+
+        ql_params = {
+            "alpha": params.pop("ql_alpha"),
+            "max_iter": params.pop("ql_max_iter"),
+            "p_tol": params.pop("ql_p_tol"),
+            "random_state": random_state,
+        }
+
+        estimators = [
+            QuantileLightGBM(**qlgbm_params, quantiles=pinball_loss_alpha),
+            QuantileLasso(**ql_params, quantiles=pinball_loss_alpha),
+        ]
+
+        # Create ensemble estimator
+        initialized_model = MultiFitQuantileEnsembleEstimator(
+            estimators=estimators,
+            cv=params.pop("cv", 3),
+            weighting_strategy=params.pop("weighting_strategy", "meta_learner"),
+            quantiles=pinball_loss_alpha,
+            random_state=random_state,
+        )
+
     else:
         raise ValueError(
             f"{estimator_architecture} is not a valid estimator architecture."
@@ -419,7 +498,7 @@ def initialize_point_estimator(
         )
     elif estimator_architecture == QKNN_NAME:
         initialized_model = QuantileKNN(**initialization_params)
-    elif estimator_architecture == QENS_NAME:
+    elif estimator_architecture == SFQENS_NAME:
         # Extract parameters for each model
         params = initialization_params.copy()
 
@@ -436,13 +515,10 @@ def initialize_point_estimator(
             "n_neighbors": params.pop("qknn_n_neighbors"),
         }
 
-        # Import SingleFitQuantileEnsembleEstimator
-        from confopt.ensembling import SingleFitQuantileEnsembleEstimator
-
         # Create ensemble estimator
         ensemble = SingleFitQuantileEnsembleEstimator(
             cv=params.pop("cv", 3),
-            weighting_strategy=params.pop("weighting_strategy", "inverse_error"),
+            weighting_strategy=params.pop("weighting_strategy", "meta_learner"),
             random_state=random_state,
         )
 

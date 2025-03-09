@@ -5,6 +5,7 @@ from copy import deepcopy
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import KFold
 from sklearn.metrics import mean_squared_error, mean_pinball_loss
+from sklearn.linear_model import LinearRegression
 from confopt.quantile_wrappers import (
     BaseSingleFitQuantileEstimator,
     BaseQuantileEstimator,
@@ -43,6 +44,7 @@ class BaseEnsembleEstimator:
             - "inverse_error": weights are inverse of CV errors
             - "uniform": equal weights for all estimators
             - "rank": weights based on rank of estimators (best gets highest weight)
+            - "meta_learner": uses linear regression to learn optimal weights from CV predictions
         random_state : int, optional
             Random seed for reproducibility.
         """
@@ -52,6 +54,7 @@ class BaseEnsembleEstimator:
         self.random_state = random_state
         self.weights = None
         self.fitted = False
+        self.meta_learner = None
 
     def add_estimator(self, estimator: BaseEstimator) -> None:
         """
@@ -67,7 +70,8 @@ class BaseEnsembleEstimator:
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> "BaseEnsembleEstimator":
         """
-        Fit all estimators and compute weights based on CV performance.
+        Base fit method for regular estimators. Quantile-based ensemble classes
+        should override this method to include quantile parameters.
 
         Parameters
         ----------
@@ -96,7 +100,8 @@ class BaseEnsembleEstimator:
 
     def _compute_weights(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
         """
-        Compute weights for each estimator based on cross-validation performance.
+        Base compute_weights method for regular estimators. Quantile-based ensemble classes
+        should override this method to include quantile parameters.
 
         Parameters
         ----------
@@ -113,6 +118,12 @@ class BaseEnsembleEstimator:
         cv_errors = []
         kf = KFold(n_splits=self.cv, shuffle=True, random_state=self.random_state)
 
+        # For meta_learner strategy, we need to collect predictions on validation folds
+        if self.weighting_strategy == "meta_learner":
+            all_val_indices = np.array([], dtype=int)
+            all_val_predictions = np.zeros((len(y), len(self.estimators)))
+            all_val_targets = np.array([])
+
         # Calculate cross-validation error for each estimator
         for i, estimator in enumerate(self.estimators):
             fold_errors = []
@@ -120,7 +131,7 @@ class BaseEnsembleEstimator:
                 f"Computing CV errors for estimator {i + 1}/{len(self.estimators)}"
             )
 
-            for train_idx, val_idx in kf.split(X):
+            for fold_idx, (train_idx, val_idx) in enumerate(kf.split(X)):
                 X_train, X_val = X[train_idx], X[val_idx]
                 y_train, y_val = y[train_idx], y[val_idx]
 
@@ -131,6 +142,22 @@ class BaseEnsembleEstimator:
                 # Calculate error on validation set (to be implemented in subclasses)
                 error = self._calculate_error(est_clone, X_val, y_val)
                 fold_errors.append(error)
+
+                # For meta_learner, collect validation predictions
+                if self.weighting_strategy == "meta_learner":
+                    val_preds = est_clone.predict(X_val).reshape(-1)
+
+                    # For the first estimator in each fold, store the validation indices and targets
+                    if i == 0:
+                        if fold_idx == 0:
+                            all_val_indices = val_idx
+                            all_val_targets = y_val
+                        else:
+                            all_val_indices = np.concatenate([all_val_indices, val_idx])
+                            all_val_targets = np.concatenate([all_val_targets, y_val])
+
+                    # Store predictions for this estimator
+                    all_val_predictions[val_idx, i] = val_preds
 
             # Use mean error across folds
             cv_errors.append(np.mean(fold_errors))
@@ -148,6 +175,19 @@ class BaseEnsembleEstimator:
             # Rank estimators (lower error is better, so we use negative errors for sorting)
             ranks = np.argsort(np.argsort(-np.array(cv_errors)))
             weights = 1.0 / (ranks + 1)  # +1 to avoid division by zero
+        elif self.weighting_strategy == "meta_learner":
+            # Sort predictions by the original indices to align with targets
+            sorted_indices = np.argsort(all_val_indices)
+            sorted_predictions = all_val_predictions[all_val_indices[sorted_indices]]
+            sorted_targets = all_val_targets[sorted_indices]
+
+            # Fit linear regression to learn optimal weights
+            self.meta_learner = LinearRegression(fit_intercept=False, positive=True)
+            self.meta_learner.fit(sorted_predictions, sorted_targets)
+            weights = self.meta_learner.coef_
+
+            # If any weights are negative (shouldn't happen with positive=True), set to small positive value
+            weights = np.maximum(weights, 1e-6)
         else:
             raise ValueError(f"Unknown weighting strategy: {self.weighting_strategy}")
 
@@ -183,6 +223,10 @@ class BaseEnsembleEstimator:
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
         Predict using the ensemble.
+
+        For meta_learner strategy, this method continues to use the learned weights
+        but can also apply the linear regression directly.
+
         To be implemented by subclasses.
 
         Parameters
@@ -252,10 +296,17 @@ class PointEnsembleEstimator(BaseEnsembleEstimator):
         # Get predictions from each estimator
         predictions = np.array([estimator.predict(X) for estimator in self.estimators])
 
-        # Apply weights to predictions
-        weighted_predictions = np.tensordot(self.weights, predictions, axes=([0], [0]))
-
-        return weighted_predictions
+        if self.weighting_strategy == "meta_learner" and self.meta_learner is not None:
+            # Transpose predictions to shape (n_samples, n_estimators)
+            predictions = predictions.T
+            # Use meta_learner for prediction
+            return self.meta_learner.predict(predictions)
+        else:
+            # Apply weights to predictions using traditional method
+            weighted_predictions = np.tensordot(
+                self.weights, predictions, axes=([0], [0])
+            )
+            return weighted_predictions
 
 
 class SingleFitQuantileEnsembleEstimator(
@@ -343,6 +394,8 @@ class SingleFitQuantileEnsembleEstimator(
     def fit(self, X: np.ndarray, y: np.ndarray):
         """
         Fit all estimators and compute weights based on CV performance.
+        For SingleFitQuantileEnsembleEstimator, we need to ensure each estimator
+        is properly initialized with quantiles.
 
         Parameters
         ----------
@@ -357,8 +410,150 @@ class SingleFitQuantileEnsembleEstimator(
         self : object
             Returns self.
         """
-        BaseEnsembleEstimator.fit(self, X, y)
+        if len(self.estimators) == 0:
+            raise ValueError("No estimators have been added to the ensemble.")
+
+        # Set quantiles_ from the first estimator if not already set
+        if not hasattr(self, "quantiles_"):
+            if hasattr(self.estimators[0], "quantiles_"):
+                self.quantiles_ = self.estimators[0].quantiles_
+
+        # Fit each estimator on the full dataset
+        for i, estimator in enumerate(self.estimators):
+            logger.info(f"Fitting estimator {i + 1}/{len(self.estimators)}")
+            # SingleFitQuantileEstimator fit method only needs X and y
+            estimator.fit(X, y)
+
+        # Compute weights
+        self.weights = self._compute_weights(X, y)
+        self.fitted = True
         return self
+
+    def _compute_weights(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """
+        Compute weights for each estimator based on cross-validation performance.
+        This version is specialized for SingleFitQuantileEstimator models.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Training data.
+        y : array-like of shape (n_samples,)
+            Target values.
+
+        Returns
+        -------
+        weights : array-like of shape (n_estimators,)
+            Weights for each estimator.
+        """
+        cv_errors = []
+        kf = KFold(n_splits=self.cv, shuffle=True, random_state=self.random_state)
+
+        # For meta_learner strategy, we need to collect predictions on validation folds
+        if self.weighting_strategy == "meta_learner":
+            all_val_indices = np.array([], dtype=int)
+            all_val_predictions = np.zeros((len(y), len(self.estimators)))
+            all_val_targets = np.array([])
+
+        # Standard quantiles for evaluation if needed
+        eval_quantiles = getattr(self, "quantiles_", [0.1, 0.5, 0.9])
+
+        # Calculate cross-validation error for each estimator
+        for i, estimator in enumerate(self.estimators):
+            fold_errors = []
+            logger.info(
+                f"Computing CV errors for estimator {i + 1}/{len(self.estimators)}"
+            )
+
+            for fold_idx, (train_idx, val_idx) in enumerate(kf.split(X)):
+                X_train, X_val = X[train_idx], X[val_idx]
+                y_train, y_val = y[train_idx], y[val_idx]
+
+                # Use deepcopy instead of clone for custom estimators
+                est_clone = deepcopy(estimator)
+                est_clone.fit(X_train, y_train)
+
+                # Calculate error on validation set
+                error = self._calculate_error(est_clone, X_val, y_val)
+                fold_errors.append(error)
+
+                # For meta_learner, collect validation predictions
+                if self.weighting_strategy == "meta_learner":
+                    val_preds = est_clone.predict(X_val, quantiles=eval_quantiles)
+                    # We need to handle multi-dimensional predictions
+                    # Just use one quantile (middle one) for meta-learning
+                    middle_idx = len(eval_quantiles) // 2
+                    val_preds_flat = val_preds[:, middle_idx].reshape(-1)
+
+                    # For the first estimator in each fold, store the validation indices and targets
+                    if i == 0:
+                        if fold_idx == 0:
+                            all_val_indices = val_idx
+                            all_val_targets = y_val
+                        else:
+                            all_val_indices = np.concatenate([all_val_indices, val_idx])
+                            all_val_targets = np.concatenate([all_val_targets, y_val])
+
+                    # Store predictions for this estimator
+                    all_val_predictions[val_idx, i] = val_preds_flat
+
+            # Use mean error across folds
+            cv_errors.append(np.mean(fold_errors))
+
+        # Convert errors to weights based on strategy
+        # Same as base class from here on
+        if self.weighting_strategy == "uniform":
+            weights = np.ones(len(self.estimators))
+        elif self.weighting_strategy == "inverse_error":
+            # Prevent division by zero
+            errors = np.array(cv_errors)
+            if np.any(errors == 0):
+                errors[errors == 0] = np.min(errors[errors > 0]) / 100
+            weights = 1.0 / errors
+        elif self.weighting_strategy == "rank":
+            # Rank estimators (lower error is better)
+            ranks = np.argsort(np.argsort(-np.array(cv_errors)))
+            weights = 1.0 / (ranks + 1)  # +1 to avoid division by zero
+        elif self.weighting_strategy == "meta_learner":
+            # Sort predictions by the original indices to align with targets
+            sorted_indices = np.argsort(all_val_indices)
+            sorted_predictions = all_val_predictions[all_val_indices[sorted_indices]]
+            sorted_targets = all_val_targets[sorted_indices]
+
+            # Fit linear regression to learn optimal weights
+            self.meta_learner = LinearRegression(fit_intercept=False, positive=True)
+            self.meta_learner.fit(sorted_predictions, sorted_targets)
+            weights = self.meta_learner.coef_
+
+            # If any weights are negative, set to small positive value
+            weights = np.maximum(weights, 1e-6)
+        else:
+            raise ValueError(f"Unknown weighting strategy: {self.weighting_strategy}")
+
+        # Normalize weights
+        weights = weights / np.sum(weights)
+
+        return weights
+
+    # def fit(self, X: np.ndarray, y: np.ndarray):
+    #     """
+    #     Fit all estimators and compute weights based on CV performance.
+
+    #     Parameters
+    #     ----------
+    #     X : array-like of shape (n_samples, n_features)
+    #         Training data.
+    #     y : array-like of shape (n_samples,)
+    #         Target values.
+
+    #     Returns
+    #     -------
+
+    #     self : object
+    #         Returns self.
+    #     """
+    #     BaseEnsembleEstimator.fit(self, X, y)
+    #     return self
 
     def _get_submodel_predictions(self, X: np.ndarray) -> np.ndarray:
         """
@@ -509,6 +704,8 @@ class MultiFitQuantileEnsembleEstimator(BaseEnsembleEstimator, BaseQuantileEstim
     def fit(self, X: np.ndarray, y: np.ndarray):
         """
         Fit all estimators and compute weights based on CV performance.
+        For MultiFitQuantileEnsembleEstimator, we need to pass the quantiles
+        to each estimator.
 
         Parameters
         ----------
@@ -523,8 +720,136 @@ class MultiFitQuantileEnsembleEstimator(BaseEnsembleEstimator, BaseQuantileEstim
         self : object
             Returns self.
         """
-        BaseEnsembleEstimator.fit(self, X, y)
+        if len(self.estimators) == 0:
+            raise ValueError("No estimators have been added to the ensemble.")
+
+        # Fit each estimator on the full dataset
+        for i, estimator in enumerate(self.estimators):
+            logger.info(f"Fitting estimator {i + 1}/{len(self.estimators)}")
+            # Check if estimator already has quantiles set
+            if (
+                not hasattr(estimator, "quantiles")
+                or estimator.quantiles != self.quantiles
+            ):
+                # If this is a BaseQuantileEstimator instance, set its quantiles
+                if hasattr(estimator, "quantiles"):
+                    estimator.quantiles = self.quantiles
+
+            # Now fit the estimator
+            estimator.fit(X, y)
+
+        # Compute weights
+        self.weights = self._compute_weights(X, y)
+        self.fitted = True
         return self
+
+    def _compute_weights(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """
+        Compute weights for each estimator based on cross-validation performance.
+        This version is specialized for MultiFitQuantileEstimator models.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Training data.
+        y : array-like of shape (n_samples,)
+            Target values.
+
+        Returns
+        -------
+        weights : array-like of shape (n_estimators,)
+            Weights for each estimator.
+        """
+        cv_errors = []
+        kf = KFold(n_splits=self.cv, shuffle=True, random_state=self.random_state)
+
+        # For meta_learner strategy, we need to collect predictions on validation folds
+        if self.weighting_strategy == "meta_learner":
+            all_val_indices = np.array([], dtype=int)
+            all_val_predictions = np.zeros((len(y), len(self.estimators)))
+            all_val_targets = np.array([])
+
+        # Calculate cross-validation error for each estimator
+        for i, estimator in enumerate(self.estimators):
+            fold_errors = []
+            logger.info(
+                f"Computing CV errors for estimator {i + 1}/{len(self.estimators)}"
+            )
+
+            for fold_idx, (train_idx, val_idx) in enumerate(kf.split(X)):
+                X_train, X_val = X[train_idx], X[val_idx]
+                y_train, y_val = y[train_idx], y[val_idx]
+
+                # Use deepcopy instead of clone for custom estimators
+                est_clone = deepcopy(estimator)
+                # Ensure the clone has the same quantiles
+                if hasattr(est_clone, "quantiles"):
+                    est_clone.quantiles = self.quantiles
+
+                est_clone.fit(X_train, y_train)
+
+                # Calculate error on validation set
+                error = self._calculate_error(est_clone, X_val, y_val)
+                fold_errors.append(error)
+
+                # For meta_learner, collect validation predictions
+                if self.weighting_strategy == "meta_learner":
+                    # MultiFitQuantileEstimator's predict doesn't need quantiles parameter
+                    val_preds = est_clone.predict(X_val)
+                    # Just use one quantile (middle one) for meta-learning
+                    middle_idx = len(self.quantiles) // 2
+                    val_preds_flat = val_preds[:, middle_idx].reshape(-1)
+
+                    # For the first estimator in each fold, store the validation indices and targets
+                    if i == 0:
+                        if fold_idx == 0:
+                            all_val_indices = val_idx
+                            all_val_targets = y_val
+                        else:
+                            all_val_indices = np.concatenate([all_val_indices, val_idx])
+                            all_val_targets = np.concatenate([all_val_targets, y_val])
+
+                    # Store predictions for this estimator
+                    all_val_predictions[val_idx, i] = val_preds_flat
+
+            # Use mean error across folds
+            cv_errors.append(np.mean(fold_errors))
+
+        # Convert errors to weights - same as in base class
+        # ...existing code for converting errors to weights...
+        # (Same logic as in SingleFitQuantileEnsembleEstimator)
+        if self.weighting_strategy == "uniform":
+            weights = np.ones(len(self.estimators))
+        elif self.weighting_strategy == "inverse_error":
+            # Prevent division by zero
+            errors = np.array(cv_errors)
+            if np.any(errors == 0):
+                errors[errors == 0] = np.min(errors[errors > 0]) / 100
+            weights = 1.0 / errors
+        elif self.weighting_strategy == "rank":
+            # Rank estimators (lower error is better)
+            ranks = np.argsort(np.argsort(-np.array(cv_errors)))
+            weights = 1.0 / (ranks + 1)  # +1 to avoid division by zero
+        elif self.weighting_strategy == "meta_learner":
+            # Sort predictions by the original indices to align with targets
+            sorted_indices = np.argsort(all_val_indices)
+            sorted_predictions = all_val_predictions[all_val_indices[sorted_indices]]
+            sorted_targets = all_val_targets[sorted_indices]
+
+            # Fit linear regression to learn optimal weights
+            self.meta_learner = LinearRegression(fit_intercept=False, positive=True)
+            self.meta_learner.fit(sorted_predictions, sorted_targets)
+            weights = self.meta_learner.coef_
+
+            # If any weights are negative, set to small positive value
+            weights = np.maximum(weights, 1e-6)
+        else:
+            raise ValueError(f"Unknown weighting strategy: {self.weighting_strategy}")
+
+        # Normalize weights
+        weights = weights / np.sum(weights)
+
+        return weights
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """

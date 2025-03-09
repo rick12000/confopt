@@ -13,14 +13,16 @@ DNN_NAME: str = "dnn"
 QKNN_NAME: str = "qknn"
 QL_NAME: str = "ql"
 QLGBM_NAME: str = "qlgbm"
-QENS_NAME: str = "sfqens"  # New quantile ensemble model
+SFQENS_NAME: str = "sfqens"  # New quantile ensemble model
+MFENS_NAME: str = "mfqens"  # New ensemble model name for QLGBM + QL combination
 
 # Reference names of quantile regression estimators:
 QUANTILE_ESTIMATOR_ARCHITECTURES: List[str] = [
     QGBM_NAME,
     QLGBM_NAME,
     QL_NAME,  # Added QuantileLasso
-    QENS_NAME,  # Added Quantile Ensemble
+    SFQENS_NAME,  # Added Quantile Ensemble
+    MFENS_NAME,  # Add the new ensemble name to the list if needed
 ]
 
 POINT_ESTIMATOR_ARCHITECTURES: List[str] = [
@@ -30,7 +32,7 @@ POINT_ESTIMATOR_ARCHITECTURES: List[str] = [
     LGBM_NAME,
     KNN_NAME,
     RF_NAME,
-    QENS_NAME,  # Add QENS here to make it work as a point estimator too
+    SFQENS_NAME,  # Add QENS here to make it work as a point estimator too
 ]
 
 # Reference names of estimators that don't need their input data normalized:
