@@ -24,6 +24,7 @@ from confopt.config import (
     QL_NAME,
     QLGBM_NAME,
     LGBM_NAME,
+    QENS_NAME,  # Import the new ensemble model name
     QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
 from confopt.quantile_wrappers import (
@@ -125,6 +126,19 @@ SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
         "reg_alpha": [0.1, 0.5, 1.0],
         "reg_lambda": [0.1, 0.5, 1.0],
     },
+    QENS_NAME: {
+        # Ensemble parameters
+        "cv": [2, 3],
+        "weighting_strategy": ["inverse_error", "rank", "uniform"],
+        # QRF parameters
+        "qrf_n_estimators": [10, 25, 50],
+        "qrf_max_depth": [3, 5],
+        "qrf_max_features": [0.6, 0.8],
+        "qrf_min_samples_split": [2, 3],
+        "qrf_bootstrap": [True, False],
+        # QKNN parameters
+        "qknn_n_neighbors": [3, 5, 7, 10],
+    },
 }
 
 SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
@@ -210,6 +224,19 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
         "reg_alpha": 0.1,
         "reg_lambda": 0.1,
         "min_child_weight": 3,
+    },
+    QENS_NAME: {
+        # Ensemble parameters
+        "cv": 3,
+        "weighting_strategy": "inverse_error",
+        # QRF parameters
+        "qrf_n_estimators": 25,
+        "qrf_max_depth": 5,
+        "qrf_max_features": 0.8,
+        "qrf_min_samples_split": 2,
+        "qrf_bootstrap": True,
+        # QKNN parameters
+        "qknn_n_neighbors": 5,
     },
 }
 
@@ -392,6 +419,38 @@ def initialize_point_estimator(
         )
     elif estimator_architecture == QKNN_NAME:
         initialized_model = QuantileKNN(**initialization_params)
+    elif estimator_architecture == QENS_NAME:
+        # Extract parameters for each model
+        params = initialization_params.copy()
+
+        qrf_params = {
+            "n_estimators": params.pop("qrf_n_estimators"),
+            "max_depth": params.pop("qrf_max_depth"),
+            "max_features": params.pop("qrf_max_features"),
+            "min_samples_split": params.pop("qrf_min_samples_split"),
+            "bootstrap": params.pop("qrf_bootstrap"),
+            "random_state": random_state,
+        }
+
+        qknn_params = {
+            "n_neighbors": params.pop("qknn_n_neighbors"),
+        }
+
+        # Import SingleFitQuantileEnsembleEstimator
+        from confopt.ensembling import SingleFitQuantileEnsembleEstimator
+
+        # Create ensemble estimator
+        ensemble = SingleFitQuantileEnsembleEstimator(
+            cv=params.pop("cv", 3),
+            weighting_strategy=params.pop("weighting_strategy", "inverse_error"),
+            random_state=random_state,
+        )
+
+        # Add individual estimators
+        ensemble.add_estimator(QuantileForest(**qrf_params))
+        ensemble.add_estimator(QuantileKNN(**qknn_params))
+
+        initialized_model = ensemble
     else:
         raise ValueError(
             f"{estimator_architecture} is not a valid point estimator architecture."
