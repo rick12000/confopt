@@ -275,15 +275,9 @@ class BaseSingleFitQuantileEstimator:
             An array of shape (n_samples, n_predictions) where each row contains
             multiple predictions whose distribution will be used to compute quantiles.
         """
-        if not hasattr(self.fitted_model, "estimators_"):
-            raise ValueError(
-                "The fitted model does not have an 'estimators_' attribute."
-            )
-        # Collect predictions from each sub-model (e.g. tree in a forest)
-        sub_preds = np.column_stack(
-            [estimator.predict(X) for estimator in self.fitted_model.estimators_]
+        raise NotImplementedError(
+            "Subclasses should implement the _get_submodel_predictions() method."
         )
-        return sub_preds
 
     def predict(self, X: np.ndarray, quantiles: List[float]) -> np.ndarray:
         """
@@ -321,7 +315,7 @@ class QuantileForest(BaseSingleFitQuantileEstimator):
         max_features: float = 0.8,
         min_samples_split: int = 2,
         bootstrap: bool = True,
-        **rf_kwargs,
+        random_state: Optional[int] = None,
     ):
         """
         Parameters
@@ -336,6 +330,7 @@ class QuantileForest(BaseSingleFitQuantileEstimator):
             "max_features": max_features,
             "min_samples_split": min_samples_split,
             "bootstrap": bootstrap,
+            "random_state": random_state,
         }
         super().__init__()
 
@@ -345,6 +340,35 @@ class QuantileForest(BaseSingleFitQuantileEstimator):
         """
         self.fitted_model = RandomForestRegressor(**self.rf_kwargs)
         self.fitted_model.fit(X, y)
+
+    def _get_submodel_predictions(self, X: np.ndarray) -> np.ndarray:
+        """
+        Retrieves a collection of predictions for each sample.
+
+        Default implementation assumes that self.fitted_model has an attribute
+        'estimators_' (e.g. for ensembles like RandomForestRegressor). This method
+        should be overridden for models that do not follow this pattern (e.g. KNN).
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Feature matrix for prediction.
+
+        Returns
+        -------
+        np.ndarray
+            An array of shape (n_samples, n_predictions) where each row contains
+            multiple predictions whose distribution will be used to compute quantiles.
+        """
+        if not hasattr(self.fitted_model, "estimators_"):
+            raise ValueError(
+                "The fitted model does not have an 'estimators_' attribute."
+            )
+        # Collect predictions from each sub-model (e.g. tree in a forest)
+        sub_preds = np.column_stack(
+            [estimator.predict(X) for estimator in self.fitted_model.estimators_]
+        )
+        return sub_preds
 
 
 class QuantileKNN(BaseSingleFitQuantileEstimator):

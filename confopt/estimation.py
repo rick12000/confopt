@@ -26,6 +26,7 @@ from confopt.config import (
     LGBM_NAME,
     SFQENS_NAME,  # Import the new ensemble model name
     MFENS_NAME,  # Import the new ensemble model name
+    PENS_NAME,  # Import the new point ensemble model name
     QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
 from confopt.quantile_wrappers import (
@@ -39,6 +40,7 @@ from confopt.quantile_wrappers import (
 from confopt.ensembling import (
     SingleFitQuantileEnsembleEstimator,
     MultiFitQuantileEnsembleEstimator,
+    PointEnsembleEstimator,  # Make sure to import PointEnsembleEstimator
 )
 
 from confopt.utils import get_tuning_configurations
@@ -163,6 +165,22 @@ SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
         "ql_max_iter": [100, 200, 500],
         "ql_p_tol": [1e-3, 1e-4],
     },
+    PENS_NAME: {
+        # Ensemble parameters
+        "cv": [2, 3],
+        "weighting_strategy": ["inverse_error", "rank", "uniform", "meta_learner"],
+        # GBM parameters
+        "gbm_learning_rate": [0.05, 0.1, 0.2, 0.3],
+        "gbm_n_estimators": [10, 25, 50],
+        "gbm_min_samples_split": [2, 5, 7],
+        "gbm_min_samples_leaf": [2, 3, 5],
+        "gbm_max_depth": [2, 3, 4],
+        "gbm_subsample": [0.8, 0.9, 1.0],
+        # KNN parameters
+        "knn_n_neighbors": [3, 5, 7, 9],
+        "knn_weights": ["uniform", "distance"],
+        "knn_p": [1, 2],
+    },
 }
 
 SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
@@ -279,6 +297,22 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
         "ql_alpha": 0.05,
         "ql_max_iter": 200,
         "ql_p_tol": 1e-4,
+    },
+    PENS_NAME: {
+        # Ensemble parameters
+        "cv": 3,
+        "weighting_strategy": "inverse_error",
+        # GBM parameters
+        "gbm_learning_rate": 0.1,
+        "gbm_n_estimators": 25,
+        "gbm_min_samples_split": 3,
+        "gbm_min_samples_leaf": 3,
+        "gbm_max_depth": 2,
+        "gbm_subsample": 0.9,
+        # KNN parameters
+        "knn_n_neighbors": 5,
+        "knn_weights": "distance",
+        "knn_p": 2,
     },
 }
 
@@ -402,7 +436,6 @@ def initialize_quantile_estimator(
             estimators=estimators,
             cv=params.pop("cv", 3),
             weighting_strategy=params.pop("weighting_strategy", "meta_learner"),
-            quantiles=pinball_loss_alpha,
             random_state=random_state,
         )
 
@@ -498,6 +531,38 @@ def initialize_point_estimator(
         )
     elif estimator_architecture == QKNN_NAME:
         initialized_model = QuantileKNN(**initialization_params)
+    elif estimator_architecture == PENS_NAME:
+        # Extract parameters for each model
+        params = initialization_params.copy()
+
+        gbm_params = {
+            "learning_rate": params.pop("gbm_learning_rate"),
+            "n_estimators": params.pop("gbm_n_estimators"),
+            "min_samples_split": params.pop("gbm_min_samples_split"),
+            "min_samples_leaf": params.pop("gbm_min_samples_leaf"),
+            "max_depth": params.pop("gbm_max_depth"),
+            "subsample": params.pop("gbm_subsample"),
+            "random_state": random_state,
+        }
+
+        knn_params = {
+            "n_neighbors": params.pop("knn_n_neighbors"),
+            "weights": params.pop("knn_weights"),
+            "p": params.pop("knn_p", 2),
+        }
+
+        # Create ensemble estimator with GBM and KNN
+        ensemble = PointEnsembleEstimator(
+            cv=params.pop("cv", 3),
+            weighting_strategy=params.pop("weighting_strategy", "inverse_error"),
+            random_state=random_state,
+        )
+
+        # Add individual estimators
+        ensemble.add_estimator(GradientBoostingRegressor(**gbm_params))
+        ensemble.add_estimator(KNeighborsRegressor(**knn_params))
+
+        initialized_model = ensemble
     elif estimator_architecture == SFQENS_NAME:
         # Extract parameters for each model
         params = initialization_params.copy()
