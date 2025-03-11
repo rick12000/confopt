@@ -456,7 +456,7 @@ class TestSingleFitQuantileConformalSearcher:
         assert searcher.conformal_estimator.quantile_estimator is not None
         assert searcher.training_time is not None
         assert searcher.primary_estimator_error is not None
-        assert searcher.median_estimator is None  # Not used with UCB
+        assert searcher.point_estimator is None  # Not used with UCB
 
     def test_fit_with_thompson_optimistic(self, sample_data):
         """Test fit method with Thompson sampler and optimistic sampling"""
@@ -476,7 +476,7 @@ class TestSingleFitQuantileConformalSearcher:
 
         # Check that both estimators are fitted
         assert searcher.conformal_estimator.quantile_estimator is not None
-        assert searcher.median_estimator is not None  # Used with optimistic Thompson
+        assert searcher.point_estimator is not None  # Used with optimistic Thompson
 
     def test_predict_with_ucb(self, fitted_single_fit_searcher, sample_data):
         """Test prediction with UCB sampling strategy"""
@@ -672,7 +672,7 @@ class TestMultiFitQuantileConformalSearcher:
         )
 
         # Check that median estimator is fitted (for optimistic sampling)
-        assert searcher.median_estimator is not None
+        assert searcher.point_estimator is not None
 
         # Make predictions
         X_test = sample_data["X_test"]

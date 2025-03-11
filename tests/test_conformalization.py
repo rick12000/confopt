@@ -1,9 +1,6 @@
 import numpy as np
 import pytest
-import gc
 from confopt.conformalization import (
-    # MedianEstimator,
-    # PointEstimator,
     LocallyWeightedConformalEstimator,
     QuantileInterval,
     SingleFitQuantileConformalEstimator,
@@ -15,119 +12,8 @@ from confopt.config import (
     SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
 
-
-@pytest.fixture(autouse=True)
-def cleanup_after_test():
-    """Clean up resources after each test to prevent memory accumulation."""
-    yield
-    # Force garbage collection to clean up any lingering resources
-    gc.collect()
-
-
-# class TestMedianEstimator:
-#     @pytest.mark.parametrize("estimator_architecture", QUANTILE_ESTIMATOR_ARCHITECTURES)
-#     def test_initialization(self, estimator_architecture):
-#         """Test that MedianEstimator initializes correctly"""
-#         estimator = MedianEstimator(
-#             quantile_estimator_architecture=estimator_architecture
-#         )
-#         assert estimator.quantile_estimator_architecture == estimator_architecture
-#         assert estimator.median_estimator is None
-
-#     @pytest.mark.parametrize(
-#         "estimator_architecture", QUANTILE_ESTIMATOR_ARCHITECTURES[:2]
-#     )  # Limit to 2 for speed
-#     def test_fit_and_predict(
-#         self, estimator_architecture, dummy_fixed_quantile_dataset
-#     ):
-#         """Test that MedianEstimator fits and predicts correctly"""
-#         estimator = MedianEstimator(
-#             quantile_estimator_architecture=estimator_architecture
-#         )
-
-#         # Prepare data
-#         X, y = (
-#             dummy_fixed_quantile_dataset[:, 0].reshape(-1, 1),
-#             dummy_fixed_quantile_dataset[:, 1],
-#         )
-#         train_split = 0.8
-#         X_train, y_train = (
-#             X[: round(len(X) * train_split), :],
-#             y[: round(len(y) * train_split)],
-#         )
-#         X_test = X[round(len(X) * train_split) :, :]
-
-#         # Fit the estimator
-#         estimator.fit(X=X_train, y=y_train, random_state=42)
-
-#         # Verify estimator is fitted
-#         assert estimator.median_estimator is not None
-
-#         # Test predictions
-#         predictions = estimator.predict(X_test)
-#         assert isinstance(predictions, np.ndarray)
-#         assert predictions.shape[0] == X_test.shape[0]
-
-#     def test_predict_error(self):
-#         """Test error case - predict before fit"""
-#         estimator = MedianEstimator(
-#             quantile_estimator_architecture=QUANTILE_ESTIMATOR_ARCHITECTURES[0]
-#         )
-#         with pytest.raises(ValueError):
-#             estimator.predict(np.random.rand(10, 1))
-
-
-# class TestPointEstimator:
-#     @pytest.mark.parametrize("estimator_architecture", POINT_ESTIMATOR_ARCHITECTURES[:2])
-#     def test_initialization(self, estimator_architecture):
-#         """Test that PointEstimator initializes correctly"""
-#         estimator = PointEstimator(
-#             point_estimator_architecture=estimator_architecture
-#         )
-#         assert estimator.point_estimator_architecture == estimator_architecture
-#         assert estimator.point_estimator is None
-
-#     @pytest.mark.parametrize(
-#         "estimator_architecture", POINT_ESTIMATOR_ARCHITECTURES[:2]
-#     )  # Limit to 2 for speed
-#     def test_fit_and_predict(
-#         self, estimator_architecture, dummy_fixed_quantile_dataset
-#     ):
-#         """Test that PointEstimator fits and predicts correctly"""
-#         estimator = PointEstimator(
-#             point_estimator_architecture=estimator_architecture
-#         )
-
-#         # Prepare data
-#         X, y = (
-#             dummy_fixed_quantile_dataset[:, 0].reshape(-1, 1),
-#             dummy_fixed_quantile_dataset[:, 1],
-#         )
-#         train_split = 0.8
-#         X_train, y_train = (
-#             X[: round(len(X) * train_split), :],
-#             y[: round(len(y) * train_split)],
-#         )
-#         X_test = X[round(len(X) * train_split) :, :]
-
-#         # Fit the estimator
-#         estimator.fit(X=X_train, y=y_train, random_state=42)
-
-#         # Verify estimator is fitted
-#         assert estimator.point_estimator is not None
-
-#         # Test predictions
-#         predictions = estimator.predict(X_test)
-#         assert isinstance(predictions, np.ndarray)
-#         assert predictions.shape[0] == X_test.shape[0]
-
-#     def test_predict_error(self):
-#         """Test error case - predict before fit"""
-#         estimator = PointEstimator(
-#             point_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0]
-#         )
-#         with pytest.raises(ValueError):
-#             estimator.predict(np.random.rand(10, 1))
+# Global variable for coverage tolerance
+COVERAGE_TOLERANCE = 0.05
 
 
 class TestLocallyWeightedConformalEstimator:
@@ -244,11 +130,9 @@ class TestLocallyWeightedConformalEstimator:
             coverage = np.mean(
                 (y_val >= lower_bound.flatten()) & (y_val <= upper_bound.flatten())
             )
-            assert abs((1 - coverage) - alpha) < 0.2  # Allow for some error in coverage
-
-        # Explicitly delete estimator to free resources
-        del estimator
-        gc.collect()
+            assert (
+                abs((1 - coverage) - alpha) < COVERAGE_TOLERANCE
+            )  # Allow for some error in coverage
 
     def test_predict_interval_error(self):
         """Test error handling in predict_interval"""
@@ -298,10 +182,6 @@ class TestSingleFitQuantileConformalEstimator:
         interval = QuantileInterval(lower_quantile=0.1, upper_quantile=0.9)
         key = estimator._interval_key(interval)
         assert key == "0.1_0.9"
-
-        # Explicitly delete estimator to free resources
-        del estimator
-        gc.collect()
 
     @pytest.mark.parametrize(
         "estimator_architecture",
@@ -373,11 +253,7 @@ class TestSingleFitQuantileConformalEstimator:
             # Check interval coverage (approximate)
             target_coverage = interval.upper_quantile - interval.lower_quantile
             actual_coverage = np.mean((y_val >= lower_bound) & (y_val <= upper_bound))
-            assert abs(actual_coverage - target_coverage) < 0.2
-
-        # Explicitly delete estimator to free resources
-        del estimator
-        gc.collect()
+            assert abs(actual_coverage - target_coverage) < COVERAGE_TOLERANCE
 
     def test_predict_interval_error(self):
         """Test error handling in predict_interval"""
@@ -390,10 +266,6 @@ class TestSingleFitQuantileConformalEstimator:
 
         with pytest.raises(ValueError):
             estimator.predict_interval(X=X, interval=interval)
-
-        # Explicitly delete estimator to free resources
-        del estimator
-        gc.collect()
 
 
 class TestMultiFitQuantileConformalEstimator:
@@ -414,10 +286,6 @@ class TestMultiFitQuantileConformalEstimator:
         assert estimator.quantile_estimator is None
         assert estimator.nonconformity_scores is None
         assert estimator.conformalize_predictions is False
-
-        # Explicitly delete estimator to free resources
-        del estimator
-        gc.collect()
 
     @pytest.mark.parametrize(
         "estimator_architecture",
@@ -481,11 +349,7 @@ class TestMultiFitQuantileConformalEstimator:
         interval = estimator.interval
         target_coverage = interval.upper_quantile - interval.lower_quantile
         actual_coverage = np.mean((y_val >= lower_bound) & (y_val <= upper_bound))
-        assert abs(actual_coverage - target_coverage) < 0.2
-
-        # Explicitly delete estimator to free resources
-        del estimator
-        gc.collect()
+        assert abs(actual_coverage - target_coverage) < COVERAGE_TOLERANCE
 
     def test_predict_interval_error(self):
         """Test error handling in predict_interval"""
@@ -501,7 +365,3 @@ class TestMultiFitQuantileConformalEstimator:
 
         with pytest.raises(ValueError):
             estimator.predict_interval(X=X)
-
-        # Explicitly delete estimator to free resources
-        del estimator
-        gc.collect()

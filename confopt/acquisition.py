@@ -1,6 +1,6 @@
 import logging
 from typing import Optional, List, Union, Literal
-
+from confopt.estimation import SEARCH_MODEL_DEFAULT_CONFIGURATIONS
 import numpy as np
 from confopt.tracking import RuntimeTracker
 from confopt.adaptation import ACI, DtACI
@@ -9,9 +9,8 @@ from confopt.conformalization import (
     QuantileInterval,
     SingleFitQuantileConformalEstimator,
     MultiFitQuantileConformalEstimator,
-    MedianEstimator,
-    PointEstimator,
 )
+from confopt.estimation import initialize_point_estimator
 
 logger = logging.getLogger(__name__)
 
@@ -410,7 +409,7 @@ class SingleFitQuantileConformalSearcher:
             quantile_estimator_architecture=quantile_estimator_architecture,
             n_pre_conformal_trials=n_pre_conformal_trials,
         )
-        self.median_estimator = None
+        self.point_estimator = None
         self.training_time = None
         self.primary_estimator_error = None
         self.predictions_per_interval = None
@@ -434,11 +433,14 @@ class SingleFitQuantileConformalSearcher:
             isinstance(self.sampler, ThompsonSampler)
             and self.sampler.enable_optimistic_sampling
         ):
-            self.median_estimator = PointEstimator("gbm")
-            self.median_estimator.fit(
+            self.point_estimator = initialize_point_estimator(
+                estimator_architecture="gbm",
+                initialization_params=SEARCH_MODEL_DEFAULT_CONFIGURATIONS["gbm"],
+                random_state=random_state,
+            )
+            self.point_estimator.fit(
                 X=np.vstack((X_train, X_val)),
                 y=np.concatenate((y_train, y_val)),
-                random_state=random_state,
             )
 
         # Get all intervals from the sampler
@@ -536,12 +538,9 @@ class SingleFitQuantileConformalSearcher:
         )
 
         # Apply optimistic sampling if enabled - do it once for all samples
-        if (
-            self.sampler.enable_optimistic_sampling
-            and self.median_estimator is not None
-        ):
+        if self.sampler.enable_optimistic_sampling and self.point_estimator is not None:
             # Get all median predictions in one call
-            median_predictions = self.median_estimator.predict(X)
+            median_predictions = self.point_estimator.predict(X)
             lower_bounds = np.minimum(lower_bounds, median_predictions)
 
         return lower_bounds
@@ -604,7 +603,7 @@ class MultiFitQuantileConformalSearcher:
             self.sampler.quantiles = self.sampler._calculate_quantiles()
         self.n_pre_conformal_trials = n_pre_conformal_trials
 
-        self.median_estimator = None
+        self.point_estimator = None
         self.training_time = None
         self.primary_estimator_error = None
         self.predictions_per_interval = None
@@ -629,13 +628,14 @@ class MultiFitQuantileConformalSearcher:
             isinstance(self.sampler, ThompsonSampler)
             and self.sampler.enable_optimistic_sampling
         ):
-            self.median_estimator = MedianEstimator(
-                self.quantile_estimator_architecture
+            self.point_estimator = initialize_point_estimator(
+                estimator_architecture="gbm",
+                initialization_params=SEARCH_MODEL_DEFAULT_CONFIGURATIONS["gbm"],
+                random_state=random_state,
             )
-            self.median_estimator.fit(
+            self.point_estimator.fit(
                 X=np.vstack((X_train, X_val)),
                 y=np.concatenate((y_train, y_val)),
-                random_state=random_state,
             )
 
         # Get intervals from the sampler
@@ -732,12 +732,9 @@ class MultiFitQuantileConformalSearcher:
         )
 
         # Apply optimistic sampling if enabled - do it once for all samples
-        if (
-            self.sampler.enable_optimistic_sampling
-            and self.median_estimator is not None
-        ):
+        if self.sampler.enable_optimistic_sampling and self.point_estimator is not None:
             # Get all median predictions in one call
-            median_predictions = self.median_estimator.predict(X)
+            median_predictions = self.point_estimator.predict(X)
             lower_bounds = np.minimum(lower_bounds, median_predictions)
 
         return lower_bounds

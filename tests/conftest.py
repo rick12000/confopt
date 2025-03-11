@@ -13,7 +13,6 @@ from confopt.tuning import (
 from confopt.utils import get_tuning_configurations
 from hashlib import sha256
 from confopt.conformalization import (
-    MedianEstimator,
     LocallyWeightedConformalEstimator,
     SingleFitQuantileConformalEstimator,
     MultiFitQuantileConformalEstimator,
@@ -156,12 +155,6 @@ def dummy_tuner(dummy_parameter_grid):
 def sample_quantile_interval():
     """Sample quantile interval with lower=0.1, upper=0.9"""
     return QuantileInterval(lower_quantile=0.1, upper_quantile=0.9)
-
-
-@pytest.fixture
-def sample_median_estimator():
-    """Initialize a median estimator with QGBM architecture"""
-    return MedianEstimator(quantile_estimator_architecture=QGBM_NAME)
 
 
 @pytest.fixture
