@@ -76,6 +76,225 @@ class BaseQuantileEstimator:
         return y_pred
 
 
+class BaseSingleFitQuantileEstimator:
+    """
+    Base class for quantile estimators that are fit only once and then produce
+    quantile predictions by aggregating a set of predictions (e.g., from sub-models
+    or from nearest neighbors).
+
+    Child classes should implement the fit() method and, if needed, override
+    _get_submodel_predictions().
+    """
+
+    def __init__(self):
+        """
+        Parameters
+        ----------
+        quantiles : List[float]
+            List of quantiles to predict (values between 0 and 1).
+        """
+        self.fitted_model = None  # For ensemble models (e.g., forest)
+
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        """
+        Fit the underlying model. Subclasses should implement this.
+        """
+        raise NotImplementedError("Subclasses should implement the fit() method.")
+
+    def _get_candidate_local_distribution(self, X: np.ndarray) -> np.ndarray:
+        """
+        Retrieves a collection of predictions for each sample.
+
+        Default implementation assumes that self.fitted_model has an attribute
+        'estimators_' (e.g. for ensembles like RandomForestRegressor). This method
+        should be overridden for models that do not follow this pattern (e.g. KNN).
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Feature matrix for prediction.
+
+        Returns
+        -------
+        np.ndarray
+            An array of shape (n_samples, n_predictions) where each row contains
+            multiple predictions whose distribution will be used to compute quantiles.
+        """
+        raise NotImplementedError(
+            "Subclasses should implement the _get_submodel_predictions() method."
+        )
+
+    def predict(self, X: np.ndarray, quantiles: List[float]) -> np.ndarray:
+        """
+        Computes quantile predictions for each sample by aggregating predictions.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Feature matrix for prediction.
+
+        Returns
+        -------
+        np.ndarray
+            A 2D array of shape (n_samples, len(quantiles)), where each column
+            corresponds to a quantile prediction.
+        """
+        candidate_distribution = self._get_candidate_local_distribution(X)
+        # Convert quantiles (0-1) to percentiles (0-100)
+        percentiles = [q * 100 for q in quantiles]
+        quantile_preds = np.percentile(candidate_distribution, percentiles, axis=1).T
+        return quantile_preds
+
+
+class QuantRegressionWrapper:
+    """
+    Wrapper for statsmodels QuantReg to make it compatible with sklearn-style API.
+    """
+
+    def __init__(self, alpha: float = 0.5, max_iter: int = 1000, p_tol: float = 1e-6):
+        """
+        Initialize the QuantReg wrapper with parameters.
+
+        Parameters
+        ----------
+        alpha : float
+            The quantile to fit (between 0 and 1)
+        max_iter : int
+            Maximum number of iterations for optimization
+        p_tol : float
+            Convergence tolerance
+        """
+        self.alpha = alpha  # The quantile level
+        self.max_iter = max_iter
+        self.p_tol = p_tol
+        self.model = None
+        self.result = None
+
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        """
+        Fit quantile regression model.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Feature matrix
+        y : np.ndarray
+            Target vector
+        """
+        # Add intercept column to X if not present
+        if not np.any(np.all(X == 1, axis=0)):
+            X_with_intercept = np.column_stack([np.ones(len(X)), X])
+        else:
+            X_with_intercept = X
+
+        # Create and fit the model
+        self.model = QuantReg(y, X_with_intercept)
+        self.result = self.model.fit(
+            q=self.alpha, max_iter=self.max_iter, p_tol=self.p_tol
+        )
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """
+        Make predictions using the fitted model.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Feature matrix
+
+        Returns
+        -------
+        np.ndarray
+            Predictions
+        """
+        # Add intercept column to X if not present
+        if not np.any(np.all(X == 1, axis=0)):
+            X_with_intercept = np.column_stack([np.ones(len(X)), X])
+        else:
+            X_with_intercept = X
+
+        return self.result.predict(X_with_intercept)
+
+
+class QuantileLasso(BaseQuantileEstimator):
+    """
+    Quantile Lasso regression using statsmodels (L1-penalized quantile regression).
+    Inherits from BaseQuantileEstimator.
+
+    This implementation fits a separate model for each quantile and uses them for prediction.
+    """
+
+    def __init__(
+        self,
+        quantiles: List[float],
+        alpha: float = 0.1,  # Regularization strength (λ)
+        max_iter: int = 1000,
+        p_tol: float = 1e-6,  # Precision tolerance
+        random_state: int = None,
+    ):
+        """
+        Parameters
+        ----------
+        quantiles : List[float]
+            List of quantiles to predict (values between 0 and 1).
+        alpha : float, default=0.1
+            L1 regularization parameter (lambda).
+        max_iter : int, default=1000
+            Maximum number of iterations.
+        p_tol : float, default=1e-6
+            Precision tolerance for convergence.
+        random_state : int, optional
+            Seed for random number generation.
+        """
+        # Create model parameters without quantiles
+        model_params = {
+            "max_iter": max_iter,
+            "p_tol": p_tol,
+            # alpha parameter is the quantile value in QuantReg,
+            # so we'll pass it during fit
+        }
+
+        # Initialize with the QuantRegressionWrapper class as model_class
+        super().__init__(
+            quantiles=quantiles,
+            model_class=QuantRegressionWrapper,
+            model_params=model_params,
+        )
+
+        # Store the regularization parameter separately as it has a naming conflict
+        # with the quantile parameter in QuantReg
+        self.reg_alpha = alpha
+        self.random_state = random_state
+
+    def fit(self, X: np.array, y: np.array):
+        """
+        Fits a model for each quantile.
+
+        Parameters
+        ----------
+        X : np.array
+            Feature matrix.
+        y : np.array
+            Target vector.
+        """
+        self.trained_estimators = []
+        for quantile in self.quantiles:
+            # Each estimator gets the quantile value as its alpha parameter
+            params_with_quantile = {**self.model_params, "alpha": quantile}
+            quantile_estimator = self.model_class(**params_with_quantile)
+            quantile_estimator.fit(X, y)
+            self.trained_estimators.append(quantile_estimator)
+
+        return self
+
+    def __str__(self):
+        return "QuantileLasso()"
+
+    def __repr__(self):
+        return "QuantileLasso()"
+
+
 class QuantileGBM(BaseQuantileEstimator):
     """
     Quantile gradient boosted machine estimator.
@@ -231,76 +450,6 @@ class QuantileLightGBM(BaseQuantileEstimator):
         return "QuantileLightGBM()"
 
 
-class BaseSingleFitQuantileEstimator:
-    """
-    Base class for quantile estimators that are fit only once and then produce
-    quantile predictions by aggregating a set of predictions (e.g., from sub-models
-    or from nearest neighbors).
-
-    Child classes should implement the fit() method and, if needed, override
-    _get_submodel_predictions().
-    """
-
-    def __init__(self):
-        """
-        Parameters
-        ----------
-        quantiles : List[float]
-            List of quantiles to predict (values between 0 and 1).
-        """
-        self.fitted_model = None  # For ensemble models (e.g., forest)
-
-    def fit(self, X: np.ndarray, y: np.ndarray):
-        """
-        Fit the underlying model. Subclasses should implement this.
-        """
-        raise NotImplementedError("Subclasses should implement the fit() method.")
-
-    def _get_submodel_predictions(self, X: np.ndarray) -> np.ndarray:
-        """
-        Retrieves a collection of predictions for each sample.
-
-        Default implementation assumes that self.fitted_model has an attribute
-        'estimators_' (e.g. for ensembles like RandomForestRegressor). This method
-        should be overridden for models that do not follow this pattern (e.g. KNN).
-
-        Parameters
-        ----------
-        X : np.ndarray
-            Feature matrix for prediction.
-
-        Returns
-        -------
-        np.ndarray
-            An array of shape (n_samples, n_predictions) where each row contains
-            multiple predictions whose distribution will be used to compute quantiles.
-        """
-        raise NotImplementedError(
-            "Subclasses should implement the _get_submodel_predictions() method."
-        )
-
-    def predict(self, X: np.ndarray, quantiles: List[float]) -> np.ndarray:
-        """
-        Computes quantile predictions for each sample by aggregating predictions.
-
-        Parameters
-        ----------
-        X : np.ndarray
-            Feature matrix for prediction.
-
-        Returns
-        -------
-        np.ndarray
-            A 2D array of shape (n_samples, len(quantiles)), where each column
-            corresponds to a quantile prediction.
-        """
-        submodel_preds = self._get_submodel_predictions(X)
-        # Convert quantiles (0-1) to percentiles (0-100)
-        percentiles = [q * 100 for q in quantiles]
-        quantile_preds = np.percentile(submodel_preds, percentiles, axis=1).T
-        return quantile_preds
-
-
 class QuantileForest(BaseSingleFitQuantileEstimator):
     """
     Quantile estimator based on an ensemble (e.g., RandomForestRegressor).
@@ -341,7 +490,7 @@ class QuantileForest(BaseSingleFitQuantileEstimator):
         self.fitted_model = RandomForestRegressor(**self.rf_kwargs)
         self.fitted_model.fit(X, y)
 
-    def _get_submodel_predictions(self, X: np.ndarray) -> np.ndarray:
+    def _get_candidate_local_distribution(self, X: np.ndarray) -> np.ndarray:
         """
         Retrieves a collection of predictions for each sample.
 
@@ -360,11 +509,6 @@ class QuantileForest(BaseSingleFitQuantileEstimator):
             An array of shape (n_samples, n_predictions) where each row contains
             multiple predictions whose distribution will be used to compute quantiles.
         """
-        if not hasattr(self.fitted_model, "estimators_"):
-            raise ValueError(
-                "The fitted model does not have an 'estimators_' attribute."
-            )
-        # Collect predictions from each sub-model (e.g. tree in a forest)
         sub_preds = np.column_stack(
             [estimator.predict(X) for estimator in self.fitted_model.estimators_]
         )
@@ -404,7 +548,7 @@ class QuantileKNN(BaseSingleFitQuantileEstimator):
         )
         self.nn_model.fit(X)
 
-    def _get_submodel_predictions(self, X: np.ndarray) -> np.ndarray:
+    def _get_candidate_local_distribution(self, X: np.ndarray) -> np.ndarray:
         """
         For each sample in X, finds the n_neighbors in the training data and
         returns their target values.
@@ -419,155 +563,3 @@ class QuantileKNN(BaseSingleFitQuantileEstimator):
         # Retrieve the corresponding y values for the neighbors
         neighbor_preds = self.y_train[indices]  # shape: (n_samples, n_neighbors)
         return neighbor_preds
-
-
-class QuantRegressionWrapper:
-    """
-    Wrapper for statsmodels QuantReg to make it compatible with sklearn-style API.
-    """
-
-    def __init__(self, alpha: float = 0.5, max_iter: int = 1000, p_tol: float = 1e-6):
-        """
-        Initialize the QuantReg wrapper with parameters.
-
-        Parameters
-        ----------
-        alpha : float
-            The quantile to fit (between 0 and 1)
-        max_iter : int
-            Maximum number of iterations for optimization
-        p_tol : float
-            Convergence tolerance
-        """
-        self.alpha = alpha  # The quantile level
-        self.max_iter = max_iter
-        self.p_tol = p_tol
-        self.model = None
-        self.result = None
-
-    def fit(self, X: np.ndarray, y: np.ndarray):
-        """
-        Fit quantile regression model.
-
-        Parameters
-        ----------
-        X : np.ndarray
-            Feature matrix
-        y : np.ndarray
-            Target vector
-        """
-        # Add intercept column to X if not present
-        if not np.any(np.all(X == 1, axis=0)):
-            X_with_intercept = np.column_stack([np.ones(len(X)), X])
-        else:
-            X_with_intercept = X
-
-        # Create and fit the model
-        self.model = QuantReg(y, X_with_intercept)
-        self.result = self.model.fit(
-            q=self.alpha, max_iter=self.max_iter, p_tol=self.p_tol
-        )
-        return self
-
-    def predict(self, X: np.ndarray) -> np.ndarray:
-        """
-        Make predictions using the fitted model.
-
-        Parameters
-        ----------
-        X : np.ndarray
-            Feature matrix
-
-        Returns
-        -------
-        np.ndarray
-            Predictions
-        """
-        if self.result is None:
-            raise ValueError("Model has not been fitted yet.")
-
-        # Add intercept column to X if not present
-        if not np.any(np.all(X == 1, axis=0)):
-            X_with_intercept = np.column_stack([np.ones(len(X)), X])
-        else:
-            X_with_intercept = X
-
-        return self.result.predict(X_with_intercept)
-
-
-class QuantileLasso(BaseQuantileEstimator):
-    """
-    Quantile Lasso regression using statsmodels (L1-penalized quantile regression).
-    Inherits from BaseQuantileEstimator.
-
-    This implementation fits a separate model for each quantile and uses them for prediction.
-    """
-
-    def __init__(
-        self,
-        quantiles: List[float],
-        alpha: float = 0.1,  # Regularization strength (λ)
-        max_iter: int = 1000,
-        p_tol: float = 1e-6,  # Precision tolerance
-        random_state: int = None,
-    ):
-        """
-        Parameters
-        ----------
-        quantiles : List[float]
-            List of quantiles to predict (values between 0 and 1).
-        alpha : float, default=0.1
-            L1 regularization parameter (lambda).
-        max_iter : int, default=1000
-            Maximum number of iterations.
-        p_tol : float, default=1e-6
-            Precision tolerance for convergence.
-        random_state : int, optional
-            Seed for random number generation.
-        """
-        # Create model parameters without quantiles
-        model_params = {
-            "max_iter": max_iter,
-            "p_tol": p_tol,
-            # alpha parameter is the quantile value in QuantReg,
-            # so we'll pass it during fit
-        }
-
-        # Initialize with the QuantRegressionWrapper class as model_class
-        super().__init__(
-            quantiles=quantiles,
-            model_class=QuantRegressionWrapper,
-            model_params=model_params,
-        )
-
-        # Store the regularization parameter separately as it has a naming conflict
-        # with the quantile parameter in QuantReg
-        self.reg_alpha = alpha
-        self.random_state = random_state
-
-    def fit(self, X: np.array, y: np.array):
-        """
-        Fits a model for each quantile.
-
-        Parameters
-        ----------
-        X : np.array
-            Feature matrix.
-        y : np.array
-            Target vector.
-        """
-        self.trained_estimators = []
-        for quantile in self.quantiles:
-            # Each estimator gets the quantile value as its alpha parameter
-            params_with_quantile = {**self.model_params, "alpha": quantile}
-            quantile_estimator = self.model_class(**params_with_quantile)
-            quantile_estimator.fit(X, y)
-            self.trained_estimators.append(quantile_estimator)
-
-        return self
-
-    def __str__(self):
-        return "QuantileLasso()"
-
-    def __repr__(self):
-        return "QuantileLasso()"

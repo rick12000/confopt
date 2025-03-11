@@ -190,31 +190,3 @@ class ConfigurationEncoder:
                     col_idx += 1
 
         return pd.DataFrame(X, columns=self.column_names)
-
-
-def tabularize_configurations(configurations: List[Dict]) -> pd.DataFrame:
-    """
-    Transform list of configuration dictionaries into tabular format.
-
-    Configurations are encoded with numeric parameters preserved and
-    categorical parameters one-hot encoded consistently.
-
-    Parameters
-    ----------
-    configurations :
-        List of hyperparameter configurations to tabularize.
-
-    Returns
-    -------
-    tabularized_configurations :
-        Tabularized hyperparameter configurations.
-    """
-    logger.debug(f"Received {len(configurations)} configurations to tabularize.")
-
-    if not configurations:
-        return pd.DataFrame()
-
-    # Use the ConfigurationEncoder to process configurations
-    encoder = ConfigurationEncoder()
-    encoder.fit(configurations)
-    return encoder.transform(configurations)

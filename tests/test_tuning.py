@@ -8,7 +8,6 @@ import pytest
 from confopt.tracking import RuntimeTracker, Trial
 from confopt.tuning import (
     process_and_split_estimation_data,
-    normalize_estimation_data,
     ObjectiveConformalSearcher,
 )
 from confopt.acquisition import (
@@ -143,71 +142,6 @@ def test_process_and_split_estimation_data__reproducibility(dummy_tuner):
     assert np.array_equal(y_train_first_call, y_train_second_call)
     assert np.array_equal(X_val_first_call, X_val_second_call)
     assert np.array_equal(y_val_first_call, y_val_second_call)
-
-
-def test_normalize_estimation_data(dummy_tuner):
-    # Proportion of all candidate configurations that
-    # have already been searched:
-    searched_split = 0.5
-    # Split of searched configurations that is used as
-    # training data for the search estimator:
-    train_split = 0.5
-
-    # Use the tabularized configurations from the tuner
-    all_configs = dummy_tuner.tabularized_configurations
-    n_configs = len(all_configs)
-
-    # Split the configurations
-    n_searched = round(n_configs * searched_split)
-    dummy_searched_configurations = all_configs[:n_searched]
-    dummy_searchable_configurations = all_configs[n_searched:]
-    stored_dummy_searchable_configurations = deepcopy(dummy_searchable_configurations)
-
-    # Split the searched configurations into training and validation
-    n_training = round(n_searched * train_split)
-    dummy_training_searched_configurations = dummy_searched_configurations[:n_training]
-    stored_dummy_training_searched_configurations = deepcopy(
-        dummy_training_searched_configurations
-    )
-    dummy_validation_searched_configurations = dummy_searched_configurations[
-        n_training:
-    ]
-    stored_dummy_validation_searched_configurations = deepcopy(
-        dummy_validation_searched_configurations
-    )
-
-    (
-        normalized_training_searched_configurations,
-        normalized_validation_searched_configurations,
-        normalized_searchable_configurations,
-    ) = normalize_estimation_data(
-        training_searched_configurations=dummy_training_searched_configurations,
-        validation_searched_configurations=dummy_validation_searched_configurations,
-        searchable_configurations=dummy_searchable_configurations,
-    )
-
-    assert len(normalized_training_searched_configurations) == len(
-        dummy_training_searched_configurations
-    )
-    assert len(normalized_validation_searched_configurations) == len(
-        dummy_validation_searched_configurations
-    )
-    assert len(normalized_searchable_configurations) == len(
-        dummy_searchable_configurations
-    )
-
-    # Assert there is no mutability of inputs:
-    assert np.array_equal(
-        dummy_training_searched_configurations,
-        stored_dummy_training_searched_configurations,
-    )
-    assert np.array_equal(
-        dummy_validation_searched_configurations,
-        stored_dummy_validation_searched_configurations,
-    )
-    assert np.array_equal(
-        dummy_searchable_configurations, stored_dummy_searchable_configurations
-    )
 
 
 def test_get_tuning_configurations__reproducibility(search_space):

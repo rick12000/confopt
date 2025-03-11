@@ -1,9 +1,7 @@
 import numpy as np
-import pandas as pd
 
 from confopt.utils import (
     get_tuning_configurations,
-    tabularize_configurations,
     ConfigurationEncoder,
 )
 from confopt.ranges import IntRange, FloatRange, CategoricalRange
@@ -164,56 +162,3 @@ def test_configuration_encoder():
         # Treated as categorical
         cat2_cols = [col for col in df.columns if col.startswith("cat2_")]
         assert len(cat2_cols) > 0
-
-
-def test_tabularize_configurations():
-    """Test that tabularize_configurations properly transforms configurations to tabular format"""
-    # Create test configurations
-    configs = [
-        {"num1": 1.0, "num2": 5, "cat": "option1", "bool_param": True},
-        {"num1": 2.0, "num2": 10, "cat": "option2", "bool_param": False},
-        {"num1": 3.0, "num2": 15, "cat": "option1", "bool_param": True},
-    ]
-
-    # Transform to tabular format
-    df = tabularize_configurations(configs)
-
-    # Check basic properties
-    assert isinstance(df, pd.DataFrame)
-    assert df.shape[0] == len(configs)
-
-    # Check for one-hot encoded string categorical columns
-    cat_cols = [col for col in df.columns if col.startswith("cat_")]
-    assert len(cat_cols) > 0
-
-    # Check for numeric columns
-    assert "num1" in df.columns
-    assert "num2" in df.columns
-
-    # Check values are correctly preserved
-    assert df.loc[0, "num1"] == 1.0
-    assert df.loc[1, "num1"] == 2.0
-    assert df.loc[2, "num1"] == 3.0
-
-    # Test empty input
-    empty_df = tabularize_configurations([])
-    assert empty_df.empty
-
-
-def test_tabularize_configurations_consistency():
-    """Test that tabularize_configurations produces consistent column mappings for the same data"""
-    configs = [{"x": 1, "y": "a"}, {"x": 2, "y": "b"}]
-
-    df1 = tabularize_configurations(configs)
-    df2 = tabularize_configurations(configs)
-
-    # Same configurations should produce identical dataframes
-    assert df1.equals(df2)
-
-    # Adding new data should not change the encoding pattern
-    configs_extended = configs + [{"x": 3, "y": "c"}]
-    df3 = tabularize_configurations(configs_extended)
-
-    # Original columns should be preserved in the same order
-    for col in df1.columns:
-        assert col in df3.columns

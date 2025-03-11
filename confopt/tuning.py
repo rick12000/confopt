@@ -7,9 +7,9 @@ from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 from datetime import datetime
 import inspect
-
+from confopt.utils import ConfigurationEncoder
 from confopt.preprocessing import train_val_split, remove_iqr_outliers
-from confopt.utils import get_tuning_configurations, tabularize_configurations
+from confopt.utils import get_tuning_configurations
 from confopt.tracking import Trial, Study, RuntimeTracker, derive_optimal_tuning_count
 from confopt.acquisition import (
     LocallyWeightedConformalSearcher,
@@ -87,55 +87,6 @@ def process_and_split_estimation_data(
     return X_train, y_train, X_val, y_val
 
 
-def normalize_estimation_data(
-    training_searched_configurations: np.array,
-    validation_searched_configurations: np.array,
-    searchable_configurations: np.array,
-):
-    """
-    Normalize configuration data used to train conformal search estimators.
-
-    Parameters
-    ----------
-    training_searched_configurations :
-        Training portion of parameter configurations selected for
-        search as part of conformal optimization framework.
-    validation_searched_configurations :
-        Validation portion of parameter configurations selected for
-        search as part of conformal optimization framework.
-    searchable_configurations :
-        Larger range of parameter configurations that remain
-        un-searched (i.e. whose validation performance has not
-        yet been evaluated).
-
-    Returns
-    -------
-    normalized_training_searched_configurations :
-        Normalized training portion of searched parameter
-        configurations.
-    normalized_validation_searched_configurations :
-        Normalized validation portion of searched parameter
-        configurations.
-    normalized_searchable_configurations :
-        Normalized un-searched parameter configurations.
-    """
-    scaler = StandardScaler()
-    scaler.fit(training_searched_configurations)
-    normalized_searchable_configurations = scaler.transform(searchable_configurations)
-    normalized_training_searched_configurations = scaler.transform(
-        training_searched_configurations
-    )
-    normalized_validation_searched_configurations = scaler.transform(
-        validation_searched_configurations
-    )
-
-    return (
-        normalized_training_searched_configurations,
-        normalized_validation_searched_configurations,
-        normalized_searchable_configurations,
-    )
-
-
 class ObjectiveConformalSearcher:
     """
     Conformal hyperparameter searcher.
@@ -196,15 +147,20 @@ class ObjectiveConformalSearcher:
             warm_start_configs=self.warm_start_configs,
         )
 
-        # Pre-tabularize all configurations for efficiency
-        self.tabularized_configurations = tabularize_configurations(
-            configurations=self.tuning_configurations,
+        # Tabularize all configurations:
+        self.encoder = ConfigurationEncoder()
+        self.encoder.fit(self.tuning_configurations)
+        self.tabularized_configurations = self.encoder.transform(
+            self.tuning_configurations
         ).to_numpy()
 
         # Create efficient index tracking
-        self.available_indices = np.arange(len(self.tuning_configurations))
+        self.searchable_indices = np.arange(len(self.tuning_configurations))
         self.searched_indices = np.array([], dtype=int)
         self.searched_performances = np.array([])
+        self.forbidden_indices = np.array(
+            [], dtype=int
+        )  # Track non-numerical performances
 
         self.study = Study()
 
@@ -276,17 +232,16 @@ class ObjectiveConformalSearcher:
             across configurations, in seconds.
         """
         rs_trials = []
-        skipped_configuration_counter = 0
 
         # Use numpy for faster sampling without replacement
-        n_sample = min(n_searches, len(self.available_indices))
+        n_sample = min(n_searches, len(self.searchable_indices))
         random_indices = np.random.choice(
-            self.available_indices, size=n_sample, replace=False
+            self.searchable_indices, size=n_sample, replace=False
         )
 
         # Update available indices immediately
-        self.available_indices = np.setdiff1d(
-            self.available_indices, random_indices, assume_unique=True
+        self.searchable_indices = np.setdiff1d(
+            self.searchable_indices, random_indices, assume_unique=True
         )
 
         # Store sampled configurations
@@ -307,9 +262,13 @@ class ObjectiveConformalSearcher:
             training_time = training_time_tracker.return_runtime()
 
             if np.isnan(validation_performance):
-                skipped_configuration_counter += 1
                 logger.debug(
-                    "Obtained non-numerical performance, skipping configuration."
+                    "Obtained non-numerical performance, forbidding configuration."
+                )
+                self.forbidden_indices = np.append(self.forbidden_indices, idx)
+                # Ensure it's removed from available indices
+                self.searchable_indices = np.setdiff1d(
+                    self.searchable_indices, [idx], assume_unique=True
                 )
                 continue
 
@@ -411,8 +370,8 @@ class ObjectiveConformalSearcher:
         )
 
         # Remove these configurations from available indices
-        self.available_indices = np.setdiff1d(
-            self.available_indices, warm_start_indices, assume_unique=True
+        self.searchable_indices = np.setdiff1d(
+            self.searchable_indices, warm_start_indices, assume_unique=True
         )
 
         # Add trials to study
@@ -535,7 +494,7 @@ class ObjectiveConformalSearcher:
 
         # Main search loop
         max_iterations = min(
-            len(self.available_indices),
+            len(self.searchable_indices),
             len(self.tuning_configurations) - n_random_searches,
         )
         for config_idx in range(max_iterations):
@@ -548,14 +507,14 @@ class ObjectiveConformalSearcher:
                     search_progress_bar.update(1)
 
             # Check if we've exhausted all configurations
-            if len(self.available_indices) == 0:
+            if len(self.searchable_indices) == 0:
                 logger.info("All configurations have been searched. Stopping early.")
                 break
 
             # Get tabularized searchable configurations more efficiently
             # We can index the pre-tabularized configurations directly
             tabularized_searchable_configurations = self.tabularized_configurations[
-                self.available_indices
+                self.searchable_indices
             ]
 
             # Calculate validation split based on number of searched configurations
@@ -613,6 +572,8 @@ class ObjectiveConformalSearcher:
                     )
                 elif searcher_tuning_framework == "fixed":
                     search_model_tuning_count = 10
+                else:
+                    raise ValueError("Invalid searcher tuning framework specified.")
             else:
                 search_model_tuning_count = 0
 
@@ -622,9 +583,9 @@ class ObjectiveConformalSearcher:
             )
 
             # Find minimum performing configuration
-            minimal_local_idx = np.argmin(parameter_performance_bounds)
-            global_idx = self.available_indices[minimal_local_idx]
-            minimal_parameter = self.tuning_configurations[global_idx].copy()
+            minimal_searchable_idx = np.argmin(parameter_performance_bounds)
+            minimal_starting_idx = self.searchable_indices[minimal_searchable_idx]
+            minimal_parameter = self.tuning_configurations[minimal_starting_idx].copy()
 
             # Evaluate with objective function
             validation_performance = self.objective_function(
@@ -636,7 +597,7 @@ class ObjectiveConformalSearcher:
                 searcher.sampler, "adapters"
             ):
                 searcher.update_interval_width(
-                    sampled_idx=minimal_local_idx,
+                    sampled_idx=minimal_searchable_idx,
                     sampled_performance=validation_performance,
                 )
 
@@ -645,14 +606,21 @@ class ObjectiveConformalSearcher:
             )
 
             if np.isnan(validation_performance):
+                self.forbidden_indices = np.append(
+                    self.forbidden_indices, minimal_starting_idx
+                )
+                # Remove from available indices
+                self.searchable_indices = np.setdiff1d(
+                    self.searchable_indices, minimal_starting_idx, assume_unique=True
+                )
                 continue
 
             # Handle UCBSampler breach calculation
             if isinstance(searcher.sampler, UCBSampler):
                 if (
-                    searcher.predictions_per_interval[0][minimal_local_idx][0]
+                    searcher.predictions_per_interval[0][minimal_searchable_idx][0]
                     <= validation_performance
-                    <= searcher.predictions_per_interval[0][minimal_local_idx][1]
+                    <= searcher.predictions_per_interval[0][minimal_searchable_idx][1]
                 ):
                     breach = 0
                 else:
@@ -664,11 +632,13 @@ class ObjectiveConformalSearcher:
 
             # Update indices efficiently
             # Remove the global index from available indices
-            self.available_indices = self.available_indices[
-                self.available_indices != global_idx
+            self.searchable_indices = self.searchable_indices[
+                self.searchable_indices != minimal_starting_idx
             ]
             # Add to searched indices
-            self.searched_indices = np.append(self.searched_indices, global_idx)
+            self.searched_indices = np.append(
+                self.searched_indices, minimal_starting_idx
+            )
             self.searched_performances = np.append(
                 self.searched_performances, validation_performance
             )
@@ -676,7 +646,9 @@ class ObjectiveConformalSearcher:
             tabularized_searched_configurations = np.vstack(
                 [
                     tabularized_searched_configurations,
-                    self.tabularized_configurations[global_idx : global_idx + 1],
+                    self.tabularized_configurations[
+                        minimal_starting_idx : minimal_starting_idx + 1
+                    ],
                 ]
             )
 
