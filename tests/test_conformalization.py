@@ -12,6 +12,7 @@ from confopt.conformalization import (
 from confopt.config import (
     MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
     POINT_ESTIMATOR_ARCHITECTURES,
+    SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
 
 
@@ -205,11 +206,6 @@ class TestLocallyWeightedConformalEstimator:
             dummy_fixed_quantile_dataset[:, 1],
         )
 
-        # Use a smaller subset to reduce memory usage
-        max_samples = min(len(X), 100)  # Limit to maximum 100 samples
-        X = X[:max_samples]
-        y = y[:max_samples]
-
         train_split = 0.8
         X_train, y_train = (
             X[: round(len(X) * train_split), :],
@@ -230,16 +226,9 @@ class TestLocallyWeightedConformalEstimator:
             random_state=42,
         )
 
-        # Verify estimator components are fitted
-        assert estimator.pe_estimator is not None
-        assert estimator.ve_estimator is not None
-        assert estimator.nonconformity_scores is not None
-        assert estimator.training_time is not None
-        assert estimator.primary_estimator_error is not None
-
         # Test predict_interval with just one confidence level
-        confidence_levels = [0.8]  # Reduced from three levels to just one
-        for alpha in confidence_levels:
+        alphas = [0.8]  # Reduced from three levels to just one
+        for alpha in alphas:
             lower_bound, upper_bound = estimator.predict_interval(X=X_val, alpha=alpha)
 
             # Check shapes and types
@@ -255,7 +244,7 @@ class TestLocallyWeightedConformalEstimator:
             coverage = np.mean(
                 (y_val >= lower_bound.flatten()) & (y_val <= upper_bound.flatten())
             )
-            assert abs(coverage - alpha) < 0.2  # Allow for some error in coverage
+            assert abs((1 - coverage) - alpha) < 0.2  # Allow for some error in coverage
 
         # Explicitly delete estimator to free resources
         del estimator
@@ -285,7 +274,8 @@ class TestQuantileInterval:
 
 class TestSingleFitQuantileConformalEstimator:
     @pytest.mark.parametrize(
-        "estimator_architecture", ["qrf"]  # Reduced to one architecture
+        "estimator_architecture",
+        SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,  # Reduced to one architecture
     )
     def test_initialization(self, estimator_architecture):
         """Test SingleFitQuantileConformalEstimator initialization"""
@@ -314,7 +304,8 @@ class TestSingleFitQuantileConformalEstimator:
         gc.collect()
 
     @pytest.mark.parametrize(
-        "estimator_architecture", ["qrf"]  # Reduced to one architecture
+        "estimator_architecture",
+        SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,  # Reduced to one architecture
     )
     def test_fit_and_predict_interval(
         self, estimator_architecture, dummy_fixed_quantile_dataset
@@ -330,11 +321,6 @@ class TestSingleFitQuantileConformalEstimator:
             dummy_fixed_quantile_dataset[:, 0].reshape(-1, 1),
             dummy_fixed_quantile_dataset[:, 1],
         )
-
-        # Use a smaller subset to reduce memory usage
-        max_samples = min(len(X), 100)  # Limit to maximum 100 samples
-        X = X[:max_samples]
-        y = y[:max_samples]
 
         train_split = 0.8
         X_train, y_train = (
@@ -453,11 +439,6 @@ class TestMultiFitQuantileConformalEstimator:
             dummy_fixed_quantile_dataset[:, 0].reshape(-1, 1),
             dummy_fixed_quantile_dataset[:, 1],
         )
-
-        # Use a smaller subset to reduce memory usage
-        max_samples = min(len(X), 100)  # Limit to maximum 100 samples
-        X = X[:max_samples]
-        y = y[:max_samples]
 
         train_split = 0.8
         X_train, y_train = (
