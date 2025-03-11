@@ -10,13 +10,11 @@ from sklearn.kernel_ridge import KernelRidge
 from sklearn.metrics import mean_pinball_loss, mean_squared_error
 from sklearn.model_selection import KFold
 from sklearn.neighbors import KNeighborsRegressor
-from sklearn.neural_network import MLPRegressor
 from confopt.config import (
     GBM_NAME,
     QRF_NAME,
     QGBM_NAME,
     QKNN_NAME,
-    DNN_NAME,
     GP_NAME,
     KNN_NAME,
     KR_NAME,
@@ -27,7 +25,7 @@ from confopt.config import (
     SFQENS_NAME,  # Import the new ensemble model name
     MFENS_NAME,  # Import the new ensemble model name
     PENS_NAME,  # Import the new point ensemble model name
-    QUANTILE_ESTIMATOR_ARCHITECTURES,
+    MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
 from confopt.quantile_wrappers import (
     QuantileGBM,
@@ -40,7 +38,7 @@ from confopt.quantile_wrappers import (
 from confopt.ensembling import (
     SingleFitQuantileEnsembleEstimator,
     MultiFitQuantileEnsembleEstimator,
-    PointEnsembleEstimator,  # Make sure to import PointEnsembleEstimator
+    PointEnsembleEstimator,
 )
 
 from confopt.utils import get_tuning_configurations
@@ -48,14 +46,6 @@ from confopt.utils import get_tuning_configurations
 logger = logging.getLogger(__name__)
 
 SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
-    DNN_NAME: {
-        "solver": ["adam", "lbfgs"],
-        "learning_rate_init": [0.001, 0.005, 0.01],
-        "alpha": [0.01, 0.1, 1.0, 5.0, 10.0],
-        "hidden_layer_sizes": [(8,), (16,), (8, 4), (16, 8)],
-        "max_iter": [300, 500, 1000],
-        "early_stopping": [True],
-    },
     RF_NAME: {
         "n_estimators": [10, 25, 50, 75],
         "max_features": [0.3, 0.5, 0.7, "sqrt"],
@@ -94,7 +84,6 @@ SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
     KR_NAME: {
         "alpha": [0.1, 1.0, 10.0],
         "kernel": ["linear", "rbf", "poly"],
-        "gamma": [0.1, 1.0, "scale"],
     },
     QRF_NAME: {
         "n_estimators": [10, 25, 50],
@@ -184,14 +173,6 @@ SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
 }
 
 SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
-    DNN_NAME: {
-        "solver": "lbfgs",
-        "learning_rate_init": 0.01,
-        "alpha": 1.0,
-        "hidden_layer_sizes": (8, 4),
-        "max_iter": 500,
-        "early_stopping": True,
-    },
     RF_NAME: {
         "n_estimators": 25,
         "max_features": "sqrt",
@@ -230,7 +211,6 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
     KR_NAME: {
         "alpha": 1.0,
         "kernel": "rbf",
-        "gamma": "scale",
     },
     QRF_NAME: {
         "n_estimators": 25,
@@ -249,7 +229,7 @@ SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
     },
     QGBM_NAME: {
         "learning_rate": 0.2,
-        "n_estimators": 35,
+        "n_estimators": 25,
         "min_samples_split": 5,
         "min_samples_leaf": 3,
         "max_depth": 5,
@@ -501,11 +481,7 @@ def initialize_point_estimator(
     initialized_model :
         An initialized estimator class instance.
     """
-    if estimator_architecture == DNN_NAME:
-        initialized_model = MLPRegressor(
-            **initialization_params, random_state=random_state
-        )
-    elif estimator_architecture == RF_NAME:
+    if estimator_architecture == RF_NAME:
         initialized_model = RandomForestRegressor(
             **initialization_params, random_state=random_state
         )
@@ -656,7 +632,7 @@ def cross_validate_configurations(
             logger.debug(
                 f"Evaluating search model parameter configuration: {configuration}"
             )
-            if estimator_architecture in QUANTILE_ESTIMATOR_ARCHITECTURES:
+            if estimator_architecture in MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES:
                 if quantiles is None:
                     raise ValueError(
                         "'quantiles' cannot be None if passing a quantile regression estimator."
@@ -677,7 +653,7 @@ def cross_validate_configurations(
             model.fit(X_train, Y_train)
 
             try:
-                if estimator_architecture in QUANTILE_ESTIMATOR_ARCHITECTURES:
+                if estimator_architecture in MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES:
                     if quantiles is None:
                         raise ValueError(
                             "'quantiles' cannot be None if passing a quantile regression estimator."

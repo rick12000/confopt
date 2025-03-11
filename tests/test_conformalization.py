@@ -10,7 +10,7 @@ from confopt.conformalization import (
     MultiFitQuantileConformalEstimator,
 )
 from confopt.config import (
-    QUANTILE_ESTIMATOR_ARCHITECTURES,
+    MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
     POINT_ESTIMATOR_ARCHITECTURES,
 )
 
@@ -131,8 +131,8 @@ def cleanup_after_test():
 
 class TestLocallyWeightedConformalEstimator:
     # Reduce parameter combinations significantly for initialization test
-    @pytest.mark.parametrize("point_arch", [POINT_ESTIMATOR_ARCHITECTURES[0]])
-    @pytest.mark.parametrize("variance_arch", [POINT_ESTIMATOR_ARCHITECTURES[0]])
+    @pytest.mark.parametrize("point_arch", POINT_ESTIMATOR_ARCHITECTURES)
+    @pytest.mark.parametrize("variance_arch", POINT_ESTIMATOR_ARCHITECTURES)
     def test_initialization(self, point_arch, variance_arch):
         """Test that LocallyWeightedConformalEstimator initializes correctly"""
         estimator = LocallyWeightedConformalEstimator(
@@ -145,9 +145,7 @@ class TestLocallyWeightedConformalEstimator:
         assert estimator.ve_estimator is None
         assert estimator.nonconformity_scores is None
 
-    @pytest.mark.parametrize(
-        "estimator_architecture", [POINT_ESTIMATOR_ARCHITECTURES[0]]
-    )
+    @pytest.mark.parametrize("estimator_architecture", POINT_ESTIMATOR_ARCHITECTURES)
     def test_fit_component_estimator(
         self, estimator_architecture, dummy_fixed_quantile_dataset
     ):
@@ -187,10 +185,10 @@ class TestLocallyWeightedConformalEstimator:
         assert predictions.shape[0] == X_train.shape[0]
 
     @pytest.mark.parametrize(
-        "point_arch", [POINT_ESTIMATOR_ARCHITECTURES[0]]
+        "point_arch", POINT_ESTIMATOR_ARCHITECTURES
     )  # Drastically reduced combinations
     @pytest.mark.parametrize(
-        "variance_arch", [POINT_ESTIMATOR_ARCHITECTURES[0]]
+        "variance_arch", POINT_ESTIMATOR_ARCHITECTURES
     )  # Drastically reduced combinations
     def test_fit_and_predict_interval(
         self, point_arch, variance_arch, dummy_fixed_quantile_dataset
@@ -414,7 +412,7 @@ class TestSingleFitQuantileConformalEstimator:
 
 class TestMultiFitQuantileConformalEstimator:
     @pytest.mark.parametrize(
-        "estimator_architecture", [QUANTILE_ESTIMATOR_ARCHITECTURES[0]]
+        "estimator_architecture", MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES
     )  # Reduced to one architecture
     def test_initialization(self, estimator_architecture):
         """Test MultiFitQuantileConformalEstimator initialization"""
@@ -437,7 +435,7 @@ class TestMultiFitQuantileConformalEstimator:
 
     @pytest.mark.parametrize(
         "estimator_architecture",
-        [QUANTILE_ESTIMATOR_ARCHITECTURES[0]],  # Reduced to one architecture
+        MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,  # Reduced to one architecture
     )
     def test_fit_and_predict_interval(
         self, estimator_architecture, dummy_fixed_quantile_dataset
@@ -512,7 +510,9 @@ class TestMultiFitQuantileConformalEstimator:
         """Test error handling in predict_interval"""
         interval = QuantileInterval(lower_quantile=0.1, upper_quantile=0.9)
         estimator = MultiFitQuantileConformalEstimator(
-            quantile_estimator_architecture=QUANTILE_ESTIMATOR_ARCHITECTURES[0],
+            quantile_estimator_architecture=MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES[
+                0
+            ],
             interval=interval,
             n_pre_conformal_trials=5,  # Reduced from 20 to 5
         )

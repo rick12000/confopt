@@ -44,8 +44,10 @@ class UCBSampler:
         elif framework == "DtACI":
             adapter = DtACI(alpha=self.alpha)
             self.expert_alphas = adapter.alpha_t_values
-        else:
+        elif framework is None:
             adapter = None
+        else:
+            raise ValueError(f"Unknown adapter framework: {framework}")
         return adapter
 
     def _calculate_quantiles(self) -> QuantileInterval:
@@ -105,8 +107,10 @@ class PessimisticLowerBoundSampler:
         elif framework == "DtACI":
             adapter = DtACI(alpha=self.alpha)
             self.expert_alphas = adapter.alpha_t_values
-        else:
+        elif framework is None:
             adapter = None
+        else:
+            raise ValueError(f"Unknown adapter framework: {framework}")
         return adapter
 
     def _calculate_quantiles(self) -> QuantileInterval:
@@ -438,10 +442,14 @@ class SingleFitQuantileConformalSearcher:
             )
 
         # Get all intervals from the sampler
-        if isinstance(self.sampler, UCBSampler):
+        if isinstance(self.sampler, UCBSampler) or isinstance(
+            self.sampler, PessimisticLowerBoundSampler
+        ):
             intervals = [self.sampler.fetch_interval()]
-        else:  # ThompsonSampler
+        elif isinstance(self.sampler, ThompsonSampler):
             intervals = self.sampler.fetch_intervals()
+        else:
+            raise ValueError("Unknown sampler type.")
 
         # Fit the single conformal estimator with all intervals
         self.conformal_estimator.fit(
@@ -631,10 +639,14 @@ class MultiFitQuantileConformalSearcher:
             )
 
         # Get intervals from the sampler
-        if isinstance(self.sampler, UCBSampler):
+        if isinstance(self.sampler, UCBSampler) or isinstance(
+            self.sampler, PessimisticLowerBoundSampler
+        ):
             intervals = [self.sampler.fetch_interval()]
-        else:  # ThompsonSampler
+        elif isinstance(self.sampler, ThompsonSampler):
             intervals = self.sampler.fetch_intervals()
+        else:
+            raise ValueError("Unknown sampler type.")
 
         # Initialize and fit conformal estimators for each interval
         errors = []

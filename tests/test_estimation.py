@@ -2,6 +2,9 @@ import numpy as np
 import pytest
 from copy import deepcopy
 
+# Remove scipy imports and add the proper range types
+from confopt.ranges import IntRange, FloatRange
+
 from confopt.estimation import (
     initialize_point_estimator,
     initialize_quantile_estimator,
@@ -167,8 +170,20 @@ class TestCrossValidation:
         X = np.random.rand(100, 5)
         y = np.random.rand(100)
         configs = [
-            {"n_estimators": 50, "learning_rate": 0.1},
-            {"n_estimators": 100, "learning_rate": 0.05},
+            {
+                "n_estimators": 50,
+                "learning_rate": 0.1,
+                "min_samples_split": 2,
+                "min_samples_leaf": 1,
+                "max_depth": 3,
+            },
+            {
+                "n_estimators": 100,
+                "learning_rate": 0.05,
+                "min_samples_split": 5,
+                "min_samples_leaf": 2,
+                "max_depth": 5,
+            },
         ]
         quantiles = [0.25, 0.75]
 
@@ -197,12 +212,11 @@ class TestTuning:
         # Make y strongly correlated with the first feature
         y = 3 * X[:, 0] + 0.5 * np.random.randn(100)
 
-        # Get a smaller subset of configurations to speed up testing
-        # configurations = [{"n_neighbors": 1}, {"n_neighbors": 5}, {"n_neighbors": 10}]
-
         # Mock the tuning space for testing
         original_tuning_space = SEARCH_MODEL_TUNING_SPACE[KNN_NAME]
-        SEARCH_MODEL_TUNING_SPACE[KNN_NAME] = {"n_neighbors": [1, 5, 10]}
+        SEARCH_MODEL_TUNING_SPACE[KNN_NAME] = {
+            "n_neighbors": IntRange(min_value=1, max_value=10)
+        }
 
         try:
             # Run tuning
@@ -222,21 +236,35 @@ class TestTuning:
         X = np.random.rand(100, 5)
         y = np.random.rand(100)
 
-        # Run tuning twice with the same random state
-        best_config1 = tune(
-            X=X,
-            y=y,
-            estimator_architecture=GBM_NAME,
-            n_searches=5,  # Small number for faster testing
-            random_state=42,
-        )
+        # Store original tuning space
+        original_tuning_space = SEARCH_MODEL_TUNING_SPACE[GBM_NAME]
+        # Create a test tuning space with custom parameter ranges
+        test_tuning_space = {
+            "n_estimators": IntRange(min_value=50, max_value=100),
+            "learning_rate": FloatRange(min_value=0.01, max_value=0.1),
+            "max_depth": IntRange(min_value=3, max_value=7),
+        }
+        SEARCH_MODEL_TUNING_SPACE[GBM_NAME] = test_tuning_space
 
-        best_config2 = tune(
-            X=X, y=y, estimator_architecture=GBM_NAME, n_searches=5, random_state=42
-        )
+        try:
+            # Run tuning twice with the same random state
+            best_config1 = tune(
+                X=X,
+                y=y,
+                estimator_architecture=GBM_NAME,
+                n_searches=5,  # Small number for faster testing
+                random_state=42,
+            )
 
-        # Verify results are identical
-        assert best_config1 == best_config2
+            best_config2 = tune(
+                X=X, y=y, estimator_architecture=GBM_NAME, n_searches=5, random_state=42
+            )
+
+            # Verify results are identical
+            assert best_config1 == best_config2
+        finally:
+            # Restore original tuning space
+            SEARCH_MODEL_TUNING_SPACE[GBM_NAME] = original_tuning_space
 
 
 def test_end_to_end_model_selection():
@@ -251,11 +279,11 @@ def test_end_to_end_model_selection():
     X_train, X_test = X[:split_idx], X[split_idx:]
     y_train, _ = y[:split_idx], y[split_idx:]
 
-    # Create a smaller search space for faster testing
+    # Create a smaller search space for faster testing using proper parameter ranges
     test_tuning_space = {
-        "n_estimators": [50, 100],
-        "learning_rate": [0.05, 0.1],
-        "max_depth": [3, 5],
+        "n_estimators": IntRange(min_value=50, max_value=100),
+        "learning_rate": FloatRange(min_value=0.05, max_value=0.1),
+        "max_depth": IntRange(min_value=3, max_value=5),
     }
 
     original_tuning_space = SEARCH_MODEL_TUNING_SPACE[GBM_NAME]

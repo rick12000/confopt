@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List
 
 # Reference names of search estimator architectures:
 QGBM_NAME: str = "qgbm"
@@ -9,7 +9,6 @@ GBM_NAME: str = "gbm"
 LGBM_NAME: str = "lgbm"
 KNN_NAME: str = "knn"
 RF_NAME: str = "rf"
-DNN_NAME: str = "dnn"
 QKNN_NAME: str = "qknn"
 QL_NAME: str = "ql"
 QLGBM_NAME: str = "qlgbm"
@@ -18,12 +17,17 @@ MFENS_NAME: str = "mfqens"  # New ensemble model name for QLGBM + QL combination
 PENS_NAME: str = "pens"  # New point ensemble model for GBM + KNN combination
 
 # Reference names of quantile regression estimators:
-QUANTILE_ESTIMATOR_ARCHITECTURES: List[str] = [
+MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES: List[str] = [
     QGBM_NAME,
     QLGBM_NAME,
-    QL_NAME,  # Added QuantileLasso
-    SFQENS_NAME,  # Added Quantile Ensemble
-    MFENS_NAME,  # Add the new ensemble name to the list if needed
+    QL_NAME,
+    MFENS_NAME,
+]
+
+SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES: List[str] = [
+    QRF_NAME,
+    QKNN_NAME,
+    SFQENS_NAME,
 ]
 
 POINT_ESTIMATOR_ARCHITECTURES: List[str] = [
@@ -33,14 +37,5 @@ POINT_ESTIMATOR_ARCHITECTURES: List[str] = [
     LGBM_NAME,
     KNN_NAME,
     RF_NAME,
-    SFQENS_NAME,  # Add QENS here to make it work as a point estimator too
-    PENS_NAME,  # New point ensemble for GBM + KNN
+    PENS_NAME,
 ]
-
-# Lookup of metrics to their direction of optimization (direct
-# for performance metrics, inverse for loss or error metrics)
-METRIC_PROPORTIONALITY_LOOKUP: Dict[str, str] = {
-    "accuracy_score": "direct",
-    "log_loss": "inverse",
-    "mean_squared_error": "inverse",
-}
