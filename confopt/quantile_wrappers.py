@@ -169,6 +169,7 @@ class QuantRegressionWrapper:
         self.p_tol = p_tol
         self.model = None
         self.result = None
+        self.has_added_intercept = False  # Track if intercept was added
 
     def fit(self, X: np.ndarray, y: np.ndarray):
         """
@@ -181,8 +182,11 @@ class QuantRegressionWrapper:
         y : np.ndarray
             Target vector
         """
-        # Add intercept column to X if not present
-        if not np.any(np.all(X == 1, axis=0)):
+        # Check if intercept column is already present
+        self.has_added_intercept = not np.any(np.all(X == 1, axis=0))
+
+        # Add intercept column to X if needed
+        if self.has_added_intercept:
             X_with_intercept = np.column_stack([np.ones(len(X)), X])
         else:
             X_with_intercept = X
@@ -208,8 +212,8 @@ class QuantRegressionWrapper:
         np.ndarray
             Predictions
         """
-        # Add intercept column to X if not present
-        if not np.any(np.all(X == 1, axis=0)):
+        # Add intercept column to X if it was added during fitting
+        if self.has_added_intercept:
             X_with_intercept = np.column_stack([np.ones(len(X)), X])
         else:
             X_with_intercept = X

@@ -592,15 +592,6 @@ class ObjectiveConformalSearcher:
                 configuration=minimal_parameter
             )
 
-            # Update intervals if needed
-            if hasattr(searcher.sampler, "adapter") or hasattr(
-                searcher.sampler, "adapters"
-            ):
-                searcher.update_interval_width(
-                    sampled_idx=minimal_searchable_idx,
-                    sampled_performance=validation_performance,
-                )
-
             logger.debug(
                 f"Conformal search iter {config_idx} performance: {validation_performance}"
             )
@@ -614,6 +605,15 @@ class ObjectiveConformalSearcher:
                     self.searchable_indices, minimal_starting_idx, assume_unique=True
                 )
                 continue
+
+            # Update intervals if needed - moved after NaN check
+            if hasattr(searcher.sampler, "adapter") or hasattr(
+                searcher.sampler, "adapters"
+            ):
+                searcher.update_interval_width(
+                    sampled_idx=minimal_searchable_idx,
+                    sampled_performance=validation_performance,
+                )
 
             # Handle UCBSampler breach calculation
             if isinstance(searcher.sampler, UCBSampler):

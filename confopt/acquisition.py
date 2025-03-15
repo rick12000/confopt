@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 class UCBSampler:
     def __init__(
         self,
-        beta_decay: str = "logarithmic_decay",
+        beta_decay: Literal[
+            "inverse_square_root_decay", "logarithmic_decay"
+        ] = "logarithmic_decay",
         c: float = 1,
         interval_width: float = 0.8,
         adapter_framework: Optional[str] = None,
@@ -70,11 +72,11 @@ class UCBSampler:
         return self.quantiles
 
     def update_exploration_step(self):
-        if self.beta_decay == "logarithmic_decay":
-            self.beta = self.c * np.log(self.t) / self.t
-        elif self.beta_decay == "logarithmic_growth":
-            self.beta = 2 * np.log(self.t + 1)
         self.t += 1
+        if self.beta_decay == "inverse_square_root_decay":
+            self.beta = np.sqrt(self.c / self.t)
+        elif self.beta_decay == "logarithmic_decay":
+            self.beta = np.sqrt((self.c * np.log(self.t)) / self.t)
 
     def update_interval_width(self, breaches: list[int]):
         if isinstance(self.adapter, ACI):

@@ -122,32 +122,27 @@ class TestUCBSampler:
     def test_update_exploration_step(self):
         """Test beta updating with different decay strategies"""
         # Test logarithmic decay
+        c = 5
         sampler1 = UCBSampler(
-            beta_decay="logarithmic_decay", c=2.0
+            beta_decay="logarithmic_decay", c=c
         )  # Removed beta parameter
         assert sampler1.t == 1
         assert sampler1.beta == 1.0  # Default beta value
 
         sampler1.update_exploration_step()
         assert sampler1.t == 2
-        assert sampler1.beta == 2.0 * np.log(1) / 1  # c * log(t) / t
+        assert sampler1.beta == np.sqrt(c * np.log(2) / 2)
 
-        sampler1.update_exploration_step()
-        assert sampler1.t == 3
-        assert sampler1.beta == 2.0 * np.log(2) / 2  # c * log(t) / t
-
-        # Test logarithmic growth
-        sampler2 = UCBSampler(beta_decay="logarithmic_growth")  # Removed beta parameter
+        # Test inverse_square_root_decay
+        sampler2 = UCBSampler(
+            beta_decay="inverse_square_root_decay", c=c
+        )  # Removed beta parameter
         assert sampler2.t == 1
         assert sampler2.beta == 1.0  # Default beta value
 
         sampler2.update_exploration_step()
         assert sampler2.t == 2
-        assert sampler2.beta == 2 * np.log(2)  # 2 * log(t + 1)
-
-        sampler2.update_exploration_step()
-        assert sampler2.t == 3
-        assert sampler2.beta == 2 * np.log(3)  # 2 * log(t + 1)
+        assert sampler2.beta == np.sqrt(c / 2)
 
     def test_update_interval_width(self):
         """Test interval width updating with adapters"""
