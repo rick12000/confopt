@@ -1,222 +1,32 @@
 import logging
-from typing import Optional, List, Union, Literal
+from typing import Optional, Union, Literal
 from confopt.estimation import SEARCH_MODEL_DEFAULT_CONFIGURATIONS
 import numpy as np
 from confopt.tracking import RuntimeTracker
-from confopt.adaptation import ACI, DtACI
+from confopt.adaptation import DtACI
 from confopt.conformalization import (
     LocallyWeightedConformalEstimator,
-    QuantileInterval,
     SingleFitQuantileConformalEstimator,
     MultiFitQuantileConformalEstimator,
+)
+from confopt.sampling import (
+    LowerBoundSampler,
+    ThompsonSampler,
+    PessimisticLowerBoundSampler,
 )
 from confopt.estimation import initialize_point_estimator
 
 logger = logging.getLogger(__name__)
 
 
-class UCBSampler:
-    def __init__(
-        self,
-        beta_decay: Literal[
-            "inverse_square_root_decay", "logarithmic_decay"
-        ] = "logarithmic_decay",
-        c: float = 1,
-        interval_width: float = 0.8,
-        adapter_framework: Optional[str] = None,
-        upper_quantile_cap: Optional[float] = None,
-    ):
-        self.beta_decay = beta_decay
-        self.c = c
-        self.interval_width = interval_width
-        self.alpha = 1 - interval_width
-        self.upper_quantile_cap = upper_quantile_cap
-        self.t = 1
-        self.beta = 1
-
-        # Initialize adapter if specified
-        self.adapter = self._initialize_adapter(adapter_framework)
-
-        self.quantiles = self._calculate_quantiles()
-
-    def _initialize_adapter(self, framework: Optional[str]):
-        if framework == "ACI":
-            adapter = ACI(alpha=self.alpha)
-        elif framework == "DtACI":
-            adapter = DtACI(alpha=self.alpha)
-            self.expert_alphas = adapter.alpha_t_values
-        elif framework is None:
-            adapter = None
-        else:
-            raise ValueError(f"Unknown adapter framework: {framework}")
-        return adapter
-
-    def _calculate_quantiles(self) -> QuantileInterval:
-        if self.upper_quantile_cap:
-            interval = QuantileInterval(
-                lower_quantile=self.alpha / 2, upper_quantile=self.upper_quantile_cap
-            )
-        else:
-            interval = QuantileInterval(
-                lower_quantile=self.alpha / 2, upper_quantile=1 - (self.alpha / 2)
-            )
-        return interval
-
-    def fetch_alpha(self) -> float:
-        return self.alpha
-
-    def fetch_expert_alphas(self) -> List[float]:
-        return self.expert_alphas
-
-    def fetch_interval(self) -> QuantileInterval:
-        return self.quantiles
-
-    def update_exploration_step(self):
-        self.t += 1
-        if self.beta_decay == "inverse_square_root_decay":
-            self.beta = np.sqrt(self.c / self.t)
-        elif self.beta_decay == "logarithmic_decay":
-            self.beta = np.sqrt((self.c * np.log(self.t)) / self.t)
-
-    def update_interval_width(self, breaches: list[int]):
-        if isinstance(self.adapter, ACI):
-            if len(breaches) != 1:
-                raise ValueError("ACI adapter requires a single breach indicator.")
-            self.alpha = self.adapter.update(breach_indicator=breaches[0])
-            self.quantiles = self._calculate_quantiles()
-        elif isinstance(self.adapter, DtACI):
-            self.alpha = self.adapter.update(breach_indicators=breaches)
-            self.quantiles = self._calculate_quantiles()
-
-
-class PessimisticLowerBoundSampler:
-    def __init__(
-        self,
-        interval_width: float = 0.8,
-        adapter_framework: Optional[str] = None,
-    ):
-        self.interval_width = interval_width
-        self.alpha = 1 - interval_width
-
-        # Initialize adapter if specified
-        self.adapter = self._initialize_adapter(adapter_framework)
-        self.quantiles = self._calculate_quantiles()
-
-    def _initialize_adapter(self, framework: Optional[str]):
-        if framework == "ACI":
-            adapter = ACI(alpha=self.alpha)
-        elif framework == "DtACI":
-            adapter = DtACI(alpha=self.alpha)
-            self.expert_alphas = adapter.alpha_t_values
-        elif framework is None:
-            adapter = None
-        else:
-            raise ValueError(f"Unknown adapter framework: {framework}")
-        return adapter
-
-    def _calculate_quantiles(self) -> QuantileInterval:
-        return QuantileInterval(
-            lower_quantile=self.alpha / 2, upper_quantile=1 - (self.alpha / 2)
-        )
-
-    def fetch_alpha(self) -> float:
-        return self.alpha
-
-    def fetch_expert_alphas(self) -> List[float]:
-        if hasattr(self, "expert_alphas"):
-            return self.expert_alphas
-        return [self.alpha]
-
-    def fetch_interval(self) -> QuantileInterval:
-        return self.quantiles
-
-    def update_exploration_step(self):
-        # No exploration parameter to update for pessimistic sampler
-        pass
-
-    def update_interval_width(self, breaches: list[int]):
-        if isinstance(self.adapter, ACI):
-            if len(breaches) != 1:
-                raise ValueError("ACI adapter requires a single breach indicator.")
-            self.alpha = self.adapter.update(breach_indicator=breaches[0])
-            self.quantiles = self._calculate_quantiles()
-        elif isinstance(self.adapter, DtACI):
-            self.alpha = self.adapter.update(breach_indicators=breaches)
-            self.quantiles = self._calculate_quantiles()
-
-
-class ThompsonSampler:
-    def __init__(
-        self,
-        n_quantiles: int = 4,
-        adapter_framework: Optional[str] = None,
-        enable_optimistic_sampling: bool = False,
-    ):
-        if n_quantiles % 2 != 0:
-            raise ValueError("Number of Thompson quantiles must be even.")
-
-        self.n_quantiles = n_quantiles
-        self.enable_optimistic_sampling = enable_optimistic_sampling
-
-        starting_quantiles = [
-            round(i / (self.n_quantiles + 1), 2) for i in range(1, n_quantiles + 1)
-        ]
-        self.quantiles, self.alphas = self._initialize_quantiles_and_alphas(
-            starting_quantiles
-        )
-        self.adapters = self._initialize_adapters(adapter_framework)
-
-    def _initialize_quantiles_and_alphas(self, starting_quantiles: List[float]):
-        quantiles = []
-        alphas = []
-        half_length = len(starting_quantiles) // 2
-
-        for i in range(half_length):
-            lower, upper = starting_quantiles[i], starting_quantiles[-(i + 1)]
-            quantiles.append(
-                QuantileInterval(lower_quantile=lower, upper_quantile=upper)
-            )
-            alphas.append(1 - (upper - lower))
-        return quantiles, alphas
-
-    def _initialize_adapters(self, framework: Optional[str]):
-        if not framework:
-            return []
-
-        adapter_class = ACI if framework == "ACI" else None
-        if not adapter_class:
-            raise ValueError(f"Unknown adapter framework: {framework}")
-
-        return [adapter_class(alpha=alpha) for alpha in self.alphas]
-
-    def fetch_alphas(self) -> List[float]:
-        return self.alphas
-
-    def fetch_intervals(self) -> List[QuantileInterval]:
-        return self.quantiles
-
-    def update_interval_width(self, breaches: List[int]):
-        for i, (adapter, breach) in enumerate(zip(self.adapters, breaches)):
-            updated_alpha = adapter.update(breach_indicator=breach)
-            self.alphas[i] = updated_alpha
-            self.quantiles[i] = QuantileInterval(
-                lower_quantile=updated_alpha / 2, upper_quantile=1 - (updated_alpha / 2)
-            )
-
-
 class LocallyWeightedConformalSearcher:
-    """
-    Locally weighted conformal regression with sampling.
-
-    Uses a locally weighted conformal estimator and applies sampling strategies
-    to form point and variability predictions for y.
-    """
-
     def __init__(
         self,
         point_estimator_architecture: str,
         variance_estimator_architecture: str,
-        sampler: Union[UCBSampler, ThompsonSampler, PessimisticLowerBoundSampler],
+        sampler: Union[
+            LowerBoundSampler, ThompsonSampler, PessimisticLowerBoundSampler
+        ],
     ):
         self.conformal_estimator = LocallyWeightedConformalEstimator(
             point_estimator_architecture=point_estimator_architecture,
@@ -235,10 +45,7 @@ class LocallyWeightedConformalSearcher:
         tuning_iterations: Optional[int] = 0,
         random_state: Optional[int] = None,
     ):
-        """
-        Fit the conformal estimator.
-        """
-        self.conformal_estimator.fit(
+        self.conformal_estimator.tune_fit(
             X_train=X_train,
             y_train=y_train,
             X_val=X_val,
@@ -250,10 +57,7 @@ class LocallyWeightedConformalSearcher:
         self.primary_estimator_error = self.conformal_estimator.primary_estimator_error
 
     def predict(self, X: np.array):
-        """
-        Predict using the conformal estimator and apply the sampler.
-        """
-        if isinstance(self.sampler, UCBSampler):
+        if isinstance(self.sampler, LowerBoundSampler):
             return self._predict_with_ucb(X)
         elif isinstance(self.sampler, ThompsonSampler):
             return self._predict_with_thompson(X)
@@ -261,9 +65,6 @@ class LocallyWeightedConformalSearcher:
             return self._predict_with_pessimistic_lower_bound(X)
 
     def _predict_with_ucb(self, X: np.array):
-        """
-        Predict using UCB sampling strategy.
-        """
         point_estimate = np.array(
             self.conformal_estimator.pe_estimator.predict(X)
         ).reshape(-1, 1)
@@ -310,9 +111,6 @@ class LocallyWeightedConformalSearcher:
         return tracked_lower_bound
 
     def _predict_with_thompson(self, X: np.array):
-        """
-        Predict using Thompson sampling strategy with locally weighted conformal estimator.
-        """
         self.predictions_per_interval = []
 
         # Get all intervals from the Thompson sampler
@@ -386,22 +184,17 @@ class LocallyWeightedConformalSearcher:
 
 
 class SingleFitQuantileConformalSearcher:
-    """
-    Single-fit quantile conformal regression with sampling.
-
-    Uses a single quantile conformal estimator that can predict any quantile
-    after being fitted once, and applies sampling strategies to form predictions.
-    """
-
     def __init__(
         self,
         quantile_estimator_architecture: Literal["qknn", "qrf"],
-        sampler: Union[UCBSampler, ThompsonSampler, PessimisticLowerBoundSampler],
+        sampler: Union[
+            LowerBoundSampler, ThompsonSampler, PessimisticLowerBoundSampler
+        ],
         n_pre_conformal_trials: int = 20,
     ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
         self.sampler = sampler
-        if isinstance(self.sampler, UCBSampler):
+        if isinstance(self.sampler, LowerBoundSampler):
             self.sampler.upper_quantile_cap = 0.5
             self.sampler.quantiles = self.sampler._calculate_quantiles()
         self.n_pre_conformal_trials = n_pre_conformal_trials
@@ -445,17 +238,15 @@ class SingleFitQuantileConformalSearcher:
                 y=np.concatenate((y_train, y_val)),
             )
 
-        # Get all intervals from the sampler
-        if isinstance(self.sampler, UCBSampler) or isinstance(
+        if isinstance(self.sampler, LowerBoundSampler) or isinstance(
             self.sampler, PessimisticLowerBoundSampler
         ):
-            intervals = [self.sampler.fetch_interval()]
+            intervals = [self.sampler.fetch_quantile_interval()]
         elif isinstance(self.sampler, ThompsonSampler):
             intervals = self.sampler.fetch_intervals()
         else:
             raise ValueError("Unknown sampler type.")
 
-        # Fit the single conformal estimator with all intervals
         self.conformal_estimator.fit(
             X_train=X_train,
             y_train=y_train,
@@ -470,10 +261,7 @@ class SingleFitQuantileConformalSearcher:
         self.primary_estimator_error = self.conformal_estimator.primary_estimator_error
 
     def predict(self, X: np.array):
-        """
-        Predict using the conformal estimator and apply the sampler.
-        """
-        if isinstance(self.sampler, UCBSampler):
+        if isinstance(self.sampler, LowerBoundSampler):
             return self._predict_with_ucb(X)
         elif isinstance(self.sampler, ThompsonSampler):
             return self._predict_with_thompson(X)
@@ -481,11 +269,8 @@ class SingleFitQuantileConformalSearcher:
             return self._predict_with_pessimistic_lower_bound(X)
 
     def _predict_with_ucb(self, X: np.array):
-        """
-        Predict using UCB sampling strategy with a single estimator.
-        """
         # Get the interval from the UCB sampler
-        interval = self.sampler.fetch_interval()
+        interval = self.sampler.fetch_quantile_interval()
 
         # Predict interval using the single estimator
         (
@@ -507,9 +292,6 @@ class SingleFitQuantileConformalSearcher:
         return lower_bound
 
     def _predict_with_thompson(self, X: np.array):
-        """
-        Predict using Thompson sampling strategy with a single estimator.
-        """
         # Get all intervals from the Thompson sampler
         intervals = self.sampler.fetch_intervals()
 
@@ -548,11 +330,8 @@ class SingleFitQuantileConformalSearcher:
         return lower_bounds
 
     def _predict_with_pessimistic_lower_bound(self, X: np.array):
-        """
-        Predict using Pessimistic Lower Bound sampling strategy with a single estimator.
-        """
         # Get the interval from the pessimistic sampler
-        interval = self.sampler.fetch_interval()
+        interval = self.sampler.fetch_quantile_interval()
 
         # Predict interval using the single estimator
         (
@@ -568,9 +347,6 @@ class SingleFitQuantileConformalSearcher:
         return lower_interval_bound
 
     def update_interval_width(self, sampled_idx: int, sampled_performance: float):
-        """
-        Update interval width based on performance.
-        """
         breaches = []
         for predictions in self.predictions_per_interval:
             sampled_predictions = predictions[sampled_idx, :]
@@ -585,22 +361,17 @@ class SingleFitQuantileConformalSearcher:
 
 
 class MultiFitQuantileConformalSearcher:
-    """
-    Multi-fit quantile conformal regression with sampling.
-
-    Uses one or more multi-fit quantile conformal estimators and applies
-    sampling strategies to form predictions.
-    """
-
     def __init__(
         self,
         quantile_estimator_architecture: str,
-        sampler: Union[UCBSampler, ThompsonSampler, PessimisticLowerBoundSampler],
+        sampler: Union[
+            LowerBoundSampler, ThompsonSampler, PessimisticLowerBoundSampler
+        ],
         n_pre_conformal_trials: int = 20,
     ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
         self.sampler = sampler
-        if isinstance(self.sampler, UCBSampler):
+        if isinstance(self.sampler, LowerBoundSampler):
             self.sampler.upper_quantile_cap = 0.5
             self.sampler.quantiles = self.sampler._calculate_quantiles()
         self.n_pre_conformal_trials = n_pre_conformal_trials
@@ -641,10 +412,10 @@ class MultiFitQuantileConformalSearcher:
             )
 
         # Get intervals from the sampler
-        if isinstance(self.sampler, UCBSampler) or isinstance(
+        if isinstance(self.sampler, LowerBoundSampler) or isinstance(
             self.sampler, PessimisticLowerBoundSampler
         ):
-            intervals = [self.sampler.fetch_interval()]
+            intervals = [self.sampler.fetch_quantile_interval()]
         elif isinstance(self.sampler, ThompsonSampler):
             intervals = self.sampler.fetch_intervals()
         else:
@@ -676,7 +447,7 @@ class MultiFitQuantileConformalSearcher:
         """
         Predict using the conformal estimators and apply the sampler.
         """
-        if isinstance(self.sampler, UCBSampler):
+        if isinstance(self.sampler, LowerBoundSampler):
             return self._predict_with_ucb(X)
         elif isinstance(self.sampler, ThompsonSampler):
             return self._predict_with_thompson(X)

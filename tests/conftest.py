@@ -19,7 +19,7 @@ from confopt.conformalization import (
     QuantileInterval,
 )
 from confopt.config import QGBM_NAME, GBM_NAME, QRF_NAME
-from confopt.ranges import FloatRange
+from confopt.data_classes import FloatRange
 
 DEFAULT_SEED = 1234
 

@@ -17,21 +17,6 @@ COVERAGE_TOLERANCE = 0.05
 
 
 class TestLocallyWeightedConformalEstimator:
-    # Reduce parameter combinations significantly for initialization test
-    @pytest.mark.parametrize("point_arch", POINT_ESTIMATOR_ARCHITECTURES)
-    @pytest.mark.parametrize("variance_arch", POINT_ESTIMATOR_ARCHITECTURES)
-    def test_initialization(self, point_arch, variance_arch):
-        """Test that LocallyWeightedConformalEstimator initializes correctly"""
-        estimator = LocallyWeightedConformalEstimator(
-            point_estimator_architecture=point_arch,
-            variance_estimator_architecture=variance_arch,
-        )
-        assert estimator.point_estimator_architecture == point_arch
-        assert estimator.variance_estimator_architecture == variance_arch
-        assert estimator.pe_estimator is None
-        assert estimator.ve_estimator is None
-        assert estimator.nonconformity_scores is None
-
     @pytest.mark.parametrize("estimator_architecture", POINT_ESTIMATOR_ARCHITECTURES)
     def test_fit_component_estimator(
         self, estimator_architecture, dummy_fixed_quantile_dataset
@@ -54,7 +39,7 @@ class TestLocallyWeightedConformalEstimator:
         )
 
         # Test with default configurations (no tuning)
-        fitted_est = estimator._fit_component_estimator(
+        fitted_est = estimator._tune_fit_component_estimator(
             X=X_train,
             y=y_train,
             estimator_architecture=estimator_architecture,
@@ -103,7 +88,7 @@ class TestLocallyWeightedConformalEstimator:
         )
 
         # Fit the estimator
-        estimator.fit(
+        estimator.tune_fit(
             X_train=X_train,
             y_train=y_train,
             X_val=X_val,

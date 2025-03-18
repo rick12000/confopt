@@ -14,9 +14,9 @@ from confopt.tracking import Trial, Study, RuntimeTracker, derive_optimal_tuning
 from confopt.acquisition import (
     LocallyWeightedConformalSearcher,
     MultiFitQuantileConformalSearcher,
-    UCBSampler,
+    LowerBoundSampler,
 )
-from confopt.ranges import ParameterRange
+from confopt.data_classes import ParameterRange
 
 logger = logging.getLogger(__name__)
 
@@ -616,7 +616,7 @@ class ObjectiveConformalSearcher:
                 )
 
             # Handle UCBSampler breach calculation
-            if isinstance(searcher.sampler, UCBSampler):
+            if isinstance(searcher.sampler, LowerBoundSampler):
                 if (
                     searcher.predictions_per_interval[0][minimal_searchable_idx][0]
                     <= validation_performance

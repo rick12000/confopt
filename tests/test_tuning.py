@@ -12,9 +12,9 @@ from confopt.tuning import (
 )
 from confopt.acquisition import (
     LocallyWeightedConformalSearcher,
-    UCBSampler,
+    LowerBoundSampler,
 )
-from confopt.ranges import IntRange, FloatRange, CategoricalRange
+from confopt.data_classes import IntRange, FloatRange, CategoricalRange
 
 DEFAULT_SEED = 1234
 
@@ -226,7 +226,7 @@ def test_search(dummy_tuner):
     searcher = LocallyWeightedConformalSearcher(
         point_estimator_architecture="gbm",
         variance_estimator_architecture="gbm",
-        sampler=UCBSampler(c=1, interval_width=0.8),  # Removed beta parameter
+        sampler=LowerBoundSampler(c=1, interval_width=0.8),  # Removed beta parameter
     )
 
     n_random_searches = 10  # Increased from 5
@@ -258,7 +258,7 @@ def test_search__reproducibility(dummy_tuner):
     searcher = LocallyWeightedConformalSearcher(
         point_estimator_architecture="gbm",
         variance_estimator_architecture="gbm",
-        sampler=UCBSampler(c=1, interval_width=0.8),  # Removed beta parameter
+        sampler=LowerBoundSampler(c=1, interval_width=0.8),  # Removed beta parameter
     )
 
     n_random_searches = 10  # Increased from 5

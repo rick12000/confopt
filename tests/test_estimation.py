@@ -3,7 +3,7 @@ import pytest
 from copy import deepcopy
 
 # Remove scipy imports and add the proper range types
-from confopt.ranges import IntRange, FloatRange
+from confopt.data_classes import IntRange, FloatRange
 
 from confopt.estimation import (
     initialize_point_estimator,

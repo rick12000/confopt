@@ -5,7 +5,7 @@ import math
 
 import numpy as np
 import pandas as pd
-from confopt.ranges import IntRange, FloatRange, CategoricalRange, ParameterRange
+from confopt.data_classes import IntRange, FloatRange, CategoricalRange, ParameterRange
 
 logger = logging.getLogger(__name__)
 

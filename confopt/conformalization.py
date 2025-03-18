@@ -2,8 +2,7 @@ import logging
 import numpy as np
 from typing import Optional, Tuple, List, Literal
 from sklearn.metrics import mean_squared_error, mean_pinball_loss
-from pydantic import BaseModel
-
+from confopt.data_classes import QuantileInterval
 from confopt.preprocessing import train_val_split
 from confopt.tracking import RuntimeTracker
 from confopt.estimation import (
@@ -30,24 +29,18 @@ class LocallyWeightedConformalEstimator:
         self.point_estimator_architecture = point_estimator_architecture
         self.variance_estimator_architecture = variance_estimator_architecture
 
-        self.pe_estimator = None
-        self.ve_estimator = None
-        self.nonconformity_scores = None
-        self.training_time = None
-        self.primary_estimator_error = None
-
-    def _fit_component_estimator(
+    def _tune_fit_component_estimator(
         self,
-        X,
-        y,
-        estimator_architecture,
-        tuning_iterations,
+        X: np.ndarray,
+        y: np.ndarray,
+        estimator_architecture: str,
+        tuning_iterations: int,
         random_state: Optional[int] = None,
     ):
         """
         Fit component estimator with option to tune.
         """
-        if tuning_iterations > 1 and len(X) > 10:
+        if tuning_iterations > 1 and len(X) > 15:
             initialization_params = tune(
                 X=X,
                 y=y,
@@ -69,7 +62,7 @@ class LocallyWeightedConformalEstimator:
 
         return estimator
 
-    def fit(
+    def tune_fit(
         self,
         X_train: np.array,
         y_train: np.array,
@@ -95,7 +88,7 @@ class LocallyWeightedConformalEstimator:
 
         training_time_tracker = RuntimeTracker()
 
-        self.pe_estimator = self._fit_component_estimator(
+        self.pe_estimator = self._tune_fit_component_estimator(
             X=X_pe,
             y=y_pe,
             estimator_architecture=self.point_estimator_architecture,
@@ -106,7 +99,7 @@ class LocallyWeightedConformalEstimator:
         pe_residuals = y_ve - self.pe_estimator.predict(X_ve)
         abs_pe_residuals = abs(pe_residuals)
 
-        self.ve_estimator = self._fit_component_estimator(
+        self.ve_estimator = self._tune_fit_component_estimator(
             X=X_ve,
             y=abs_pe_residuals,
             estimator_architecture=self.variance_estimator_architecture,
@@ -156,11 +149,6 @@ class LocallyWeightedConformalEstimator:
         upper_bound = y_pred + scaled_score
 
         return lower_bound, upper_bound
-
-
-class QuantileInterval(BaseModel):
-    lower_quantile: float
-    upper_quantile: float
 
 
 class SingleFitQuantileConformalEstimator:

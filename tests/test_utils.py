@@ -4,7 +4,7 @@ from confopt.utils import (
     get_tuning_configurations,
     ConfigurationEncoder,
 )
-from confopt.ranges import IntRange, FloatRange, CategoricalRange
+from confopt.data_classes import IntRange, FloatRange, CategoricalRange
 
 DEFAULT_SEED = 1234
 
