@@ -49,33 +49,16 @@ class ObjectiveSurfaceGenerator:
 
 
 @pytest.fixture
-def dummy_stationary_gaussian_dataset():
+def dummy_expanding_quantile_gaussian_dataset():
     np.random.seed(DEFAULT_SEED)
     random.seed(DEFAULT_SEED)
 
     X, y = [], []
-    for x_observation in range(1, 11):
-        for _ in range(0, 1000):
+    for x_observation in range(1, 6):
+        for _ in range(0, 100):
             X.append(x_observation)
-            y.append(np.random.normal(0, 101))
-    dataset = np.column_stack([X, y])
-    np.random.shuffle(dataset)
-    return dataset
-
-
-@pytest.fixture
-def dummy_fixed_quantile_dataset():
-    np.random.seed(DEFAULT_SEED)
-    random.seed(DEFAULT_SEED)
-
-    X, y = [], []
-    for x_observation in range(1, 11):
-        for _ in range(0, 1000):
-            X.append(x_observation)
-            y.append(random.choice(range(1, 101)))
-    dataset = np.column_stack([X, y])
-    np.random.shuffle(dataset)
-    return dataset
+            y.append(x_observation * np.random.normal(0, 101))
+    return np.array(X).reshape(-1, 1), np.array(y)
 
 
 @pytest.fixture

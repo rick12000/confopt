@@ -45,7 +45,7 @@ class LocallyWeightedConformalSearcher:
         tuning_iterations: Optional[int] = 0,
         random_state: Optional[int] = None,
     ):
-        self.conformal_estimator.tune_fit(
+        self.conformal_estimator.fit(
             X_train=X_train,
             y_train=y_train,
             X_val=X_val,
@@ -199,9 +199,20 @@ class SingleFitQuantileConformalSearcher:
             self.sampler.quantiles = self.sampler._calculate_quantiles()
         self.n_pre_conformal_trials = n_pre_conformal_trials
 
+        # Determine intervals to use based on the sampler type
+        if isinstance(self.sampler, LowerBoundSampler) or isinstance(
+            self.sampler, PessimisticLowerBoundSampler
+        ):
+            intervals = [self.sampler.fetch_quantile_interval()]
+        elif isinstance(self.sampler, ThompsonSampler):
+            intervals = self.sampler.fetch_intervals()
+        else:
+            raise ValueError("Unknown sampler type.")
+
         # Use a single estimator for all intervals
         self.conformal_estimator = SingleFitQuantileConformalEstimator(
             quantile_estimator_architecture=quantile_estimator_architecture,
+            intervals=intervals,
             n_pre_conformal_trials=n_pre_conformal_trials,
         )
         self.point_estimator = None
@@ -238,21 +249,11 @@ class SingleFitQuantileConformalSearcher:
                 y=np.concatenate((y_train, y_val)),
             )
 
-        if isinstance(self.sampler, LowerBoundSampler) or isinstance(
-            self.sampler, PessimisticLowerBoundSampler
-        ):
-            intervals = [self.sampler.fetch_quantile_interval()]
-        elif isinstance(self.sampler, ThompsonSampler):
-            intervals = self.sampler.fetch_intervals()
-        else:
-            raise ValueError("Unknown sampler type.")
-
         self.conformal_estimator.fit(
             X_train=X_train,
             y_train=y_train,
             X_val=X_val,
             y_val=y_val,
-            intervals=intervals,
             tuning_iterations=tuning_iterations,
             random_state=random_state,
         )

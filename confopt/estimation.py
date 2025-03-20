@@ -4,8 +4,6 @@ from typing import Dict, Optional, List, Tuple
 import numpy as np
 from lightgbm import LGBMRegressor
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import RationalQuadratic, RBF
 from sklearn.kernel_ridge import KernelRidge
 from sklearn.metrics import mean_pinball_loss, mean_squared_error
 from sklearn.model_selection import KFold
@@ -15,7 +13,6 @@ from confopt.config import (
     QRF_NAME,
     QGBM_NAME,
     QKNN_NAME,
-    GP_NAME,
     KNN_NAME,
     KR_NAME,
     RF_NAME,
@@ -26,6 +23,8 @@ from confopt.config import (
     MFENS_NAME,  # Import the new ensemble model name
     PENS_NAME,  # Import the new point ensemble model name
     MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
+    SEARCH_MODEL_DEFAULT_CONFIGURATIONS,
+    SEARCH_MODEL_TUNING_SPACE,
 )
 from confopt.quantile_wrappers import (
     QuantileGBM,
@@ -44,257 +43,6 @@ from confopt.ensembling import (
 from confopt.utils import get_tuning_configurations
 
 logger = logging.getLogger(__name__)
-
-SEARCH_MODEL_TUNING_SPACE: Dict[str, Dict] = {
-    RF_NAME: {
-        "n_estimators": [10, 25, 50, 75],
-        "max_features": [0.3, 0.5, 0.7, "sqrt"],
-        "min_samples_split": [2, 3, 5, 7],
-        "min_samples_leaf": [1, 2, 4, 6],
-        "bootstrap": [True, False],
-    },
-    KNN_NAME: {
-        "n_neighbors": [3, 5, 7, 9],
-        "weights": ["uniform", "distance"],
-        "p": [1, 2],
-    },
-    LGBM_NAME: {
-        "learning_rate": [0.05, 0.1, 0.2],
-        "n_estimators": [10, 20, 30],
-        "max_depth": [2, 3, 4],
-        "min_child_samples": [3, 5, 7],
-        "subsample": [0.7, 0.8, 0.9],
-        "colsample_bytree": [0.6, 0.7, 0.8],
-        "reg_alpha": [0.1, 0.5, 1.0],
-        "reg_lambda": [0.1, 0.5, 1.0],
-    },
-    GBM_NAME: {
-        "learning_rate": [0.05, 0.1, 0.2, 0.3],
-        "n_estimators": [10, 25, 50],
-        "min_samples_split": [2, 5, 7],
-        "min_samples_leaf": [2, 3, 5],
-        "max_depth": [2, 3, 4],
-        "subsample": [0.8, 0.9, 1.0],
-    },
-    GP_NAME: {
-        "kernel": [RBF(), RationalQuadratic()],
-        "alpha": [1e-10, 1e-8, 1e-6],
-        "normalize_y": [True, False],
-    },
-    KR_NAME: {
-        "alpha": [0.1, 1.0, 10.0],
-        "kernel": ["linear", "rbf", "poly"],
-    },
-    QRF_NAME: {
-        "n_estimators": [10, 25, 50],
-        "max_depth": [3, 5],
-        "max_features": [0.6, 0.8],
-        "min_samples_split": [2, 3],
-        "bootstrap": [True, False],
-    },
-    QKNN_NAME: {
-        "n_neighbors": [3, 5, 7, 10],
-    },
-    QL_NAME: {
-        "alpha": [0.01, 0.05, 0.1, 0.3],  # Updated with lower values for small datasets
-        "max_iter": [100, 200, 500],  # Added a lower iteration count option
-        "p_tol": [
-            1e-3,
-            1e-4,
-            1e-5,
-        ],  # Renamed from 'tol' to 'p_tol' to match implementation
-    },
-    QGBM_NAME: {
-        "learning_rate": [0.1, 0.2, 0.3],
-        "n_estimators": [20, 35, 50],
-        "min_samples_split": [5, 10],
-        "min_samples_leaf": [3, 5],
-        "max_depth": [3, 5, 7],
-        "subsample": [0.8, 0.9],
-        "max_features": [0.8, 1.0],
-    },
-    QLGBM_NAME: {
-        "learning_rate": [0.05, 0.1, 0.2],
-        "n_estimators": [10, 20, 30],
-        "max_depth": [2, 3],
-        "min_child_samples": [3, 5, 7],
-        "subsample": [0.7, 0.8, 0.9],
-        "colsample_bytree": [0.6, 0.7, 0.8],
-        "reg_alpha": [0.1, 0.5, 1.0],
-        "reg_lambda": [0.1, 0.5, 1.0],
-    },
-    SFQENS_NAME: {
-        # Ensemble parameters
-        "cv": [2, 3],
-        "weighting_strategy": ["inverse_error", "rank", "uniform", "meta_learner"],
-        # QRF parameters
-        "qrf_n_estimators": [10, 25, 50],
-        "qrf_max_depth": [3, 5],
-        "qrf_max_features": [0.6, 0.8],
-        "qrf_min_samples_split": [2, 3],
-        "qrf_bootstrap": [True, False],
-        # QKNN parameters
-        "qknn_n_neighbors": [3, 5, 7, 10],
-    },
-    MFENS_NAME: {
-        # Ensemble parameters
-        "cv": [2, 3],
-        "weighting_strategy": ["inverse_error", "rank", "uniform", "meta_learner"],
-        # QLGBM parameters
-        "qlgbm_learning_rate": [0.05, 0.1, 0.2],
-        "qlgbm_n_estimators": [10, 20, 30],
-        "qlgbm_max_depth": [2, 3],
-        "qlgbm_min_child_samples": [3, 5, 7],
-        "qlgbm_subsample": [0.7, 0.8, 0.9],
-        "qlgbm_colsample_bytree": [0.6, 0.7, 0.8],
-        "qlgbm_reg_alpha": [0.1, 0.5],
-        "qlgbm_reg_lambda": [0.1, 0.5],
-        # QL parameters
-        "ql_alpha": [0.01, 0.05, 0.1],
-        "ql_max_iter": [100, 200, 500],
-        "ql_p_tol": [1e-3, 1e-4],
-    },
-    PENS_NAME: {
-        # Ensemble parameters
-        "cv": [2, 3],
-        "weighting_strategy": ["inverse_error", "rank", "uniform", "meta_learner"],
-        # GBM parameters
-        "gbm_learning_rate": [0.05, 0.1, 0.2, 0.3],
-        "gbm_n_estimators": [10, 25, 50],
-        "gbm_min_samples_split": [2, 5, 7],
-        "gbm_min_samples_leaf": [2, 3, 5],
-        "gbm_max_depth": [2, 3, 4],
-        "gbm_subsample": [0.8, 0.9, 1.0],
-        # KNN parameters
-        "knn_n_neighbors": [3, 5, 7, 9],
-        "knn_weights": ["uniform", "distance"],
-        "knn_p": [1, 2],
-    },
-}
-
-SEARCH_MODEL_DEFAULT_CONFIGURATIONS: Dict[str, Dict] = {
-    RF_NAME: {
-        "n_estimators": 25,
-        "max_features": "sqrt",
-        "min_samples_split": 3,
-        "min_samples_leaf": 2,
-        "bootstrap": True,
-    },
-    KNN_NAME: {
-        "n_neighbors": 5,
-        "weights": "distance",
-    },
-    GBM_NAME: {
-        "learning_rate": 0.1,
-        "n_estimators": 25,
-        "min_samples_split": 3,
-        "min_samples_leaf": 3,
-        "max_depth": 2,
-        "subsample": 0.9,
-    },
-    LGBM_NAME: {
-        "learning_rate": 0.1,
-        "n_estimators": 20,
-        "max_depth": 2,
-        "min_child_samples": 5,
-        "subsample": 0.8,
-        "colsample_bytree": 0.7,
-        "reg_alpha": 0.1,
-        "reg_lambda": 0.1,
-        "min_child_weight": 3,
-    },
-    GP_NAME: {
-        "kernel": RBF(),
-        "normalize_y": True,
-        "alpha": 1e-8,
-    },
-    KR_NAME: {
-        "alpha": 1.0,
-        "kernel": "rbf",
-    },
-    QRF_NAME: {
-        "n_estimators": 25,
-        "max_depth": 5,
-        "max_features": 0.8,
-        "min_samples_split": 2,
-        "bootstrap": True,
-    },
-    QKNN_NAME: {
-        "n_neighbors": 5,
-    },
-    QL_NAME: {
-        "alpha": 0.05,  # Lowered default for small datasets
-        "max_iter": 200,  # Reasonable default for small datasets
-        "p_tol": 1e-4,  # Renamed from 'tol' to 'p_tol' to match implementation
-    },
-    QGBM_NAME: {
-        "learning_rate": 0.2,
-        "n_estimators": 25,
-        "min_samples_split": 5,
-        "min_samples_leaf": 3,
-        "max_depth": 5,
-        "subsample": 0.8,
-        "max_features": 0.8,
-    },
-    QLGBM_NAME: {
-        "learning_rate": 0.1,
-        "n_estimators": 20,
-        "max_depth": 2,
-        "min_child_samples": 5,
-        "subsample": 0.8,
-        "colsample_bytree": 0.7,
-        "reg_alpha": 0.1,
-        "reg_lambda": 0.1,
-        "min_child_weight": 3,
-    },
-    SFQENS_NAME: {
-        # Ensemble parameters
-        "cv": 3,
-        "weighting_strategy": "inverse_error",
-        # QRF parameters
-        "qrf_n_estimators": 25,
-        "qrf_max_depth": 5,
-        "qrf_max_features": 0.8,
-        "qrf_min_samples_split": 2,
-        "qrf_bootstrap": True,
-        # QKNN parameters
-        "qknn_n_neighbors": 5,
-    },
-    MFENS_NAME: {
-        # Ensemble parameters
-        "cv": 3,
-        "weighting_strategy": "inverse_error",
-        # QLGBM parameters
-        "qlgbm_learning_rate": 0.1,
-        "qlgbm_n_estimators": 20,
-        "qlgbm_max_depth": 2,
-        "qlgbm_min_child_samples": 5,
-        "qlgbm_subsample": 0.8,
-        "qlgbm_colsample_bytree": 0.7,
-        "qlgbm_reg_alpha": 0.1,
-        "qlgbm_reg_lambda": 0.1,
-        # QL parameters
-        "ql_alpha": 0.05,
-        "ql_max_iter": 200,
-        "ql_p_tol": 1e-4,
-    },
-    PENS_NAME: {
-        # Ensemble parameters
-        "cv": 3,
-        "weighting_strategy": "inverse_error",
-        # GBM parameters
-        "gbm_learning_rate": 0.1,
-        "gbm_n_estimators": 25,
-        "gbm_min_samples_split": 3,
-        "gbm_min_samples_leaf": 3,
-        "gbm_max_depth": 2,
-        "gbm_subsample": 0.9,
-        # KNN parameters
-        "knn_n_neighbors": 5,
-        "knn_weights": "distance",
-        "knn_p": 2,
-    },
-}
 
 
 def tune(
@@ -494,10 +242,6 @@ def initialize_point_estimator(
     elif estimator_architecture == LGBM_NAME:
         initialized_model = LGBMRegressor(
             **initialization_params, random_state=random_state, verbose=-1
-        )
-    elif estimator_architecture == GP_NAME:
-        initialized_model = GaussianProcessRegressor(
-            **initialization_params, random_state=random_state
         )
     elif estimator_architecture == KR_NAME:
         initialized_model = KernelRidge(**initialization_params)

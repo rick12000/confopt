@@ -560,6 +560,8 @@ class ObjectiveConformalSearcher:
 
                 if config_idx == 0:
                     first_searcher_runtime = searcher_runtime
+            else:
+                searcher_runtime = None
 
             # Determine tuning count if necessary
             if searcher_tuning_framework is not None:
