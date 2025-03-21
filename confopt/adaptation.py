@@ -1,6 +1,10 @@
 import numpy as np
 
 
+def pinball_loss(y, yhat, q: float):
+    return np.maximum(q * (y - yhat), (1 - q) * (yhat - y))
+
+
 class BaseACI:
     def __init__(self, alpha=0.1):
         """
@@ -37,6 +41,7 @@ class ACI(BaseACI):
         """
         super().__init__(alpha)
         self.gamma = gamma
+        self.alpha_t = alpha
 
     def update(self, breach_indicator):
         """
@@ -56,9 +61,7 @@ class ACI(BaseACI):
 
 
 class DtACI(BaseACI):
-    def __init__(
-        self, alpha=0.1, gamma_values=None, initial_alphas=None, sigma=0.1, eta=1.0
-    ):
+    def __init__(self, alpha=0.1, gamma_values=None):
         """
         Dynamically Tuned Adaptive Conformal Inference (DtACI).
         Implementation follows Algorithm 1 from Gradu et al. (2023).
@@ -66,7 +69,6 @@ class DtACI(BaseACI):
         Parameters:
         - alpha: Target coverage level (1 - alpha is the desired coverage).
         - gamma_values: List of candidate step-size values {γᵢ}ᵏᵢ₌₁.
-        - initial_alphas: List of starting points {αᵢ}ᵏᵢ₌₁.
         - sigma: Parameter for weight smoothing.
         - eta: Learning rate parameter.
         """
@@ -74,36 +76,27 @@ class DtACI(BaseACI):
 
         # Set default values if not provided
         if gamma_values is None:
-            gamma_values = [0.001, 0.01, 0.05, 0.1]
-        if initial_alphas is None:
-            initial_alphas = [alpha] * len(gamma_values)
+            gamma_values = [0.001, 0.002, 0.004, 0.008, 0.0160, 0.032, 0.064, 0.128]
 
         self.k = len(gamma_values)
-        self.gamma_values = gamma_values
-        self.alpha_t_values = initial_alphas.copy()
-        self.sigma = sigma
-        self.eta = eta
+        self.gamma_values = np.asarray(gamma_values)
+        self.alpha_t_values = np.array([alpha] * len(gamma_values))
 
-        # Initialize weights
-        self.weights = [1.0] * self.k
+        # Use properties for sigma and eta if not provided
+        self.interval = 500
+        self.sigma = 1 / (2 * self.interval)
+        self.eta = (
+            (np.sqrt(3 / self.interval))
+            * np.sqrt(np.log(self.interval * self.k) + 2)
+            / ((1 - alpha) ** 2 * alpha**3)
+        )
+
+        # Initialize log weights (using log space for numerical stability)
+        self.log_weights = np.ones(self.k) / self.k  # Equal weights at start
 
         # The selected alpha_t for the current step
         self.chosen_idx = None
-        self.alpha_t = self.sample_alpha_t()
-
-    def sample_alpha_t(self):
-        """Sample alpha_t based on the current weights."""
-        # Calculate probabilities
-        total_weight = sum(self.weights)
-        probs = [w / total_weight for w in self.weights]
-
-        # Use numpy instead of random.choices for reproducibility
-        self.chosen_idx = np.random.choice(range(self.k), p=probs)
-
-        # Set the current alpha_t
-        self.alpha_t = self.alpha_t_values[self.chosen_idx]
-
-        return self.alpha_t
+        self.alpha_t = alpha
 
     def update(self, breach_indicators):
         """
@@ -115,37 +108,27 @@ class DtACI(BaseACI):
         Returns:
         - alpha_t: The new alpha_t value for the next step.
         """
-        if len(breach_indicators) != self.k:
-            raise ValueError(
-                f"Expected {self.k} breach indicators, got {len(breach_indicators)}"
-            )
+        # Use breach indicators as errors (1 if breached)
+        errors = np.asarray(breach_indicators)
 
-        # Use breach indicators directly as errors (err_i_t in the algorithm)
-        errors = breach_indicators
+        # Calculate pinball losses
+        losses = pinball_loss(errors, self.alpha_t_values, self.alpha)
 
-        # Update weights with exponential weighting
-        # w̄ᵗⁱ ← wᵗⁱ exp(-η ℓ(βₜ, αᵗⁱ))
-        # Here the loss ℓ is just the breach indicator
-        weights_bar = [
-            w * np.exp(-self.eta * err) for w, err in zip(self.weights, errors)
-        ]
+        # Update log weights using pinball loss
+        log_weights_bar = self.log_weights * np.exp(-self.eta * losses)
+        sum_log_weights_bar = np.sum(log_weights_bar)
 
-        # Calculate total weight W_t
-        total_weight_bar = sum(weights_bar)
+        # Apply smoothing
+        self.log_weights = (1 - self.sigma) * log_weights_bar + (
+            sum_log_weights_bar * self.sigma / self.k
+        )
 
-        # Update weights for the next round with smoothing
-        # wᵗ⁺¹ⁱ ← (1-σ)w̄ᵗⁱ + W_t σ/k
-        self.weights = [
-            (1 - self.sigma) * w_bar + total_weight_bar * self.sigma / self.k
-            for w_bar in weights_bar
-        ]
+        # Normalize log weights
+        self.log_weights = self.log_weights / np.sum(self.log_weights)
 
-        # Update each alpha_t value for the experts
-        # αᵗ⁺¹ⁱ = αᵗⁱ + γᵢ(α - errᵗⁱ)
-        for i in range(self.k):
-            self.alpha_t_values[i] += self.gamma_values[i] * (self.alpha - errors[i])
-            # Ensure all alpha values stay within reasonable bounds
-            self.alpha_t_values[i] = max(0.01, min(0.99, self.alpha_t_values[i]))
-
-        # Sample the new alpha_t for the next step
-        return self.sample_alpha_t()
+        # Update alpha values for each expert
+        self.alpha_t_values = np.clip(
+            self.alpha_t_values + self.gamma_values * (self.alpha - errors), 0.01, 0.99
+        )
+        self.alpha_t = np.random.choice(self.alpha_t_values, size=1, p=self.log_weights)
+        return self.alpha_t

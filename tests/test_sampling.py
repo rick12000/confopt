@@ -42,7 +42,7 @@ class TestPessimisticLowerBoundSampler:
         if framework == "ACI":
             assert adapter.alpha == pytest.approx(0.2)
         elif framework == "DtACI":
-            assert adapter.alpha_t_values == [pytest.approx(0.2)]
+            assert (adapter.alpha_t_values == [pytest.approx(0.2)]).all()
 
     def test_initialize_adapter_invalid(self):
         sampler = PessimisticLowerBoundSampler()
@@ -65,7 +65,11 @@ class TestPessimisticLowerBoundSampler:
 
     @pytest.mark.parametrize(
         "adapter_framework,breaches,should_raise",
-        [("ACI", [1], False), ("ACI", [1, 0], True), ("DtACI", [1, 0, 1, 0], False)],
+        [
+            ("ACI", [1], False),
+            ("ACI", [1, 0], True),
+            ("DtACI", [1, 0, 1, 0, 1, 0, 0, 1], False),
+        ],
     )
     def test_update_interval_width(self, adapter_framework, breaches, should_raise):
         sampler = PessimisticLowerBoundSampler(adapter_framework=adapter_framework)

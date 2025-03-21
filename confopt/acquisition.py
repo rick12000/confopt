@@ -1,8 +1,6 @@
 import logging
 from typing import Optional, Union, Literal
-from confopt.estimation import SEARCH_MODEL_DEFAULT_CONFIGURATIONS
 import numpy as np
-from confopt.tracking import RuntimeTracker
 from confopt.adaptation import DtACI
 from confopt.conformalization import (
     LocallyWeightedConformalEstimator,
@@ -15,6 +13,11 @@ from confopt.sampling import (
     PessimisticLowerBoundSampler,
 )
 from confopt.estimation import initialize_point_estimator
+
+from confopt.config import (
+    ESTIMATOR_REGISTRY,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +36,6 @@ class LocallyWeightedConformalSearcher:
             variance_estimator_architecture=variance_estimator_architecture,
         )
         self.sampler = sampler
-        self.training_time = None
         self.predictions_per_interval = None
 
     def fit(
@@ -53,7 +55,6 @@ class LocallyWeightedConformalSearcher:
             tuning_iterations=tuning_iterations,
             random_state=random_state,
         )
-        self.training_time = self.conformal_estimator.training_time
         self.primary_estimator_error = self.conformal_estimator.primary_estimator_error
 
     def predict(self, X: np.array):
@@ -216,7 +217,6 @@ class SingleFitQuantileConformalSearcher:
             n_pre_conformal_trials=n_pre_conformal_trials,
         )
         self.point_estimator = None
-        self.training_time = None
         self.primary_estimator_error = None
         self.predictions_per_interval = None
 
@@ -232,7 +232,6 @@ class SingleFitQuantileConformalSearcher:
         """
         Fit the single conformal estimator for all intervals.
         """
-        training_time_tracker = RuntimeTracker()
 
         # Initialize and fit optimistic estimator if needed
         if (
@@ -241,7 +240,7 @@ class SingleFitQuantileConformalSearcher:
         ):
             self.point_estimator = initialize_point_estimator(
                 estimator_architecture="gbm",
-                initialization_params=SEARCH_MODEL_DEFAULT_CONFIGURATIONS["gbm"],
+                initialization_params=ESTIMATOR_REGISTRY["gbm"].default_config,
                 random_state=random_state,
             )
             self.point_estimator.fit(
@@ -258,7 +257,6 @@ class SingleFitQuantileConformalSearcher:
             random_state=random_state,
         )
 
-        self.training_time = training_time_tracker.return_runtime()
         self.primary_estimator_error = self.conformal_estimator.primary_estimator_error
 
     def predict(self, X: np.array):
@@ -378,7 +376,6 @@ class MultiFitQuantileConformalSearcher:
         self.n_pre_conformal_trials = n_pre_conformal_trials
 
         self.point_estimator = None
-        self.training_time = None
         self.primary_estimator_error = None
         self.predictions_per_interval = None
 
@@ -394,7 +391,6 @@ class MultiFitQuantileConformalSearcher:
         """
         Fit the conformal estimators.
         """
-        training_time_tracker = RuntimeTracker()
         self.conformal_estimators = []
 
         # Initialize and fit optimistic estimator if needed
@@ -404,7 +400,7 @@ class MultiFitQuantileConformalSearcher:
         ):
             self.point_estimator = initialize_point_estimator(
                 estimator_architecture="gbm",
-                initialization_params=SEARCH_MODEL_DEFAULT_CONFIGURATIONS["gbm"],
+                initialization_params=ESTIMATOR_REGISTRY["gbm"].default_config,
                 random_state=random_state,
             )
             self.point_estimator.fit(
@@ -441,7 +437,6 @@ class MultiFitQuantileConformalSearcher:
             self.conformal_estimators.append(estimator)
             errors.append(estimator.primary_estimator_error)
 
-        self.training_time = training_time_tracker.return_runtime()
         self.primary_estimator_error = np.mean(errors)
 
     def predict(self, X: np.array):

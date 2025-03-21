@@ -8,7 +8,10 @@ from confopt.estimation import (
     initialize_point_estimator,
     initialize_quantile_estimator,
     tune,
-    SEARCH_MODEL_DEFAULT_CONFIGURATIONS,
+)
+
+from confopt.config import (
+    ESTIMATOR_REGISTRY,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,9 +53,10 @@ class LocallyWeightedConformalEstimator:
                 random_state=random_state,
             )
         else:
-            initialization_params = SEARCH_MODEL_DEFAULT_CONFIGURATIONS[
+            # Use the default configuration for this estimator from the registry
+            initialization_params = ESTIMATOR_REGISTRY[
                 estimator_architecture
-            ].copy()
+            ].default_config.copy()
         estimator = initialize_point_estimator(
             estimator_architecture=estimator_architecture,
             initialization_params=initialization_params,
@@ -198,9 +202,9 @@ class SingleFitQuantileConformalEstimator:
                 random_state=random_state,
             )
         else:
-            initialization_params = SEARCH_MODEL_DEFAULT_CONFIGURATIONS[
+            initialization_params = ESTIMATOR_REGISTRY[
                 self.quantile_estimator_architecture
-            ].copy()
+            ].default_config
 
         # Initialize and fit a single quantile estimator
         self.quantile_estimator = initialize_point_estimator(
@@ -346,9 +350,9 @@ class MultiFitQuantileConformalEstimator:
                 random_state=random_state,
             )
         else:
-            initialization_params = SEARCH_MODEL_DEFAULT_CONFIGURATIONS[
+            initialization_params = ESTIMATOR_REGISTRY[
                 self.quantile_estimator_architecture
-            ].copy()
+            ].default_config
 
         # Initialize and fit the quantile estimator
         self.quantile_estimator = initialize_quantile_estimator(

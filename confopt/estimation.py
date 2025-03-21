@@ -2,44 +2,17 @@ import logging
 from typing import Dict, Optional, List, Tuple
 
 import numpy as np
-from lightgbm import LGBMRegressor
-from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
-from sklearn.kernel_ridge import KernelRidge
 from sklearn.metrics import mean_pinball_loss, mean_squared_error
 from sklearn.model_selection import KFold
-from sklearn.neighbors import KNeighborsRegressor
-from confopt.config import (
-    GBM_NAME,
-    QRF_NAME,
-    QGBM_NAME,
-    QKNN_NAME,
-    KNN_NAME,
-    KR_NAME,
-    RF_NAME,
-    QL_NAME,
-    QLGBM_NAME,
-    LGBM_NAME,
-    SFQENS_NAME,  # Import the new ensemble model name
-    MFENS_NAME,  # Import the new ensemble model name
-    PENS_NAME,  # Import the new point ensemble model name
-    MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
-    SEARCH_MODEL_DEFAULT_CONFIGURATIONS,
-    SEARCH_MODEL_TUNING_SPACE,
-)
-from confopt.quantile_wrappers import (
-    QuantileGBM,
-    QuantileLightGBM,
-    QuantileForest,
-    QuantileKNN,
-    BaseSingleFitQuantileEstimator,
-    QuantileLasso,
-)
-from confopt.ensembling import (
-    SingleFitQuantileEnsembleEstimator,
-    MultiFitQuantileEnsembleEstimator,
-    PointEnsembleEstimator,
-)
 
+from confopt.data_classes import CategoricalRange, IntRange, FloatRange
+
+from confopt.config import (
+    ESTIMATOR_REGISTRY,
+    EstimatorType,
+    MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
+)
+from confopt.quantile_wrappers import BaseSingleFitQuantileEstimator
 from confopt.utils import get_tuning_configurations
 
 logger = logging.getLogger(__name__)
@@ -54,13 +27,36 @@ def tune(
     k_fold_splits: int = 3,
     random_state: Optional[int] = None,
 ) -> Dict:
+    """
+    Tune hyperparameters for an estimator.
+    For ensemble estimators, tunes the full ensemble to find optimal component parameters.
+    """
+    estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
+
+    # Special handling for ensemble models
+    if estimator_config.estimator_type in [
+        EstimatorType.ENSEMBLE_POINT,
+        EstimatorType.ENSEMBLE_QUANTILE_SINGLE_FIT,
+        EstimatorType.ENSEMBLE_QUANTILE_MULTI_FIT,
+    ]:
+        return tune_ensemble(
+            X=X,
+            y=y,
+            estimator_architecture=estimator_architecture,
+            n_searches=n_searches,
+            quantiles=quantiles,
+            k_fold_splits=k_fold_splits,
+            random_state=random_state,
+        )
+
+    # Regular tuning for non-ensemble estimators
     tuning_configurations = get_tuning_configurations(
-        parameter_grid=SEARCH_MODEL_TUNING_SPACE[estimator_architecture],
+        parameter_grid=ESTIMATOR_REGISTRY[estimator_architecture].tuning_space,
         n_configurations=n_searches,
         random_state=random_state,
     )
     tuning_configurations.append(
-        SEARCH_MODEL_DEFAULT_CONFIGURATIONS[estimator_architecture]
+        ESTIMATOR_REGISTRY[estimator_architecture].default_config.copy()
     )
 
     scored_configurations, scores = cross_validate_configurations(
@@ -77,6 +73,211 @@ def tune(
     return best_configuration
 
 
+def tune_ensemble(
+    X: np.array,
+    y: np.array,
+    estimator_architecture: str,
+    n_searches: int,
+    quantiles: Optional[List[float]] = None,
+    k_fold_splits: int = 3,
+    random_state: Optional[int] = None,
+) -> Dict:
+    """
+    Tune an ensemble estimator by searching across component parameter combinations.
+    """
+    estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
+    component_names = estimator_config.component_estimators
+
+    if not component_names:
+        raise ValueError(
+            f"No component estimators defined for {estimator_architecture}"
+        )
+
+    # Collect parameter spaces for each component
+    component_params = {}
+    for component_name in component_names:
+        component_config = ESTIMATOR_REGISTRY[component_name]
+        component_params[component_name] = component_config.tuning_space
+
+    # Ensemble-specific parameters
+    ensemble_params = {
+        "weighting_strategy": estimator_config.tuning_space.get(
+            "weighting_strategy",
+            CategoricalRange(
+                choices=["inverse_error", "rank", "uniform", "meta_learner"]
+            ),
+        )
+    }
+
+    # Generate combined parameter configurations
+    ensemble_configurations = []
+    rng = np.random.RandomState(random_state)
+
+    # Add default configuration
+    default_config = {"weighting_strategy": "inverse_error", "cv": 3}
+
+    # Add default component parameters
+    for component_name in component_names:
+        component_defaults = ESTIMATOR_REGISTRY[component_name].default_config
+        for param, value in component_defaults.items():
+            default_config[f"{component_name}_{param}"] = value
+
+    ensemble_configurations.append(default_config)
+
+    # Generate random configurations
+    for _ in range(n_searches):
+        config = {
+            "weighting_strategy": rng.choice(
+                ensemble_params["weighting_strategy"].choices
+            ),
+            "cv": 3,
+        }  # CV is fixed
+
+        # Generate parameters for each component
+        for component_name, param_space in component_params.items():
+            for param_name, param_range in param_space.items():
+                # Sample from the parameter range
+                if isinstance(param_range, IntRange):
+                    value = rng.randint(
+                        param_range.min_value, param_range.max_value + 1
+                    )
+                elif isinstance(param_range, FloatRange):
+                    if param_range.log_scale:
+                        log_min = np.log(param_range.min_value)
+                        log_max = np.log(param_range.max_value)
+                        value = np.exp(rng.uniform(log_min, log_max))
+                    else:
+                        value = rng.uniform(
+                            param_range.min_value, param_range.max_value
+                        )
+                elif isinstance(param_range, CategoricalRange):
+                    value = rng.choice(param_range.choices)
+                else:
+                    raise ValueError(
+                        f"Unknown parameter range type: {type(param_range)}"
+                    )
+
+                # Add to config with component name prefix
+                config[f"{component_name}_{param_name}"] = value
+
+        ensemble_configurations.append(config)
+
+    # Cross-validate all configurations
+    scored_configurations, scores = cross_validate_configurations(
+        configurations=ensemble_configurations,
+        estimator_architecture=estimator_architecture,
+        X=X,
+        y=y,
+        k_fold_splits=k_fold_splits,
+        quantiles=quantiles,
+        random_state=random_state,
+    )
+
+    best_configuration = scored_configurations[scores.index(min(scores))]
+    return best_configuration
+
+
+def initialize_estimator(
+    estimator_architecture: str,
+    initialization_params: Dict,
+    quantiles: Optional[List[float]] = None,
+    random_state: Optional[int] = None,
+):
+    """
+    Initialize an estimator based on its architecture.
+    """
+    # Get the estimator configuration from the registry
+    estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
+    estimator_class = estimator_config.estimator_class
+    estimator_type = estimator_config.estimator_type
+
+    # Make a working copy of params
+    params = initialization_params.copy()
+
+    # Handle random state
+    if random_state is not None and "random_state" in estimator_config.default_config:
+        params["random_state"] = random_state
+
+    # Initialize based on estimator type
+    if estimator_type in [EstimatorType.POINT, EstimatorType.SINGLE_FIT_QUANTILE]:
+        # For simple estimators, just initialize with the parameters
+        print(params)
+        return estimator_class(**params)
+
+    elif estimator_type == EstimatorType.MULTI_FIT_QUANTILE:
+        # For multi-fit quantile estimators, add quantiles parameter
+        if quantiles is None:
+            raise ValueError(f"Quantiles must be provided for {estimator_architecture}")
+        params["quantiles"] = quantiles
+        return estimator_class(**params)
+
+    elif estimator_type in [
+        EstimatorType.ENSEMBLE_POINT,
+        EstimatorType.ENSEMBLE_QUANTILE_SINGLE_FIT,
+        EstimatorType.ENSEMBLE_QUANTILE_MULTI_FIT,
+    ]:
+        # Extract ensemble-specific parameters
+        ensemble_params = {
+            "cv": params.pop("cv", 3),  # Default to 3 if not specified
+            "weighting_strategy": params.pop("weighting_strategy", "inverse_error"),
+            "random_state": random_state,
+        }
+
+        # Initialize ensemble
+        ensemble = estimator_class(**ensemble_params)
+
+        # Initialize each component with parameters extracted from the combined params
+        for component_name in estimator_config.component_estimators:
+            comp_params = {}
+            prefix = f"{component_name}_"
+            prefix_len = len(prefix)
+
+            # Extract parameters for this component
+            for key in list(params.keys()):
+                if key.startswith(prefix):
+                    comp_params[key[prefix_len:]] = params.pop(key)
+
+            # For multi-fit quantile ensemble, pass quantiles to components
+            is_quantile_component = ESTIMATOR_REGISTRY[
+                component_name
+            ].estimator_type in [
+                EstimatorType.MULTI_FIT_QUANTILE,
+                EstimatorType.ENSEMBLE_QUANTILE_MULTI_FIT,
+            ]
+
+            comp_estimator = initialize_estimator(
+                estimator_architecture=component_name,
+                initialization_params=comp_params,
+                quantiles=quantiles if is_quantile_component else None,
+                random_state=random_state,
+            )
+
+            # Add to ensemble
+            ensemble.add_estimator(comp_estimator)
+
+        return ensemble
+
+    else:
+        raise ValueError(f"Unknown estimator type for {estimator_architecture}")
+
+
+def initialize_point_estimator(
+    estimator_architecture: str,
+    initialization_params: Dict,
+    random_state: Optional[int] = None,
+):
+    """
+    Initialize a point estimator.
+    Compatibility wrapper for the unified initialize_estimator function.
+    """
+    print(initialization_params)
+    return initialize_estimator(
+        estimator_architecture=estimator_architecture,
+        initialization_params=initialization_params,
+        random_state=random_state,
+    )
+
+
 def initialize_quantile_estimator(
     estimator_architecture: str,
     initialization_params: Dict,
@@ -84,95 +285,15 @@ def initialize_quantile_estimator(
     random_state: Optional[int] = None,
 ):
     """
-    Initialize a quantile estimator from an input dictionary.
-
-    Classes are usually external dependancies or custom wrappers or
-    scikit-learn estimator classes. Passed dictionaries must
-    contain all required inputs for the class, in addition to any
-    optional inputs to be overridden.
-
-    Parameters
-    ----------
-    estimator_architecture :
-        String name for the type of estimator to initialize.
-    initialization_params :
-        Dictionary of initialization parameters, where each key and
-        value pair corresponds to a variable name and variable value
-        to pass to the estimator class to initialize.
-    pinball_loss_alpha :
-        List of pinball loss alpha levels that will result in the
-        estimator predicting the alpha-corresponding quantiles.
-        For eg. passing [0.25, 0.75] will initialize a quantile
-        estimator that predicts the 25th and 75th percentiles of
-        the data.
-    random_state :
-        Random generation seed.
-
-    Returns
-    -------
-    initialized_model :
-        An initialized estimator class instance.
+    Initialize a quantile estimator.
+    Compatibility wrapper for the unified initialize_estimator function.
     """
-    if estimator_architecture == QGBM_NAME:
-        initialized_model = QuantileGBM(
-            **initialization_params,
-            quantiles=pinball_loss_alpha,
-            random_state=random_state,
-        )
-    elif estimator_architecture == QLGBM_NAME:
-        initialized_model = QuantileLightGBM(
-            **initialization_params,
-            quantiles=pinball_loss_alpha,
-            random_state=random_state,
-        )
-    elif estimator_architecture == QL_NAME:
-        initialized_model = QuantileLasso(
-            **initialization_params,
-            quantiles=pinball_loss_alpha,  # Add the missing quantiles parameter
-            random_state=random_state,
-        )
-    elif estimator_architecture == MFENS_NAME:
-        # Extract parameters for each model
-        params = initialization_params.copy()
-
-        qlgbm_params = {
-            "learning_rate": params.pop("qlgbm_learning_rate"),
-            "n_estimators": params.pop("qlgbm_n_estimators"),
-            "max_depth": params.pop("qlgbm_max_depth"),
-            "min_child_samples": params.pop("qlgbm_min_child_samples"),
-            "subsample": params.pop("qlgbm_subsample"),
-            "colsample_bytree": params.pop("qlgbm_colsample_bytree"),
-            "reg_alpha": params.pop("qlgbm_reg_alpha"),
-            "reg_lambda": params.pop("qlgbm_reg_lambda"),
-            "random_state": random_state,
-        }
-
-        ql_params = {
-            "alpha": params.pop("ql_alpha"),
-            "max_iter": params.pop("ql_max_iter"),
-            "p_tol": params.pop("ql_p_tol"),
-            "random_state": random_state,
-        }
-
-        estimators = [
-            QuantileLightGBM(**qlgbm_params, quantiles=pinball_loss_alpha),
-            QuantileLasso(**ql_params, quantiles=pinball_loss_alpha),
-        ]
-
-        # Create ensemble estimator
-        initialized_model = MultiFitQuantileEnsembleEstimator(
-            estimators=estimators,
-            cv=params.pop("cv", 3),
-            weighting_strategy=params.pop("weighting_strategy", "meta_learner"),
-            random_state=random_state,
-        )
-
-    else:
-        raise ValueError(
-            f"{estimator_architecture} is not a valid estimator architecture."
-        )
-
-    return initialized_model
+    return initialize_estimator(
+        estimator_architecture=estimator_architecture,
+        initialization_params=initialization_params,
+        quantiles=pinball_loss_alpha,
+        random_state=random_state,
+    )
 
 
 def average_scores_across_folds(
@@ -199,125 +320,6 @@ def average_scores_across_folds(
         aggregated_scores[i] /= fold_counts[i]
 
     return aggregated_configurations, aggregated_scores
-
-
-def initialize_point_estimator(
-    estimator_architecture: str,
-    initialization_params: Dict,
-    random_state: Optional[int] = None,
-):
-    """
-    Initialize a point estimator from an input dictionary.
-
-    Classes are usually scikit-learn estimators and dictionaries must
-    contain all required inputs for the class, in addition to any
-    optional inputs to be overridden.
-
-    Parameters
-    ----------
-    estimator_architecture :
-        String name for the type of estimator to initialize.
-    initialization_params :
-        Dictionary of initialization parameters, where each key and
-        value pair corresponds to a variable name and variable value
-        to pass to the estimator class to initialize.
-    random_state :
-        Random generation seed.
-
-    Returns
-    -------
-    initialized_model :
-        An initialized estimator class instance.
-    """
-    if estimator_architecture == RF_NAME:
-        initialized_model = RandomForestRegressor(
-            **initialization_params, random_state=random_state
-        )
-    elif estimator_architecture == KNN_NAME:
-        initialized_model = KNeighborsRegressor(**initialization_params)
-    elif estimator_architecture == GBM_NAME:
-        initialized_model = GradientBoostingRegressor(
-            **initialization_params, random_state=random_state
-        )
-    elif estimator_architecture == LGBM_NAME:
-        initialized_model = LGBMRegressor(
-            **initialization_params, random_state=random_state, verbose=-1
-        )
-    elif estimator_architecture == KR_NAME:
-        initialized_model = KernelRidge(**initialization_params)
-    elif estimator_architecture == QRF_NAME:
-        initialized_model = QuantileForest(
-            **initialization_params, random_state=random_state
-        )
-    elif estimator_architecture == QKNN_NAME:
-        initialized_model = QuantileKNN(**initialization_params)
-    elif estimator_architecture == PENS_NAME:
-        # Extract parameters for each model
-        params = initialization_params.copy()
-
-        gbm_params = {
-            "learning_rate": params.pop("gbm_learning_rate"),
-            "n_estimators": params.pop("gbm_n_estimators"),
-            "min_samples_split": params.pop("gbm_min_samples_split"),
-            "min_samples_leaf": params.pop("gbm_min_samples_leaf"),
-            "max_depth": params.pop("gbm_max_depth"),
-            "subsample": params.pop("gbm_subsample"),
-            "random_state": random_state,
-        }
-
-        knn_params = {
-            "n_neighbors": params.pop("knn_n_neighbors"),
-            "weights": params.pop("knn_weights"),
-            "p": params.pop("knn_p", 2),
-        }
-
-        # Create ensemble estimator with GBM and KNN
-        ensemble = PointEnsembleEstimator(
-            cv=params.pop("cv", 3),
-            weighting_strategy=params.pop("weighting_strategy", "inverse_error"),
-            random_state=random_state,
-        )
-
-        # Add individual estimators
-        ensemble.add_estimator(GradientBoostingRegressor(**gbm_params))
-        ensemble.add_estimator(KNeighborsRegressor(**knn_params))
-
-        initialized_model = ensemble
-    elif estimator_architecture == SFQENS_NAME:
-        # Extract parameters for each model
-        params = initialization_params.copy()
-
-        qrf_params = {
-            "n_estimators": params.pop("qrf_n_estimators"),
-            "max_depth": params.pop("qrf_max_depth"),
-            "max_features": params.pop("qrf_max_features"),
-            "min_samples_split": params.pop("qrf_min_samples_split"),
-            "bootstrap": params.pop("qrf_bootstrap"),
-            "random_state": random_state,
-        }
-
-        qknn_params = {
-            "n_neighbors": params.pop("qknn_n_neighbors"),
-        }
-
-        # Create ensemble estimator
-        ensemble = SingleFitQuantileEnsembleEstimator(
-            cv=params.pop("cv", 3),
-            weighting_strategy=params.pop("weighting_strategy", "meta_learner"),
-            random_state=random_state,
-        )
-
-        # Add individual estimators
-        ensemble.add_estimator(QuantileForest(**qrf_params))
-        ensemble.add_estimator(QuantileKNN(**qknn_params))
-
-        initialized_model = ensemble
-    else:
-        raise ValueError(
-            f"{estimator_architecture} is not a valid point estimator architecture."
-        )
-
-    return initialized_model
 
 
 def cross_validate_configurations(
@@ -368,6 +370,7 @@ def cross_validate_configurations(
     """
     scored_configurations, scores = [], []
     kf = KFold(n_splits=k_fold_splits, random_state=random_state, shuffle=True)
+
     for train_index, test_index in kf.split(X):
         X_train, X_val = X[train_index, :], X[test_index, :]
         Y_train, Y_val = y[train_index], y[test_index]
@@ -376,54 +379,50 @@ def cross_validate_configurations(
             logger.debug(
                 f"Evaluating search model parameter configuration: {configuration}"
             )
-            if estimator_architecture in MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES:
+
+            is_quantile = (
+                estimator_architecture in MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES
+            )
+
+            if is_quantile:
                 if quantiles is None:
                     raise ValueError(
                         "'quantiles' cannot be None if passing a quantile regression estimator."
                     )
-                else:
-                    model = initialize_quantile_estimator(
-                        estimator_architecture=estimator_architecture,
-                        initialization_params=configuration,
-                        pinball_loss_alpha=quantiles,
-                        random_state=random_state,
-                    )
+                model = initialize_estimator(
+                    estimator_architecture=estimator_architecture,
+                    initialization_params=configuration,
+                    quantiles=quantiles,
+                    random_state=random_state,
+                )
             else:
-                model = initialize_point_estimator(
+                model = initialize_estimator(
                     estimator_architecture=estimator_architecture,
                     initialization_params=configuration,
                     random_state=random_state,
                 )
+
             model.fit(X_train, Y_train)
 
             try:
-                if estimator_architecture in MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES:
-                    if quantiles is None:
-                        raise ValueError(
-                            "'quantiles' cannot be None if passing a quantile regression estimator."
-                        )
-                    else:
-                        # Then evaluate on pinball loss:
-                        prediction = model.predict(X_val)
-                        lo_y_pred = prediction[:, 0]
-                        hi_y_pred = prediction[:, 1]
-                        lo_score = mean_pinball_loss(
-                            Y_val, lo_y_pred, alpha=quantiles[0]
-                        )
-                        hi_score = mean_pinball_loss(
-                            Y_val, hi_y_pred, alpha=quantiles[1]
-                        )
-                        score = (lo_score + hi_score) / 2
+                if is_quantile:
+                    # Then evaluate on pinball loss:
+                    prediction = model.predict(X_val)
+                    lo_y_pred = prediction[:, 0]
+                    hi_y_pred = prediction[:, 1]
+                    lo_score = mean_pinball_loss(Y_val, lo_y_pred, alpha=quantiles[0])
+                    hi_score = mean_pinball_loss(Y_val, hi_y_pred, alpha=quantiles[1])
+                    score = (lo_score + hi_score) / 2
                 elif isinstance(model, BaseSingleFitQuantileEstimator):
                     prediction = model.predict(X_val, quantiles=quantiles)
-                    scores = []
+                    scores_list = []
                     for i, quantile in enumerate(quantiles):
                         y_pred = prediction[:, i]
                         quantile_score = mean_pinball_loss(
                             Y_val, y_pred, alpha=quantile
                         )
-                        scores.append(quantile_score)
-                    score = sum(scores) / len(scores)
+                        scores_list.append(quantile_score)
+                    score = sum(scores_list) / len(scores_list)
                 else:
                     # Then evaluate on MSE:
                     y_pred = model.predict(X=X_val)

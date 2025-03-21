@@ -127,7 +127,6 @@ class TestLocallyWeightedConformalSearcher:
         assert searcher.conformal_estimator.pe_estimator is not None
         assert searcher.conformal_estimator.ve_estimator is not None
         assert searcher.conformal_estimator.nonconformity_scores is not None
-        assert searcher.training_time is not None
         assert searcher.primary_estimator_error is not None
 
     def test_predict_with_ucb(self, fitted_locally_weighted_searcher, sample_data):
@@ -266,7 +265,6 @@ class TestSingleFitQuantileConformalSearcher:
 
         # Check that estimator is fitted
         assert searcher.conformal_estimator.quantile_estimator is not None
-        assert searcher.training_time is not None
         assert searcher.primary_estimator_error is not None
         assert searcher.point_estimator is None  # Not used with UCB
 
@@ -419,7 +417,6 @@ class TestMultiFitQuantileConformalSearcher:
         # Check that estimator is fitted
         assert len(searcher.conformal_estimators) == 1  # One estimator for UCB
         assert searcher.conformal_estimators[0].quantile_estimator is not None
-        assert searcher.training_time is not None
         assert searcher.primary_estimator_error is not None
 
     def test_fit_with_thompson_sampler(self, sample_data):
