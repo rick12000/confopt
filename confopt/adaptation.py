@@ -1,8 +1,14 @@
 import numpy as np
 
 
-def pinball_loss(y, yhat, q: float):
-    return np.maximum(q * (y - yhat), (1 - q) * (yhat - y))
+def pinball_loss(beta, theta, alpha):
+    """
+    Calculate the pinball loss where:
+    - beta: The percentile/rank of the observation (not binary breach)
+    - theta: The predicted quantile level
+    - alpha: The target coverage level
+    """
+    return alpha * (beta - theta) - np.minimum(0, beta - theta)
 
 
 class BaseACI:
@@ -61,7 +67,7 @@ class ACI(BaseACI):
 
 
 class DtACI(BaseACI):
-    def __init__(self, alpha=0.1, gamma_values=None):
+    def __init__(self, alpha=0.1, gamma_values=None, deterministic=False):
         """
         Dynamically Tuned Adaptive Conformal Inference (DtACI).
         Implementation follows Algorithm 1 from Gradu et al. (2023).
@@ -69,8 +75,7 @@ class DtACI(BaseACI):
         Parameters:
         - alpha: Target coverage level (1 - alpha is the desired coverage).
         - gamma_values: List of candidate step-size values {γᵢ}ᵏᵢ₌₁.
-        - sigma: Parameter for weight smoothing.
-        - eta: Learning rate parameter.
+        - deterministic: If True, always select expert with highest weight.
         """
         super().__init__(alpha=alpha)
 
@@ -81,6 +86,7 @@ class DtACI(BaseACI):
         self.k = len(gamma_values)
         self.gamma_values = np.asarray(gamma_values)
         self.alpha_t_values = np.array([alpha] * len(gamma_values))
+        self.deterministic = deterministic
 
         # Use properties for sigma and eta if not provided
         self.interval = 500
@@ -98,21 +104,19 @@ class DtACI(BaseACI):
         self.chosen_idx = None
         self.alpha_t = alpha
 
-    def update(self, breach_indicators):
+    def update(self, beta_t):
         """
-        Update using the DtACI algorithm with individual breach indicators for each expert.
+        Update using the DtACI algorithm with beta_t value and breach indicators.
 
         Parameters:
-        - breach_indicators: List of indicators (1 if breached, 0 otherwise) for each expert
+        - beta_t: The percentile/rank of the latest observation in the validation set
+        - breaches: Binary breach indicators (1 if breached, 0 otherwise) for each expert
 
         Returns:
         - alpha_t: The new alpha_t value for the next step.
         """
-        # Use breach indicators as errors (1 if breached)
-        errors = np.asarray(breach_indicators)
-
-        # Calculate pinball losses
-        losses = pinball_loss(errors, self.alpha_t_values, self.alpha)
+        # Calculate pinball losses using beta_t
+        losses = pinball_loss(beta=beta_t, theta=self.alpha_t_values, alpha=self.alpha)
 
         # Update log weights using pinball loss
         log_weights_bar = self.log_weights * np.exp(-self.eta * losses)
@@ -126,9 +130,21 @@ class DtACI(BaseACI):
         # Normalize log weights
         self.log_weights = self.log_weights / np.sum(self.log_weights)
 
-        # Update alpha values for each expert
+        errors = self.alpha_t_values > beta_t
+        # Update alpha values for each expert using breach information
         self.alpha_t_values = np.clip(
             self.alpha_t_values + self.gamma_values * (self.alpha - errors), 0.01, 0.99
         )
-        self.alpha_t = np.random.choice(self.alpha_t_values, size=1, p=self.log_weights)
+
+        # Choose expert - either deterministically or probabilistically
+        if self.deterministic:
+            # Choose expert with highest weight
+            self.chosen_idx = None
+            self.alpha_t = (self.log_weights * self.alpha_t_values).sum()
+        else:
+            # Probabilistic selection based on weights
+            self.chosen_idx = np.random.choice(
+                range(self.k), size=1, p=self.log_weights
+            )[0]
+            self.alpha_t = self.alpha_t_values[self.chosen_idx]
         return self.alpha_t

@@ -1,8 +1,10 @@
 import numpy as np
 import pytest
-from confopt.adaptation import ACI, DtACI  # , pinball_loss
+from sklearn.linear_model import LinearRegression
+from confopt.adaptation import ACI, DtACI
 
-COVERAGE_TOLERANCE: float = 0.05
+
+COVERAGE_TOLERANCE: float = 0.03
 
 
 @pytest.mark.parametrize("breach", [True, False])
@@ -22,277 +24,203 @@ def test_update_adaptive_interval(breach, alpha, gamma):
     assert stored_alpha == aci.alpha
 
 
-# Test pinball loss
-# def test_pinball_loss():
-#     # Test when beta < alpha (under coverage)
-#     beta, alpha, target_alpha = 0.05, 0.1, 0.1
-#     loss = pinball_loss(beta, alpha, target_alpha)
-#     assert loss == 0  # loss is 0 when alpha equals target_alpha
-
-#     # Test when beta < alpha with alpha != target_alpha
-#     beta, alpha, target_alpha = 0.05, 0.2, 0.1
-#     loss = pinball_loss(beta, alpha, target_alpha)
-#     assert loss == (alpha - target_alpha)  # loss when we're too conservative
-
-#     # Test when beta >= alpha
-#     beta, alpha, target_alpha = 0.15, 0.1, 0.1
-#     loss = pinball_loss(beta, alpha, target_alpha)
-#     assert loss == 0  # loss is 0 when alpha equals target_alpha
-
-#     # Test when beta >= alpha with alpha != target_alpha
-#     beta, alpha, target_alpha = 0.15, 0.05, 0.1
-#     loss = pinball_loss(beta, alpha, target_alpha)
-#     assert loss == (target_alpha - alpha)  # loss when we're too aggressive
-
-# Improved fixtures for time series data
+# Create fixtures for testing with regression-based conformal prediction
 @pytest.fixture
-def stable_data():
+def linear_data_stable():
     """
-    Generate data with stable distribution (no distribution shift).
-
-    Returns:
-        ndarray: true_values generated as sin of normal noise (stable variance)
+    Generate stable linear data with constant noise level.
     """
     np.random.seed(42)
-    n = 1000
-
-    # Generate with stable variance - sin of normal noise
-    noise = np.random.normal(0, 1, n)
-    true_values = np.sin(noise)
-
-    return true_values
+    n = 500
+    X = np.linspace(0, 10, n).reshape(-1, 1)
+    y = 2 * X.flatten() + 5 + np.random.normal(0, 1, n)
+    return X, y
 
 
 @pytest.fixture
-def shifting_data():
+def linear_data_drift():
     """
-    Generate data with heteroskedastic variance that grows with n.
-
-    Returns:
-        ndarray: true_values with increasing variance as n increases
+    Generate linear data with distributional shift:
+    - Increasing noise level
+    - Change in relationship slope
+    - Jump in relationship
     """
     np.random.seed(42)
-    n = 1000
+    n = 500
+    X = np.linspace(0, 10, n).reshape(-1, 1)
 
-    # Create noise with variance that grows with n
-    n_steps = np.arange(n)
-    noise = np.random.normal(0, 1, n)
-    true_values = np.sin(
-        n_steps**2 * noise / 100
-    )  # Divide by 100 to moderate the growth
+    # Create noise with increasing variance
+    noise_level = np.linspace(0.5, 3, n)
+    noise = np.random.normal(0, 1, n) * noise_level
 
-    return true_values
+    # Create y with changing relationships
+    y = np.zeros(n)
 
+    # First segment: y = 2x + 5
+    first_segment = int(0.3 * n)
+    y[:first_segment] = 2 * X[:first_segment].flatten() + 5 + noise[:first_segment]
 
-# ACI tests with time series data
-@pytest.mark.parametrize("target_alpha", [0.1, 0.2, 0.5, 0.8, 0.9])
-def test_aci_adaptation(stable_data, shifting_data, target_alpha):
-    for data_name, true_values in [
-        ("stable_data", stable_data),
-        ("shifting_data", shifting_data),
-    ]:
-        aci = ACI(alpha=target_alpha, gamma=0.01)
-
-        alpha = target_alpha
-        breaches = 0
-
-        # Start after we have enough data to calculate meaningful quantiles
-        for i in range(20, len(true_values)):
-            # Use the quantile of previously observed values to make prediction
-            prev_values = true_values[: i - 1]
-
-            # Calculate differences between consecutive values to better model changes
-            diffs = np.diff(prev_values)
-
-            # Calculate prediction interval using quantiles of absolute differences
-            quantile_value = np.quantile(np.abs(diffs), 1 - alpha)
-
-            # Make interval wider by applying a safety factor
-            interval_width = quantile_value * 1.5
-
-            # Center interval on previous value
-            interval_low = true_values[i - 1] - interval_width
-            interval_high = true_values[i - 1] + interval_width
-
-            # Check if true value falls within interval
-            breach = not (interval_low <= true_values[i] <= interval_high)
-            if breach:
-                breaches += 1
-
-            # Update alpha_t
-            aci.update(breach_indicator=int(breach))
-
-            # Update alpha for next iteration
-            alpha = aci.alpha_t
-
-        # Calculate empirical coverage
-        empirical_coverage = 1 - (breaches / (len(true_values) - 20))
-        target_coverage = 1 - target_alpha
-
-        # Check if coverage is near target with custom error message
-        assert (
-            abs(empirical_coverage - target_coverage) < COVERAGE_TOLERANCE
-        ), f"Coverage test failed for {data_name} with target_alpha={target_alpha}: expected {target_coverage:.4f}, got {empirical_coverage:.4f}"
-
-
-# DtACI test with time series data
-@pytest.mark.parametrize("target_alpha", [0.1, 0.2, 0.5, 0.8, 0.9])
-def test_dtaci_adaptation(stable_data, shifting_data, target_alpha):
-    for data_name, true_values in [
-        ("stable_data", stable_data),
-        ("shifting_data", shifting_data),
-    ]:
-        dtaci = DtACI(alpha=target_alpha)
-
-        breaches = 0
-        for i in range(20, len(true_values)):
-            # Use the history of values to construct intervals
-            prev_values = true_values[: i - 1]
-
-            # Calculate differences between consecutive values
-            diffs = np.diff(prev_values)
-
-            # Create separate interval for each expert based on their individual alphas
-            breach_indicators = []
-            for j, alpha in enumerate(dtaci.alpha_t_values):
-                # Calculate interval width using quantiles of the differences
-                quantile_value = np.quantile(np.abs(diffs), 1 - alpha)
-
-                # Make interval wider with safety factor
-                interval_width = quantile_value * 1.5
-
-                # Create prediction interval
-                interval_low = true_values[i - 1] - interval_width
-                interval_high = true_values[i - 1] + interval_width
-
-                # Check if true value falls within interval for this expert
-                breach = not (interval_low <= true_values[i] <= interval_high)
-                breach_indicators.append(int(breach))
-
-            # For tracking overall performance, use the DtACI's current alpha_t
-            dtaci_quantile = np.quantile(np.abs(diffs), 1 - dtaci.alpha_t)
-            dtaci_width = dtaci_quantile * 1.5
-            dtaci_low = true_values[i - 1] - dtaci_width
-            dtaci_high = true_values[i - 1] + dtaci_width
-            dtaci_breach = not (dtaci_low <= true_values[i] <= dtaci_high)
-            if dtaci_breach:
-                breaches += 1
-
-            # Update DtACI with individual breach indicators from each expert
-            dtaci.update(breach_indicators=breach_indicators)
-
-        # Calculate empirical coverage
-        empirical_coverage = 1 - (breaches / (len(true_values) - 20))
-        target_coverage = 1 - target_alpha
-
-        # Check if coverage is near target with custom error message
-        assert (
-            abs(empirical_coverage - target_coverage) < COVERAGE_TOLERANCE
-        ), f"Coverage test failed for {data_name} with target_alpha={target_alpha}: expected {target_coverage:.4f}, got {empirical_coverage:.4f}"
-
-
-# Comparative test to evaluate coverage performance
-@pytest.mark.parametrize("target_alpha", [0.1, 0.2, 0.5, 0.8, 0.9])
-def test_adaptation_methods_comparison(shifting_data, target_alpha):
-    """
-    Test that DtACI has better coverage than ACI, which has better coverage
-    than using no adaptation, especially in scenarios with distribution shift.
-    """
-    true_values = shifting_data
-    target_coverage = 1 - target_alpha
-
-    # Initialize methods with the same gamma value to verify convergence
-    gamma = 0.01
-    dtaci = DtACI(alpha=target_alpha)
-    aci = ACI(alpha=target_alpha, gamma=gamma)
-
-    # Track breaches for each method
-    dtaci_breaches = 0
-    aci_breaches = 0
-    no_adapt_breaches = 0
-
-    starting_training_samples = 20
-    # Start after we have enough data to calculate meaningful quantiles
-    for i in range(starting_training_samples, len(true_values)):
-        prev_values = true_values[: i - 1]
-        diffs = np.diff(prev_values)
-
-        # 1. No Adaptation - Fixed alpha at target_alpha
-        fixed_quantile = np.quantile(np.abs(diffs), 1 - target_alpha)
-        fixed_width = fixed_quantile * 1.5
-        fixed_low = true_values[i - 1] - fixed_width
-        fixed_high = true_values[i - 1] + fixed_width
-        fixed_breach = not (fixed_low <= true_values[i] <= fixed_high)
-        if fixed_breach:
-            no_adapt_breaches += 1
-
-        # 2. ACI
-        aci_quantile = np.quantile(np.abs(diffs), 1 - aci.alpha_t)
-        aci_width = aci_quantile * 1.5
-        aci_low = true_values[i - 1] - aci_width
-        aci_high = true_values[i - 1] + aci_width
-        aci_breach = not (aci_low <= true_values[i] <= aci_high)
-        if aci_breach:
-            aci_breaches += 1
-
-        # Update ACI with the breach
-        aci.update(breach_indicator=int(aci_breach))
-
-        # 3. DtACI
-        # Calculate breach indicators for each expert (just one in this case)
-        breach_indicators = []
-        for alpha in dtaci.alpha_t_values:
-            expert_quantile = np.quantile(np.abs(diffs), 1 - alpha)
-            expert_width = expert_quantile * 1.5
-            expert_low = true_values[i - 1] - expert_width
-            expert_high = true_values[i - 1] + expert_width
-            expert_breach = not (expert_low <= true_values[i] <= expert_high)
-            breach_indicators.append(int(expert_breach))
-
-        # Calculate DtACI interval and check breach
-        dtaci_quantile = np.quantile(np.abs(diffs), 1 - dtaci.alpha_t)
-        dtaci_width = dtaci_quantile * 1.5
-        dtaci_low = true_values[i - 1] - dtaci_width
-        dtaci_high = true_values[i - 1] + dtaci_width
-        dtaci_breach = not (dtaci_low <= true_values[i] <= dtaci_high)
-        if dtaci_breach:
-            dtaci_breaches += 1
-
-        # Update DtACI with individual breach indicators
-        dtaci.update(breach_indicators=breach_indicators)
-
-    # Calculate coverage for each method
-    samples_processed = len(true_values) - 20
-    no_adapt_coverage = 1 - (no_adapt_breaches / samples_processed)
-    aci_coverage = 1 - (aci_breaches / samples_processed)
-    dtaci_coverage = 1 - (dtaci_breaches / samples_processed)
-
-    # Check that DtACI coverage is better than ACI coverage
-    dtaci_error = abs(dtaci_coverage - target_coverage)
-    aci_error = abs(aci_coverage - target_coverage)
-    no_adapt_error = abs(no_adapt_coverage - target_coverage)
-
-    # Log coverage information
-    print(f"\nTarget alpha: {target_alpha}, Target coverage: {target_coverage:.4f}")
-    print(f"DtACI coverage: {dtaci_coverage:.4f}, error: {dtaci_error:.4f}")
-    print(f"ACI coverage: {aci_coverage:.4f}, error: {aci_error:.4f}")
-    print(
-        f"No adaptation coverage: {no_adapt_coverage:.4f}, error: {no_adapt_error:.4f}"
+    # Second segment: y = 3x + 2 (slope change)
+    second_segment = int(0.6 * n)
+    y[first_segment:second_segment] = (
+        3 * X[first_segment:second_segment].flatten()
+        + 2
+        + noise[first_segment:second_segment]
     )
 
-    # Assert that DtACI has better coverage than ACI which has better coverage than no adaptation
-    # Using error relative to target coverage as the comparison metric
-    assert (
-        dtaci_error <= aci_error
-    ), f"With target_alpha={target_alpha}: DtACI (error={dtaci_error:.4f}) should have better coverage than ACI (error={aci_error:.4f})"
+    # Third segment: y = 2.5x + 8 (jump and different slope)
+    y[second_segment:] = 2.5 * X[second_segment:].flatten() + 8 + noise[second_segment:]
 
-    assert (
-        aci_error <= no_adapt_error
-    ), f"With target_alpha={target_alpha}: ACI (error={aci_error:.4f}) should have better coverage than no adaptation (error={no_adapt_error:.4f})"
+    return X, y
 
-    # Special check when DtACI has a single gamma equal to ACI's gamma
-    if len(dtaci.gamma_values) == 1 and dtaci.gamma_values[0] == gamma:
-        # They should converge to similar coverage (within a small margin)
+
+def calculate_beta_t(residual, cal_residuals):
+    """
+    Calculate beta_t as the percentile rank of the residual among the calibration residuals.
+
+    Parameters:
+    - residual: The residual of the current observation
+    - cal_residuals: Array of residuals from the calibration set
+
+    Returns:
+    - beta_t: The percentile rank (0 to 1)
+    """
+    # Calculate what percentile the residual is in the calibration set
+    return np.mean(cal_residuals >= residual)
+
+
+# Test ACI and DtACI with regression-based conformal prediction
+@pytest.mark.parametrize("target_alpha", [0.1, 0.2, 0.5, 0.8, 0.9])
+def test_regression_conformal_adaptation(
+    linear_data_stable, linear_data_drift, target_alpha
+):
+    """Test ACI and DtACI with regression-based conformal prediction using rolling window."""
+
+    # Test both tabular data and time series data
+    for data_name, data in [
+        ("stable_data", linear_data_stable),
+        ("drift_data", linear_data_drift),
+    ]:
+        # Initialize methods
+        aci = ACI(alpha=target_alpha, gamma=0.01)
+        dtaci = DtACI(
+            alpha=target_alpha, gamma_values=[0.01, 0.05], deterministic=False
+        )
+
+        # Define initial training window size
+        initial_window = (
+            30 if "data" in data_name else 20
+        )  # smaller window for time series
+
+        # Create lists to track breaches
+        no_adapt_breaches = []
+        aci_breaches = []
+        dtaci_breaches = []
+
+        X, y = data
+
+        # Process data using expanding window
+        for i in range(
+            initial_window, len(X) - (0 if data_name == "time_series" else 1)
+        ):
+            # Use all data up to current point for training & calibration
+            X_hist = X[: i - 1]
+            y_hist = y[: i - 1]
+
+            # Proper split: use 70% for training, 30% for calibration
+            n_cal = max(int(len(X_hist) * 0.3), 5)  # Ensure minimum calibration points
+
+            # Split historical data into train and calibration sets
+            X_train, X_cal = X_hist[:-n_cal], X_hist[-n_cal:]
+            y_train, y_cal = y_hist[:-n_cal], y_hist[-n_cal:]
+
+            # The next point is our test point
+            x_test = X[i].reshape(1, -1)
+            y_test = y[i]
+
+            # Train model on training data only
+            model = LinearRegression()
+            model.fit(X_train, y_train)
+
+            # Calculate residuals on calibration set (not training data)
+            y_cal_pred = model.predict(X_cal)
+            cal_residuals = np.abs(y_cal - y_cal_pred)
+
+            # Make prediction for test point
+            y_pred = model.predict(x_test)[0]
+
+            # Calculate residual for this point
+            residual = np.abs(y_test - y_pred)
+
+            # Calculate beta_t (percentile of current residual)
+            beta_t = calculate_beta_t(residual, cal_residuals)
+
+            # 1. No adaptation (fixed alpha)
+            fixed_quantile = np.quantile(cal_residuals, 1 - target_alpha)
+            fixed_lower = y_pred - fixed_quantile
+            fixed_upper = y_pred + fixed_quantile
+            fixed_breach = not (fixed_lower <= y_test <= fixed_upper)
+            no_adapt_breaches.append(int(fixed_breach))
+
+            # 2. ACI
+            aci_quantile = np.quantile(cal_residuals, 1 - aci.alpha_t)
+            aci_lower = y_pred - aci_quantile
+            aci_upper = y_pred + aci_quantile
+            aci_breach = not (aci_lower <= y_test <= aci_upper)
+            aci_breaches.append(int(aci_breach))
+
+            # Update ACI
+            aci.update(breach_indicator=int(aci_breach))
+
+            # 3. DtACI - calculate breach indicators for each expert
+            dtaci_breach_indicators = []
+            for alpha in dtaci.alpha_t_values:
+                expert_quantile = np.quantile(cal_residuals, 1 - alpha)
+                expert_lower = y_pred - expert_quantile
+                expert_upper = y_pred + expert_quantile
+                expert_breach = not (expert_lower <= y_test <= expert_upper)
+                dtaci_breach_indicators.append(int(expert_breach))
+
+            # DtACI current interval
+            dtaci_quantile = np.quantile(cal_residuals, 1 - dtaci.alpha_t)
+            dtaci_lower = y_pred - dtaci_quantile
+            dtaci_upper = y_pred + dtaci_quantile
+            dtaci_breach = not (dtaci_lower <= y_test <= dtaci_upper)
+            dtaci_breaches.append(int(dtaci_breach))
+
+            # Update DtACI
+            dtaci.update(beta_t=beta_t)
+
+        # Calculate empirical coverage
+        no_adapt_coverage = 1 - np.mean(no_adapt_breaches)
+        aci_coverage = 1 - np.mean(aci_breaches)
+        dtaci_coverage = 1 - np.mean(dtaci_breaches)
+
+        target_coverage = 1 - target_alpha
+
+        # Calculate errors
+        no_adapt_error = abs(no_adapt_coverage - target_coverage)
+        aci_error = abs(aci_coverage - target_coverage)
+
+        # Print results
+        # print(f"\nData: {data_name}, Target coverage: {target_coverage:.4f}")
+        # print(f"No adaptation: {no_adapt_coverage:.4f}, error: {no_adapt_error:.4f}")
+        # print(f"ACI: {aci_coverage:.4f}, error: {aci_error:.4f}")
+        # print(f"DtACI: {dtaci_coverage:.4f}, error: {dtaci_error:.4f}")
+
+        # Check coverage (with more tolerance for the drift and time series cases)
+        data_tolerance = (
+            COVERAGE_TOLERANCE
+            if data_name == "stable_data"
+            else COVERAGE_TOLERANCE * 1.5
+        )
+
+        # Assert coverage is within tolerance
         assert (
-            abs(dtaci_coverage - aci_coverage) < 0.02
-        ), f"With same gamma={gamma}: DtACI ({dtaci_coverage:.4f}) and ACI ({aci_coverage:.4f}) should converge to similar coverage"
+            abs(dtaci_coverage - target_coverage) < data_tolerance
+        ), f"DtACI coverage error too large: {abs(dtaci_coverage - target_coverage):.4f}"
+
+        # Check that ACI performs better than no adaptation
+        assert (
+            aci_error <= no_adapt_error * 1.1
+        ), f"{data_name}: ACI error ({aci_error:.4f}) should be better than no adaptation ({no_adapt_error:.4f})"

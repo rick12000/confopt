@@ -201,7 +201,6 @@ def initialize_estimator(
     # Initialize based on estimator type
     if estimator_type in [EstimatorType.POINT, EstimatorType.SINGLE_FIT_QUANTILE]:
         # For simple estimators, just initialize with the parameters
-        print(params)
         return estimator_class(**params)
 
     elif estimator_type == EstimatorType.MULTI_FIT_QUANTILE:
@@ -270,7 +269,6 @@ def initialize_point_estimator(
     Initialize a point estimator.
     Compatibility wrapper for the unified initialize_estimator function.
     """
-    print(initialization_params)
     return initialize_estimator(
         estimator_architecture=estimator_architecture,
         initialization_params=initialization_params,
