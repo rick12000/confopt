@@ -10,10 +10,6 @@ from confopt.estimation import (
     tune,
 )
 
-from confopt.config import (
-    ESTIMATOR_REGISTRY,
-)
-
 logger = logging.getLogger(__name__)
 
 
@@ -53,10 +49,9 @@ class LocallyWeightedConformalEstimator:
                 random_state=random_state,
             )
         else:
-            # Use the default configuration for this estimator from the registry
-            initialization_params = ESTIMATOR_REGISTRY[
-                estimator_architecture
-            ].default_config.copy()
+            # Use an empty dict to get the default estimator as-is
+            initialization_params = {}
+
         estimator = initialize_point_estimator(
             estimator_architecture=estimator_architecture,
             initialization_params=initialization_params,
@@ -192,7 +187,6 @@ class SingleFitQuantileConformalEstimator:
                 all_quantiles.append(interval.lower_quantile)
                 all_quantiles.append(interval.upper_quantile)
 
-            # TODO: Tune with pinball loss or as point estimator?
             initialization_params = tune(
                 X=X_train,
                 y=y_train,
@@ -202,9 +196,8 @@ class SingleFitQuantileConformalEstimator:
                 random_state=random_state,
             )
         else:
-            initialization_params = ESTIMATOR_REGISTRY[
-                self.quantile_estimator_architecture
-            ].default_config
+            # Use an empty dict to get the default estimator as-is
+            initialization_params = {}
 
         # Initialize and fit a single quantile estimator
         self.quantile_estimator = initialize_point_estimator(
@@ -350,9 +343,8 @@ class MultiFitQuantileConformalEstimator:
                 random_state=random_state,
             )
         else:
-            initialization_params = ESTIMATOR_REGISTRY[
-                self.quantile_estimator_architecture
-            ].default_config
+            # Use an empty dict to get the default estimator as-is
+            initialization_params = {}
 
         # Initialize and fit the quantile estimator
         self.quantile_estimator = initialize_quantile_estimator(

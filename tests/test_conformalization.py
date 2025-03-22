@@ -6,10 +6,11 @@ from confopt.conformalization import (
     SingleFitQuantileConformalEstimator,
     MultiFitQuantileConformalEstimator,
 )
-from confopt.config import (
-    MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
+
+from conftest import (
     POINT_ESTIMATOR_ARCHITECTURES,
     SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
+    MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
 
 # Global variable for coverage tolerance

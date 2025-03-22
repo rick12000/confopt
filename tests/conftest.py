@@ -21,7 +21,31 @@ from confopt.conformalization import (
 from confopt.config import QGBM_NAME, GBM_NAME, QRF_NAME
 from confopt.data_classes import FloatRange
 
+from confopt.config import ESTIMATOR_REGISTRY, EstimatorType
+
 DEFAULT_SEED = 1234
+
+POINT_ESTIMATOR_ARCHITECTURES = []
+SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES = []
+MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES = []
+for estimator_name, estimator_config in ESTIMATOR_REGISTRY.items():
+    if estimator_config.estimator_type in [
+        EstimatorType.MULTI_FIT_QUANTILE,
+        EstimatorType.ENSEMBLE_QUANTILE_MULTI_FIT,
+    ]:
+        MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
+    elif estimator_config.estimator_type in [
+        EstimatorType.SINGLE_FIT_QUANTILE,
+        EstimatorType.ENSEMBLE_QUANTILE_SINGLE_FIT,
+    ]:
+        SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
+    elif estimator_config.estimator_type in [
+        EstimatorType.POINT,
+        EstimatorType.ENSEMBLE_POINT,
+    ]:
+        POINT_ESTIMATOR_ARCHITECTURES.append(estimator_name)
+    else:
+        raise ValueError()
 
 
 def noisy_rastrigin(x, A=20, noise_seed=42, noise=0):

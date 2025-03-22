@@ -29,6 +29,7 @@ class BaseEnsembleEstimator:
         cv: int = 3,
         weighting_strategy: str = "inverse_error",
         random_state: Optional[int] = None,
+        **kwargs,
     ):
         """
         Initialize the base ensemble estimator.
@@ -47,6 +48,9 @@ class BaseEnsembleEstimator:
             - "meta_learner": uses linear regression to learn optimal weights from CV predictions
         random_state : int, optional
             Random seed for reproducibility.
+        **kwargs :
+            Additional parameters, including component-specific parameters in the form
+            component_<index>.<param_name>.
         """
         self.estimators = estimators if estimators is not None else []
         self.cv = cv
@@ -56,7 +60,11 @@ class BaseEnsembleEstimator:
         self.fitted = False
         self.meta_learner = None
 
-    def add_estimator(self, estimator: BaseEstimator) -> None:
+        # Apply any component-specific parameters from kwargs
+        if kwargs and self.estimators:
+            self.set_params(**kwargs)
+
+    def add_estimator(self, estimator: BaseEstimator, **params) -> None:
         """
         Add a single estimator to the ensemble.
 
@@ -64,9 +72,114 @@ class BaseEnsembleEstimator:
         ----------
         estimator : estimator instance
             The estimator to add to the ensemble.
+        **params : dict
+            Additional parameters to set on the estimator.
         """
+        if params and hasattr(estimator, "set_params"):
+            estimator.set_params(**params)
+
         self.estimators.append(estimator)
         self.fitted = False  # Reset fitted status when adding new estimator
+
+    def set_params(self, **params):
+        """
+        Set the parameters of this estimator.
+
+        Supports component-specific parameter setting using the format:
+        component_<index>.<param_name>
+
+        Parameters
+        ----------
+        **params : dict
+            Estimator parameters, including component parameters.
+
+        Returns
+        -------
+        self : estimator instance
+            Estimator instance.
+        """
+        component_params = {}
+        ensemble_params = {}
+
+        # Separate ensemble parameters from component parameters
+        for key, value in params.items():
+            if key.startswith("component_"):
+                # Parse component index and parameter name
+                try:
+                    parts = key.split(".")
+                    if len(parts) != 2:
+                        raise ValueError(f"Invalid component parameter format: {key}")
+
+                    comp_idx_str = parts[0].split("_")[1]
+                    if not comp_idx_str.isdigit():
+                        raise ValueError(
+                            f"Component index must be a number: {comp_idx_str}"
+                        )
+
+                    comp_idx = int(comp_idx_str)
+                    comp_param = parts[1]
+
+                    if comp_idx not in component_params:
+                        component_params[comp_idx] = {}
+                    component_params[comp_idx][comp_param] = value
+                except (IndexError, ValueError) as e:
+                    logger.warning(f"Skipping invalid component parameter {key}: {e}")
+            else:
+                ensemble_params[key] = value
+
+        # Set parameters on the ensemble itself
+        for key, value in ensemble_params.items():
+            if not hasattr(self, key):
+                raise ValueError(f"Invalid parameter {key} for {self}")
+            setattr(self, key, value)
+
+        # Set parameters on components
+        for comp_idx, params in component_params.items():
+            if comp_idx >= len(self.estimators):
+                logger.warning(
+                    f"Component index {comp_idx} out of range (0 - {len(self.estimators) - 1}), skipping"
+                )
+                continue
+
+            if hasattr(self.estimators[comp_idx], "set_params"):
+                self.estimators[comp_idx].set_params(**params)
+            else:
+                logger.warning(f"Component {comp_idx} does not support set_params")
+
+        # Reset fitted status when parameters change
+        self.fitted = False
+        return self
+
+    def get_params(self, deep=True):
+        """
+        Get parameters for this estimator.
+
+        Parameters
+        ----------
+        deep : bool, default=True
+            If True, will return the parameters for this estimator and
+            contained subobjects that are estimators.
+
+        Returns
+        -------
+        params : dict
+            Parameter names mapped to their values.
+        """
+        params = {
+            "cv": self.cv,
+            "weighting_strategy": self.weighting_strategy,
+            "random_state": self.random_state,
+        }
+
+        # Add component parameters if deep=True
+        if deep:
+            for i, estimator in enumerate(self.estimators):
+                if hasattr(estimator, "get_params"):
+                    comp_params = estimator.get_params(deep=True)
+                    for param_name, param_value in comp_params.items():
+                        params[f"component_{i}.{param_name}"] = param_value
+
+        return params
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> "BaseEnsembleEstimator":
         """
@@ -205,6 +318,7 @@ class BaseEnsembleEstimator:
 
         Parameters
         ----------
+
         estimator : estimator instance
             Fitted estimator to evaluate.
         X : array-like
@@ -231,6 +345,7 @@ class BaseEnsembleEstimator:
 
         Parameters
         ----------
+
         X : array-like
             Features.
 
@@ -250,6 +365,39 @@ class PointEnsembleEstimator(BaseEnsembleEstimator):
     This class combines multiple point estimators, weighting their predictions
     based on cross-validation performance.
     """
+
+    # def __init__(
+    #     self,
+    #     estimators: List[BaseEstimator] = None,
+    #     cv: int = 3,
+    #     weighting_strategy: str = "inverse_error",
+    #     random_state: Optional[int] = None,
+    #     **kwargs
+    # ):
+    #     """
+    #     Initialize the point ensemble estimator.
+
+    #     Parameters
+    #     ----------
+    #     estimators : list of estimator instances, optional
+    #         List of pre-initialized point estimators to include in the ensemble.
+    #     cv : int, default=3
+    #         Number of cross-validation folds for computing weights.
+    #     weighting_strategy : str, default="inverse_error"
+    #         Strategy for computing weights.
+    #     random_state : int, optional
+    #         Random seed for reproducibility.
+    #     **kwargs :
+    #         Additional parameters, including component-specific parameters in the form
+    #         component_<index>.<param_name>.
+    #     """
+    #     super().__init__(
+    #         estimators=estimators,
+    #         cv=cv,
+    #         weighting_strategy=weighting_strategy,
+    #         random_state=random_state,
+    #         **kwargs
+    #     )
 
     def _calculate_error(
         self, estimator: BaseEstimator, X: np.ndarray, y: np.ndarray
@@ -320,35 +468,40 @@ class SingleFitQuantileEnsembleEstimator(
     their predictions based on cross-validation performance.
     """
 
-    def __init__(
-        self,
-        estimators: List[BaseSingleFitQuantileEstimator] = None,
-        cv: int = 3,
-        weighting_strategy: str = "inverse_error",
-        random_state: Optional[int] = None,
-    ):
-        """
-        Initialize the single-fit quantile ensemble estimator.
+    # def __init__(
+    #     self,
+    #     estimators: List[BaseSingleFitQuantileEstimator] = None,
+    #     cv: int = 3,
+    #     weighting_strategy: str = "inverse_error",
+    #     random_state: Optional[int] = None,
+    #     **kwargs
+    # ):
+    #     """
+    #     Initialize the single-fit quantile ensemble estimator.
 
-        Parameters
-        ----------
-        estimators : list of BaseSingleFitQuantileEstimator instances, optional
-            List of pre-initialized quantile estimators to include in the ensemble.
-        cv : int, default=3
-            Number of cross-validation folds for computing weights.
-        weighting_strategy : str, default="inverse_error"
-            Strategy for computing weights.
-        random_state : int, optional
-            Random seed for reproducibility.
-        """
-        BaseEnsembleEstimator.__init__(
-            self,
-            estimators=estimators,
-            cv=cv,
-            weighting_strategy=weighting_strategy,
-            random_state=random_state,
-        )
-        BaseSingleFitQuantileEstimator.__init__(self)
+    #     Parameters
+    #     ----------
+    #     estimators : list of BaseSingleFitQuantileEstimator instances, optional
+    #         List of pre-initialized quantile estimators to include in the ensemble.
+    #     cv : int, default=3
+    #         Number of cross-validation folds for computing weights.
+    #     weighting_strategy : str, default="inverse_error"
+    #         Strategy for computing weights.
+    #     random_state : int, optional
+    #         Random seed for reproducibility.
+    #     **kwargs :
+    #         Additional parameters, including component-specific parameters in the form
+    #         component_<index>.<param_name>.
+    #     """
+    #     BaseEnsembleEstimator.__init__(
+    #         self,
+    #         estimators=estimators,
+    #         cv=cv,
+    #         weighting_strategy=weighting_strategy,
+    #         random_state=random_state,
+    #         **kwargs
+    #     )
+    #     BaseSingleFitQuantileEstimator.__init__(self)
 
     def _calculate_error(
         self, estimator: BaseSingleFitQuantileEstimator, X: np.ndarray, y: np.ndarray
@@ -419,6 +572,8 @@ class MultiFitQuantileEnsembleEstimator(BaseEnsembleEstimator, BaseQuantileEstim
         cv: int = 3,
         weighting_strategy: str = "inverse_error",
         random_state: Optional[int] = None,
+        quantiles: List[float] = None,
+        **kwargs,
     ):
         """
         Initialize the multi-fit quantile ensemble estimator.
@@ -427,25 +582,90 @@ class MultiFitQuantileEnsembleEstimator(BaseEnsembleEstimator, BaseQuantileEstim
         ----------
         estimators : list of BaseQuantileEstimator instances, optional
             List of pre-initialized quantile estimators to include in the ensemble.
-        quantiles : list of float, required
-            List of quantiles to predict (values between 0 and 1).
         cv : int, default=3
             Number of cross-validation folds for computing weights.
         weighting_strategy : str, default="inverse_error"
             Strategy for computing weights.
         random_state : int, optional
             Random seed for reproducibility.
+        quantiles : list of float, optional
+            List of quantiles to predict (values between 0 and 1).
+        **kwargs :
+            Additional parameters, including component-specific parameters in the form
+            component_<index>.<param_name>.
         """
-
         BaseEnsembleEstimator.__init__(
             self,
             estimators=estimators,
             cv=cv,
             weighting_strategy=weighting_strategy,
             random_state=random_state,
+            **kwargs,
         )
         # Initialize separate weights for each quantile
         self.quantile_weights = None
+        self.quantiles = quantiles
+
+    def set_params(self, **params):
+        """
+        Set the parameters of this estimator.
+        Handles quantiles parameter specially.
+
+        Parameters
+        ----------
+        **params : dict
+            Estimator parameters, including component parameters.
+
+        Returns
+        -------
+        self : estimator instance
+            Estimator instance.
+        """
+        # Handle quantiles specially if provided
+        if "quantiles" in params:
+            self.quantiles = params.pop("quantiles")
+            # Apply quantiles to all estimators if they support it
+            for estimator in self.estimators:
+                if hasattr(estimator, "set_params") and hasattr(estimator, "quantiles"):
+                    estimator.set_params(quantiles=self.quantiles)
+
+        # Handle remaining parameters using parent method
+        return super().set_params(**params)
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> "MultiFitQuantileEnsembleEstimator":
+        """
+        Fit the multi-fit quantile ensemble estimator.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Training data.
+        y : array-like of shape (n_samples,)
+            Target values.
+
+        Returns
+        -------
+        self : object
+            Returns self.
+        """
+        if len(self.estimators) == 0:
+            raise ValueError("No estimators have been added to the ensemble.")
+
+        # Make sure quantiles are set for all estimators
+        if self.quantiles is not None:
+            for estimator in self.estimators:
+                if hasattr(estimator, "set_params") and hasattr(estimator, "quantiles"):
+                    estimator.set_params(quantiles=self.quantiles)
+
+        # Fit each estimator on the full dataset
+        for i, estimator in enumerate(self.estimators):
+            logger.info(f"Fitting estimator {i + 1}/{len(self.estimators)}")
+            estimator.fit(X, y)
+
+        # Compute weights based on cross-validation performance
+        self.weights = self._compute_weights(X, y)
+        self.fitted = True
+        return self
 
     def _calculate_error(
         self, estimator: BaseQuantileEstimator, X: np.ndarray, y: np.ndarray

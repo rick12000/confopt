@@ -14,11 +14,6 @@ from confopt.sampling import (
 )
 from confopt.estimation import initialize_point_estimator
 
-from confopt.config import (
-    ESTIMATOR_REGISTRY,
-)
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -240,7 +235,6 @@ class SingleFitQuantileConformalSearcher:
         ):
             self.point_estimator = initialize_point_estimator(
                 estimator_architecture="gbm",
-                initialization_params=ESTIMATOR_REGISTRY["gbm"].default_config,
                 random_state=random_state,
             )
             self.point_estimator.fit(
@@ -400,7 +394,6 @@ class MultiFitQuantileConformalSearcher:
         ):
             self.point_estimator = initialize_point_estimator(
                 estimator_architecture="gbm",
-                initialization_params=ESTIMATOR_REGISTRY["gbm"].default_config,
                 random_state=random_state,
             )
             self.point_estimator.fit(
