@@ -20,8 +20,17 @@ from confopt.conformalization import (
 )
 from confopt.config import QGBM_NAME, GBM_NAME, QRF_NAME
 from confopt.data_classes import FloatRange
-
-from confopt.config import ESTIMATOR_REGISTRY, EstimatorType
+from sklearn.base import BaseEstimator
+from confopt.config import ESTIMATOR_REGISTRY
+from confopt.quantile_wrappers import (
+    BaseSingleFitQuantileEstimator,
+    BaseMultiFitQuantileEstimator,
+)
+from confopt.ensembling import (
+    MultiFitQuantileEnsembleEstimator,
+    SingleFitQuantileEnsembleEstimator,
+    PointEnsembleEstimator,
+)
 
 DEFAULT_SEED = 1234
 
@@ -29,23 +38,24 @@ POINT_ESTIMATOR_ARCHITECTURES = []
 SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES = []
 MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES = []
 for estimator_name, estimator_config in ESTIMATOR_REGISTRY.items():
-    if estimator_config.estimator_type in [
-        EstimatorType.MULTI_FIT_QUANTILE,
-        EstimatorType.ENSEMBLE_QUANTILE_MULTI_FIT,
-    ]:
+    if isinstance(
+        estimator_config.estimator_instance,
+        (BaseMultiFitQuantileEstimator, MultiFitQuantileEnsembleEstimator),
+    ):
         MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
-    elif estimator_config.estimator_type in [
-        EstimatorType.SINGLE_FIT_QUANTILE,
-        EstimatorType.ENSEMBLE_QUANTILE_SINGLE_FIT,
-    ]:
+    elif isinstance(
+        estimator_config.estimator_instance,
+        (BaseSingleFitQuantileEstimator, SingleFitQuantileEnsembleEstimator),
+    ):
         SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
-    elif estimator_config.estimator_type in [
-        EstimatorType.POINT,
-        EstimatorType.ENSEMBLE_POINT,
-    ]:
+    elif isinstance(
+        estimator_config.estimator_instance, (BaseEstimator, PointEnsembleEstimator)
+    ):
         POINT_ESTIMATOR_ARCHITECTURES.append(estimator_name)
     else:
-        raise ValueError()
+        raise ValueError(
+            f"Unknown estimator type: {estimator_config.estimator_instance}"
+        )
 
 
 def noisy_rastrigin(x, A=20, noise_seed=42, noise=0):

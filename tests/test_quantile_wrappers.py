@@ -44,8 +44,8 @@ def test_quantile_lasso_different_shapes():
 
     # Initialize and fit QuantileLasso
     quantiles = [0.1, 0.5, 0.9]  # 10th, 50th, and 90th percentiles
-    lasso = QuantileLasso(quantiles=quantiles, alpha=0.1)
-    lasso.fit(X_train, y_train)
+    lasso = QuantileLasso(alpha=0.1)
+    lasso.fit(X_train, y_train, quantiles=quantiles)
 
     # Predict on test data with different dimensions
     predictions = lasso.predict(X_test)

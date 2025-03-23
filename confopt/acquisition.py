@@ -12,7 +12,7 @@ from confopt.sampling import (
     ThompsonSampler,
     PessimisticLowerBoundSampler,
 )
-from confopt.estimation import initialize_point_estimator
+from confopt.estimation import initialize_estimator
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +233,7 @@ class SingleFitQuantileConformalSearcher:
             isinstance(self.sampler, ThompsonSampler)
             and self.sampler.enable_optimistic_sampling
         ):
-            self.point_estimator = initialize_point_estimator(
+            self.point_estimator = initialize_estimator(
                 estimator_architecture="gbm",
                 random_state=random_state,
             )
@@ -392,7 +392,7 @@ class MultiFitQuantileConformalSearcher:
             isinstance(self.sampler, ThompsonSampler)
             and self.sampler.enable_optimistic_sampling
         ):
-            self.point_estimator = initialize_point_estimator(
+            self.point_estimator = initialize_estimator(
                 estimator_architecture="gbm",
                 random_state=random_state,
             )

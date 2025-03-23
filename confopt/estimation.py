@@ -6,70 +6,16 @@ import numpy as np
 from sklearn.metrics import mean_pinball_loss, mean_squared_error
 from sklearn.model_selection import KFold
 
-from confopt.config import (
-    ESTIMATOR_REGISTRY,
-)
+from confopt.config import ESTIMATOR_REGISTRY, EstimatorConfig
 from confopt.quantile_wrappers import BaseSingleFitQuantileEstimator
 from confopt.utils import get_tuning_configurations
 
 logger = logging.getLogger(__name__)
 
 
-def tune(
-    X: np.array,
-    y: np.array,
-    estimator_architecture: str,
-    n_searches: int,
-    quantiles: Optional[List[float]] = None,
-    k_fold_splits: int = 3,
-    random_state: Optional[int] = None,
-) -> Dict:
-
-    # Get tuning configurations based on estimator type
-    tuning_configurations = get_tuning_configurations_for_architecture(
-        estimator_architecture=estimator_architecture,
-        n_searches=n_searches,
-        random_state=random_state,
-    )
-
-    scored_configurations, scores = cross_validate_configurations(
-        configurations=tuning_configurations,
-        estimator_architecture=estimator_architecture,
-        X=X,
-        y=y,
-        k_fold_splits=k_fold_splits,
-        quantiles=quantiles,
-        random_state=random_state,
-    )
-
-    best_configuration = scored_configurations[scores.index(min(scores))]
-    return best_configuration
-
-
-def get_tuning_configurations_for_architecture(
-    estimator_architecture: str,
-    n_searches: int,
-    random_state: Optional[int] = None,
-) -> List[Dict]:
-    estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
-
-    # Generate configurations using the tuning space
-    configurations = get_tuning_configurations(
-        parameter_grid=estimator_config.tuning_space,
-        n_configurations=n_searches,
-        random_state=random_state,
-    )
-
-    # Empty dict represents using the default estimator as-is
-    configurations.append({})
-
-    return configurations
-
-
 def initialize_estimator(
     estimator_architecture: str,
     initialization_params: Dict = None,
-    quantiles: Optional[List[float]] = None,
     random_state: Optional[int] = None,
 ):
     """
@@ -79,12 +25,12 @@ def initialize_estimator(
     estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
 
     # Create a deep copy of the default estimator
-    estimator = copy.deepcopy(estimator_config.default_estimator)
+    estimator = copy.deepcopy(estimator_config.estimator_instance)
 
     # Apply any parameter updates
     if initialization_params:
         # For ensemble estimators, apply parameters to the ensemble and components
-        if estimator_config.is_ensemble():
+        if estimator_config.is_ensemble_estimator():
             for param_name, param_value in initialization_params.items():
                 if param_name.startswith("component_"):
                     # Parse component index and parameter name
@@ -106,11 +52,6 @@ def initialize_estimator(
             if hasattr(estimator, "set_params"):
                 estimator.set_params(**initialization_params)
 
-    # Handle quantiles for multi-fit quantile estimators
-    if estimator_config.needs_multiple_fits() and quantiles is not None:
-        if hasattr(estimator, "set_params"):
-            estimator.set_params(quantiles=quantiles)
-
     # Set random state if applicable and provided
     if (
         random_state is not None
@@ -120,32 +61,6 @@ def initialize_estimator(
         estimator.set_params(random_state=random_state)
 
     return estimator
-
-
-def initialize_point_estimator(
-    estimator_architecture: str,
-    initialization_params: Dict = None,
-    random_state: Optional[int] = None,
-):
-    return initialize_estimator(
-        estimator_architecture=estimator_architecture,
-        initialization_params=initialization_params,
-        random_state=random_state,
-    )
-
-
-def initialize_quantile_estimator(
-    estimator_architecture: str,
-    initialization_params: Dict = None,
-    pinball_loss_alpha: List[float] = None,
-    random_state: Optional[int] = None,
-):
-    return initialize_estimator(
-        estimator_architecture=estimator_architecture,
-        initialization_params=initialization_params,
-        quantiles=pinball_loss_alpha,
-        random_state=random_state,
-    )
 
 
 def average_scores_across_folds(
@@ -176,7 +91,7 @@ def average_scores_across_folds(
 
 def cross_validate_configurations(
     configurations: List[Dict],
-    estimator_architecture: str,
+    estimator_config: EstimatorConfig,
     X: np.array,
     y: np.array,
     k_fold_splits: int = 3,
@@ -185,7 +100,6 @@ def cross_validate_configurations(
 ) -> Tuple[List[Dict], List[float]]:
     scored_configurations, scores = [], []
     kf = KFold(n_splits=k_fold_splits, random_state=random_state, shuffle=True)
-    estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
 
     for train_index, test_index in kf.split(X):
         X_train, X_val = X[train_index, :], X[test_index, :]
@@ -196,20 +110,23 @@ def cross_validate_configurations(
                 f"Evaluating search model parameter configuration: {configuration}"
             )
 
-            is_quantile = estimator_config.needs_multiple_fits()
-
             # Initialize the estimator with the configuration
             model = initialize_estimator(
-                estimator_architecture=estimator_architecture,
+                estimator_architecture=estimator_config.estimator_name,
                 initialization_params=configuration,
-                quantiles=quantiles if is_quantile else None,
                 random_state=random_state,
             )
 
-            model.fit(X_train, Y_train)
-
             try:
-                if is_quantile:
+                is_quantile_model = estimator_config.is_quantile_estimator()
+                # For multi-fit quantile estimators, pass quantiles to fit
+                if is_quantile_model:
+                    model.fit(X_train, Y_train, quantiles=quantiles)
+                else:
+                    model.fit(X_train, Y_train)
+
+                # Evaluate the model
+                if is_quantile_model:
                     # Then evaluate on pinball loss:
                     prediction = model.predict(X_val)
                     lo_y_pred = prediction[:, 0]
@@ -237,7 +154,7 @@ def cross_validate_configurations(
 
             except Exception as e:
                 logger.warning(
-                    "Scoring failed and result was not appended."
+                    "Scoring failed and result was not appended. "
                     f"Caught exception: {e}"
                 )
                 continue
@@ -247,3 +164,34 @@ def cross_validate_configurations(
     )
 
     return cross_fold_scored_configurations, cross_fold_scores
+
+
+def tune(
+    X: np.array,
+    y: np.array,
+    estimator_architecture: str,
+    n_searches: int,
+    k_fold_splits: int = 3,
+    quantiles: Optional[List[float]] = None,
+    random_state: Optional[int] = None,
+) -> Dict:
+    estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
+    # Generate configurations using the tuning space
+    tuning_configurations = get_tuning_configurations(
+        parameter_grid=estimator_config.estimator_parameter_space,
+        n_configurations=n_searches,
+        random_state=random_state,
+    )
+
+    scored_configurations, scores = cross_validate_configurations(
+        configurations=tuning_configurations,
+        estimator_config=estimator_config,
+        X=X,
+        y=y,
+        k_fold_splits=k_fold_splits,
+        quantiles=quantiles,
+        random_state=random_state,
+    )
+
+    best_configuration = scored_configurations[scores.index(min(scores))]
+    return best_configuration

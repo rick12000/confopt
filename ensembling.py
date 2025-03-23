@@ -497,16 +497,18 @@ class SingleFitQuantileEnsembleEstimator(
         error : float
             Mean pinball loss averaged across all quantiles.
         """
-        # Use median prediction (0.5 quantile) for error calculation
+        # Predict all quantiles
         y_pred = estimator.predict(X)
-        median_idx = 0
-        if len(estimator.quantiles) > 1:
-            # Try to find the median quantile (closest to 0.5)
-            median_idx = min(
-                range(len(estimator.quantiles)),
-                key=lambda i: abs(estimator.quantiles[i] - 0.5),
-            )
-        return mean_squared_error(y, y_pred[:, median_idx])
+
+        # Calculate pinball loss for each quantile separately
+        errors = []
+        for i, q in enumerate(estimator.quantiles):
+            q_pred = y_pred[:, i]
+            q_error = mean_pinball_loss(y, q_pred, alpha=q)
+            errors.append(q_error)
+
+        # Return average error across all quantiles
+        return np.mean(errors)
 
     def _compute_weights(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
         """
