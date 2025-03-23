@@ -1,30 +1,12 @@
 import numpy as np
 import pytest
 from sklearn.linear_model import LinearRegression
-from confopt.adaptation import ACI, DtACI
+from confopt.adaptation import DtACI
 
 
 COVERAGE_TOLERANCE: float = 0.03
 
 
-@pytest.mark.parametrize("breach", [True, False])
-@pytest.mark.parametrize("alpha", [0.2, 0.8])
-@pytest.mark.parametrize("gamma", [0.01, 0.1])
-def test_update_adaptive_interval(breach, alpha, gamma):
-    aci = ACI(alpha=alpha, gamma=gamma)
-    stored_alpha = aci.alpha
-    updated_alpha = aci.update(breach_indicator=breach)
-
-    assert 0 < updated_alpha < 1
-    if breach:
-        assert updated_alpha <= alpha
-    else:
-        assert updated_alpha >= alpha
-
-    assert stored_alpha == aci.alpha
-
-
-# Create fixtures for testing with regression-based conformal prediction
 @pytest.fixture
 def linear_data_stable():
     """
@@ -102,7 +84,7 @@ def test_regression_conformal_adaptation(
         ("drift_data", linear_data_drift),
     ]:
         # Initialize methods
-        aci = ACI(alpha=target_alpha, gamma=0.01)
+        aci = DtACI(alpha=target_alpha, gamma_values=[0.01], deterministic=False)
         dtaci = DtACI(
             alpha=target_alpha, gamma_values=[0.01, 0.05], deterministic=False
         )
@@ -114,7 +96,7 @@ def test_regression_conformal_adaptation(
 
         # Create lists to track breaches
         no_adapt_breaches = []
-        aci_breaches = []
+        dtaci_single_breaches = []
         dtaci_breaches = []
 
         X, y = data
@@ -162,26 +144,19 @@ def test_regression_conformal_adaptation(
             fixed_breach = not (fixed_lower <= y_test <= fixed_upper)
             no_adapt_breaches.append(int(fixed_breach))
 
-            # 2. ACI
-            aci_quantile = np.quantile(cal_residuals, 1 - aci.alpha_t)
-            aci_lower = y_pred - aci_quantile
-            aci_upper = y_pred + aci_quantile
-            aci_breach = not (aci_lower <= y_test <= aci_upper)
-            aci_breaches.append(int(aci_breach))
+            # 2. DtACI with single gamma
+            dtaci_single_quantile = np.quantile(cal_residuals, 1 - aci.alpha_t)
+            dtaci_single_lower = y_pred - dtaci_single_quantile
+            dtaci_single_upper = y_pred + dtaci_single_quantile
+            dtaci_single_breach = not (
+                dtaci_single_lower <= y_test <= dtaci_single_upper
+            )
+            dtaci_single_breaches.append(int(dtaci_single_breach))
 
-            # Update ACI
-            aci.update(breach_indicator=int(aci_breach))
+            # Update DtACI single
+            aci.update(beta=beta_t)
 
-            # 3. DtACI - calculate breach indicators for each expert
-            dtaci_breach_indicators = []
-            for alpha in dtaci.alpha_t_values:
-                expert_quantile = np.quantile(cal_residuals, 1 - alpha)
-                expert_lower = y_pred - expert_quantile
-                expert_upper = y_pred + expert_quantile
-                expert_breach = not (expert_lower <= y_test <= expert_upper)
-                dtaci_breach_indicators.append(int(expert_breach))
-
-            # DtACI current interval
+            # 3. DtACI with multiple gammas (existing code)
             dtaci_quantile = np.quantile(cal_residuals, 1 - dtaci.alpha_t)
             dtaci_lower = y_pred - dtaci_quantile
             dtaci_upper = y_pred + dtaci_quantile
@@ -189,24 +164,18 @@ def test_regression_conformal_adaptation(
             dtaci_breaches.append(int(dtaci_breach))
 
             # Update DtACI
-            dtaci.update(beta_t=beta_t)
+            dtaci.update(beta=beta_t)
 
         # Calculate empirical coverage
         no_adapt_coverage = 1 - np.mean(no_adapt_breaches)
-        aci_coverage = 1 - np.mean(aci_breaches)
+        dtaci_single_coverage = 1 - np.mean(dtaci_single_breaches)
         dtaci_coverage = 1 - np.mean(dtaci_breaches)
 
         target_coverage = 1 - target_alpha
 
         # Calculate errors
         no_adapt_error = abs(no_adapt_coverage - target_coverage)
-        aci_error = abs(aci_coverage - target_coverage)
-
-        # Print results
-        # print(f"\nData: {data_name}, Target coverage: {target_coverage:.4f}")
-        # print(f"No adaptation: {no_adapt_coverage:.4f}, error: {no_adapt_error:.4f}")
-        # print(f"ACI: {aci_coverage:.4f}, error: {aci_error:.4f}")
-        # print(f"DtACI: {dtaci_coverage:.4f}, error: {dtaci_error:.4f}")
+        dtaci_single_error = abs(dtaci_single_coverage - target_coverage)
 
         # Check coverage (with more tolerance for the drift and time series cases)
         data_tolerance = (
@@ -220,7 +189,7 @@ def test_regression_conformal_adaptation(
             abs(dtaci_coverage - target_coverage) < data_tolerance
         ), f"DtACI coverage error too large: {abs(dtaci_coverage - target_coverage):.4f}"
 
-        # Check that ACI performs better than no adaptation
+        # Check that DtACI with single gamma performs better than no adaptation
         assert (
-            aci_error <= no_adapt_error * 1.1
-        ), f"{data_name}: ACI error ({aci_error:.4f}) should be better than no adaptation ({no_adapt_error:.4f})"
+            dtaci_single_error <= no_adapt_error * 1.1
+        ), f"{data_name}: DtACI single gamma error ({dtaci_single_error:.4f}) should be better than no adaptation ({no_adapt_error:.4f})"

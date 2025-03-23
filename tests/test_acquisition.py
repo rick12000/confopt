@@ -3,8 +3,7 @@ import pytest
 
 from confopt.acquisition import (
     LocallyWeightedConformalSearcher,
-    SingleFitQuantileConformalSearcher,
-    MultiFitQuantileConformalSearcher,
+    QuantileConformalSearcher,
 )
 from confopt.sampling import (
     LowerBoundSampler,
@@ -71,27 +70,10 @@ def fitted_locally_weighted_searcher(sample_data):
 
 
 @pytest.fixture
-def fitted_single_fit_searcher(sample_data):
-    """Create a fitted single-fit quantile conformal searcher"""
-    sampler = LowerBoundSampler(c=2.0, interval_width=0.2)  # Removed beta parameter
-    searcher = SingleFitQuantileConformalSearcher(
-        quantile_estimator_architecture="qrf", sampler=sampler
-    )
-    searcher.fit(
-        X_train=sample_data["X_train"],
-        y_train=sample_data["y_train"],
-        X_val=sample_data["X_val"],
-        y_val=sample_data["y_val"],
-        random_state=42,
-    )
-    return searcher
-
-
-@pytest.fixture
-def fitted_multi_fit_searcher(sample_data):
+def fitted_quantile_searcher(sample_data):
     """Create a fitted multi-fit quantile conformal searcher"""
     sampler = LowerBoundSampler(c=2.0, interval_width=0.2)  # Removed beta parameter
-    searcher = MultiFitQuantileConformalSearcher(
+    searcher = QuantileConformalSearcher(
         quantile_estimator_architecture=QGBM_NAME, sampler=sampler
     )
     searcher.fit(
@@ -246,11 +228,11 @@ class TestLocallyWeightedConformalSearcher:
         assert len(searcher.predictions_per_interval) == 1
 
 
-class TestSingleFitQuantileConformalSearcher:
+class TestQuantileConformalSearcher:
     def test_fit_with_ucb_sampler(self, sample_data):
         """Test fit method with UCB sampler"""
         sampler = LowerBoundSampler()
-        searcher = SingleFitQuantileConformalSearcher(
+        searcher = QuantileConformalSearcher(
             quantile_estimator_architecture="qrf", sampler=sampler
         )
 
@@ -271,7 +253,7 @@ class TestSingleFitQuantileConformalSearcher:
     def test_fit_with_thompson_optimistic(self, sample_data):
         """Test fit method with Thompson sampler and optimistic sampling"""
         sampler = ThompsonSampler(enable_optimistic_sampling=True)
-        searcher = SingleFitQuantileConformalSearcher(
+        searcher = QuantileConformalSearcher(
             quantile_estimator_architecture="qrf", sampler=sampler
         )
 
@@ -313,7 +295,7 @@ class TestSingleFitQuantileConformalSearcher:
     def test_predict_with_thompson(self, sample_data):
         """Test prediction with Thompson sampling strategy"""
         sampler = ThompsonSampler(n_quantiles=4)
-        searcher = SingleFitQuantileConformalSearcher(
+        searcher = QuantileConformalSearcher(
             quantile_estimator_architecture="qrf", sampler=sampler
         )
 
@@ -372,7 +354,7 @@ class TestSingleFitQuantileConformalSearcher:
     def test_predict_with_pessimistic_lower_bound(self, sample_data):
         """Test prediction with pessimistic lower bound strategy"""
         sampler = PessimisticLowerBoundSampler()
-        searcher = SingleFitQuantileConformalSearcher(
+        searcher = QuantileConformalSearcher(
             quantile_estimator_architecture="qrf", sampler=sampler
         )
 
@@ -395,134 +377,3 @@ class TestSingleFitQuantileConformalSearcher:
         # Check that predictions_per_interval is updated
         assert searcher.predictions_per_interval is not None
         assert len(searcher.predictions_per_interval) == 1
-
-
-class TestMultiFitQuantileConformalSearcher:
-    def test_fit_with_ucb_sampler(self, sample_data):
-        """Test fit method with UCB sampler"""
-        sampler = LowerBoundSampler()
-        searcher = MultiFitQuantileConformalSearcher(
-            quantile_estimator_architecture=QGBM_NAME, sampler=sampler
-        )
-
-        # Fit the searcher
-        searcher.fit(
-            X_train=sample_data["X_train"],
-            y_train=sample_data["y_train"],
-            X_val=sample_data["X_val"],
-            y_val=sample_data["y_val"],
-            random_state=42,
-        )
-
-        # Check that estimator is fitted
-        assert len(searcher.conformal_estimators) == 1  # One estimator for UCB
-        assert searcher.conformal_estimators[0].quantile_estimator is not None
-        assert searcher.primary_estimator_error is not None
-
-    def test_fit_with_thompson_sampler(self, sample_data):
-        """Test fit method with Thompson sampler"""
-        sampler = ThompsonSampler(n_quantiles=4)
-        searcher = MultiFitQuantileConformalSearcher(
-            quantile_estimator_architecture=QGBM_NAME, sampler=sampler
-        )
-
-        # Fit the searcher
-        searcher.fit(
-            X_train=sample_data["X_train"],
-            y_train=sample_data["y_train"],
-            X_val=sample_data["X_val"],
-            y_val=sample_data["y_val"],
-            random_state=42,
-        )
-
-        # Check that estimators are fitted
-        assert (
-            len(searcher.conformal_estimators) == 2
-        )  # Two intervals for n_quantiles=4
-        for estimator in searcher.conformal_estimators:
-            assert estimator.quantile_estimator is not None
-
-    def test_predict_with_ucb(self, fitted_multi_fit_searcher, sample_data):
-        """Test prediction with UCB sampling strategy"""
-        searcher = fitted_multi_fit_searcher
-        X_test = sample_data["X_test"]
-
-        # Initial beta value
-        initial_beta = searcher.sampler.beta
-
-        # Make predictions
-        predictions = searcher.predict(X_test)
-
-        # Check prediction shape
-        assert isinstance(predictions, np.ndarray)
-        assert predictions.shape[0] == X_test.shape[0]
-
-        # Check that predictions_per_interval is updated
-        assert searcher.predictions_per_interval is not None
-        assert len(searcher.predictions_per_interval) == 1  # Default UCB has 1 interval
-
-        # Check that beta is updated
-        assert searcher.sampler.beta != initial_beta
-
-    def test_predict_with_thompson(self, sample_data):
-        """Test prediction with Thompson sampling strategy"""
-        sampler = ThompsonSampler(n_quantiles=4, enable_optimistic_sampling=True)
-        searcher = MultiFitQuantileConformalSearcher(
-            quantile_estimator_architecture=QGBM_NAME, sampler=sampler
-        )
-
-        # Fit the searcher
-        searcher.fit(
-            X_train=sample_data["X_train"],
-            y_train=sample_data["y_train"],
-            X_val=sample_data["X_val"],
-            y_val=sample_data["y_val"],
-            random_state=42,
-        )
-
-        # Check that median estimator is fitted (for optimistic sampling)
-        assert searcher.point_estimator is not None
-
-        # Make predictions
-        X_test = sample_data["X_test"]
-        np.random.seed(42)  # For reproducible Thompson sampling
-        predictions = searcher.predict(X_test)
-
-        # Check prediction shape
-        assert predictions.shape[0] == X_test.shape[0]
-
-        # Check that predictions_per_interval has one entry per interval
-        assert len(searcher.predictions_per_interval) == len(
-            searcher.conformal_estimators
-        )
-
-    def test_predict_with_pessimistic_lower_bound(self, sample_data):
-        """Test prediction with pessimistic lower bound strategy"""
-        sampler = PessimisticLowerBoundSampler()
-        searcher = MultiFitQuantileConformalSearcher(
-            quantile_estimator_architecture=QGBM_NAME, sampler=sampler
-        )
-
-        # Fit the searcher
-        searcher.fit(
-            X_train=sample_data["X_train"],
-            y_train=sample_data["y_train"],
-            X_val=sample_data["X_val"],
-            y_val=sample_data["y_val"],
-            random_state=42,
-        )
-
-        # Make predictions
-        X_test = sample_data["X_test"]
-        predictions = searcher.predict(X_test)
-
-        # Check prediction shape
-        assert predictions.shape[0] == X_test.shape[0]
-
-        # Check that predictions_per_interval is updated
-        assert searcher.predictions_per_interval is not None
-        assert len(searcher.predictions_per_interval) == 1
-
-        # Check that the predictions are actually the lower bounds from the interval
-        lower_bound = searcher.predictions_per_interval[0][:, 0]
-        assert np.array_equal(predictions, lower_bound)

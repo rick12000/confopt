@@ -3,8 +3,7 @@ import pytest
 from confopt.conformalization import (
     LocallyWeightedConformalEstimator,
     QuantileInterval,
-    SingleFitQuantileConformalEstimator,
-    MultiFitQuantileConformalEstimator,
+    QuantileConformalEstimator,
 )
 
 from conftest import (
@@ -113,7 +112,8 @@ class TestLocallyWeightedConformalEstimator:
 class TestSingleFitQuantileConformalEstimator:
     @pytest.mark.parametrize(
         "estimator_architecture",
-        SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
+        SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES
+        + MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
     )
     @pytest.mark.parametrize("tuning_iterations", [0, 2])
     def test_fit_and_predict_interval(
@@ -128,7 +128,7 @@ class TestSingleFitQuantileConformalEstimator:
             QuantileInterval(lower_quantile=0.1, upper_quantile=0.9),
         ]
 
-        estimator = SingleFitQuantileConformalEstimator(
+        estimator = QuantileConformalEstimator(
             quantile_estimator_architecture=estimator_architecture,
             intervals=intervals,
             n_pre_conformal_trials=5,  # Reduced from 20 to 5
@@ -172,59 +172,3 @@ class TestSingleFitQuantileConformalEstimator:
             target_coverage = interval.upper_quantile - interval.lower_quantile
             actual_coverage = np.mean((y_val >= lower_bound) & (y_val <= upper_bound))
             assert abs(actual_coverage - target_coverage) < COVERAGE_TOLERANCE
-
-
-class TestMultiFitQuantileConformalEstimator:
-    @pytest.mark.parametrize(
-        "estimator_architecture",
-        MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
-    )
-    @pytest.mark.parametrize("tuning_iterations", [0, 2])
-    def test_fit_and_predict_interval(
-        self,
-        estimator_architecture,
-        tuning_iterations,
-        dummy_expanding_quantile_gaussian_dataset,
-    ):
-        """Test complete fit and predict_interval workflow with variable tuning iterations"""
-        interval = QuantileInterval(lower_quantile=0.1, upper_quantile=0.9)
-        estimator = MultiFitQuantileConformalEstimator(
-            quantile_estimator_architecture=estimator_architecture,
-            interval=interval,
-            n_pre_conformal_trials=5,  # Reduced from 20 to 5
-        )
-
-        # Prepare data
-        X, y = dummy_expanding_quantile_gaussian_dataset
-
-        train_split = 0.8
-        X_train, y_train = (
-            X[: round(len(X) * train_split)],
-            y[: round(len(y) * train_split)],
-        )
-        X_val, y_val = (
-            X[round(len(X) * train_split) :],
-            y[round(len(y) * train_split) :],
-        )
-
-        # Fit the estimator with parameterized tuning iterations
-        estimator.fit(
-            X_train=X_train,
-            y_train=y_train,
-            X_val=X_val,
-            y_val=y_val,
-            tuning_iterations=tuning_iterations,
-            random_state=42,
-        )
-
-        # Test predict_interval
-        lower_bound, upper_bound = estimator.predict_interval(X=X_val)
-
-        # Check that lower bounds are <= upper bounds
-        assert np.all(lower_bound <= upper_bound)
-
-        # Check interval coverage (approximate)
-        interval = estimator.interval
-        target_coverage = interval.upper_quantile - interval.lower_quantile
-        actual_coverage = np.mean((y_val >= lower_bound) & (y_val <= upper_bound))
-        assert abs(actual_coverage - target_coverage) < COVERAGE_TOLERANCE

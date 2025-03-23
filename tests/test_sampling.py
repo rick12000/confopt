@@ -13,7 +13,7 @@ class TestPessimisticLowerBoundSampler:
     @pytest.mark.parametrize("adapter_framework", ["ACI", "DtACI", None])
     def test_init_custom_parameters(self, adapter_framework):
         sampler = PessimisticLowerBoundSampler(
-            interval_width=0.9, adapter_framework=adapter_framework
+            interval_width=0.9, adapter=adapter_framework
         )
         assert sampler.interval_width == pytest.approx(0.9)
         assert sampler.alpha == pytest.approx(0.1)
@@ -72,7 +72,7 @@ class TestPessimisticLowerBoundSampler:
         ],
     )
     def test_update_interval_width(self, adapter_framework, breaches, should_raise):
-        sampler = PessimisticLowerBoundSampler(adapter_framework=adapter_framework)
+        sampler = PessimisticLowerBoundSampler(adapter=adapter_framework)
         initial_alpha = sampler.alpha
 
         if should_raise:
@@ -89,7 +89,7 @@ class TestPessimisticLowerBoundSampler:
     )
     def test_calculate_quantiles(self, interval_width, adapter_framework):
         sampler = PessimisticLowerBoundSampler(
-            interval_width=interval_width, adapter_framework=adapter_framework
+            interval_width=interval_width, adapter=adapter_framework
         )
         interval = sampler._calculate_quantiles()
         expected_alpha = 1 - interval_width

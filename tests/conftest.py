@@ -3,22 +3,12 @@ import random
 import numpy as np
 import pytest
 
-from confopt.acquisition import (
-    MultiFitQuantileConformalSearcher,
-    LocallyWeightedConformalSearcher,
-)
 from confopt.tuning import (
     ObjectiveConformalSearcher,
 )
 from confopt.utils import get_tuning_configurations
 from hashlib import sha256
-from confopt.conformalization import (
-    LocallyWeightedConformalEstimator,
-    SingleFitQuantileConformalEstimator,
-    MultiFitQuantileConformalEstimator,
-    QuantileInterval,
-)
-from confopt.config import QGBM_NAME, GBM_NAME, QRF_NAME
+
 from confopt.data_classes import FloatRange
 from sklearn.base import BaseEstimator
 from confopt.config import ESTIMATOR_REGISTRY
@@ -96,22 +86,6 @@ def dummy_expanding_quantile_gaussian_dataset():
 
 
 @pytest.fixture
-def dummy_init_quantile_regression():
-    qcr = MultiFitQuantileConformalSearcher(quantile_estimator_architecture="qgbm")
-    return qcr
-
-
-@pytest.fixture
-def dummy_init_locally_weighted_regression():
-    lwr = LocallyWeightedConformalSearcher(
-        point_estimator_architecture="gbm",
-        demeaning_estimator_architecture="gbm",
-        variance_estimator_architecture="gbm",
-    )
-    return lwr
-
-
-@pytest.fixture
 def dummy_configuration_performance_bounds():
     """
     Dummy performance bounds, where each set of
@@ -166,35 +140,3 @@ def dummy_tuner(dummy_parameter_grid):
     )
 
     return searcher
-
-
-@pytest.fixture
-def sample_quantile_interval():
-    """Sample quantile interval with lower=0.1, upper=0.9"""
-    return QuantileInterval(lower_quantile=0.1, upper_quantile=0.9)
-
-
-@pytest.fixture
-def sample_locally_weighted_estimator():
-    """Initialize a locally weighted conformal estimator with GBM architectures"""
-    return LocallyWeightedConformalEstimator(
-        point_estimator_architecture=GBM_NAME, variance_estimator_architecture=GBM_NAME
-    )
-
-
-@pytest.fixture
-def sample_single_fit_estimator():
-    """Initialize a single fit quantile conformal estimator with QRF architecture"""
-    return SingleFitQuantileConformalEstimator(
-        quantile_estimator_architecture=QRF_NAME, n_pre_conformal_trials=20
-    )
-
-
-@pytest.fixture
-def sample_multi_fit_estimator(sample_quantile_interval):
-    """Initialize a multi-fit quantile conformal estimator with QGBM architecture"""
-    return MultiFitQuantileConformalEstimator(
-        quantile_estimator_architecture=QGBM_NAME,
-        interval=sample_quantile_interval,
-        n_pre_conformal_trials=20,
-    )

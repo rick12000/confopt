@@ -13,7 +13,7 @@ from confopt.utils import get_tuning_configurations
 from confopt.tracking import Trial, Study, RuntimeTracker, derive_optimal_tuning_count
 from confopt.acquisition import (
     LocallyWeightedConformalSearcher,
-    MultiFitQuantileConformalSearcher,
+    QuantileConformalSearcher,
     LowerBoundSampler,
 )
 from confopt.data_classes import ParameterRange
@@ -383,9 +383,7 @@ class ObjectiveConformalSearcher:
 
     def search(
         self,
-        searcher: Union[
-            LocallyWeightedConformalSearcher, MultiFitQuantileConformalSearcher
-        ],
+        searcher: Union[LocallyWeightedConformalSearcher, QuantileConformalSearcher],
         n_random_searches: int = 20,
         conformal_retraining_frequency: int = 1,
         searcher_tuning_framework: Optional[Literal["runtime", "ucb", "fixed"]] = None,

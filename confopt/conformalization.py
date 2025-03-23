@@ -1,6 +1,6 @@
 import logging
 import numpy as np
-from typing import Optional, Tuple, List, Literal
+from typing import Optional, Tuple, List
 from sklearn.metrics import mean_squared_error, mean_pinball_loss
 from confopt.data_classes import QuantileInterval
 from confopt.preprocessing import train_val_split
@@ -148,23 +148,28 @@ class LocallyWeightedConformalEstimator:
         return lower_bound, upper_bound
 
 
-class SingleFitQuantileConformalEstimator:
+class QuantileConformalEstimator:
     """
-    Single-fit quantile conformal estimator.
+    Unified quantile conformal estimator that works with both single-fit and multi-fit quantile estimators.
 
-    Uses a single model that can predict multiple quantiles with a single fit.
-    Can predict any quantile after fitting once.
+    Uses a single model to predict multiple quantiles for specified intervals.
     """
 
     def __init__(
         self,
-        quantile_estimator_architecture: Literal["qknn", "qrf"],
+        quantile_estimator_architecture: str,
         intervals: List[QuantileInterval],
         n_pre_conformal_trials: int = 20,
     ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
-        self.n_pre_conformal_trials = n_pre_conformal_trials
         self.intervals = intervals
+        self.n_pre_conformal_trials = n_pre_conformal_trials
+
+        self.quantile_estimator = None
+        self.nonconformity_scores = None
+        self.all_quantiles = None
+        self.conformalize_predictions = False
+        self.primary_estimator_error = None
 
     def fit(
         self,
@@ -177,7 +182,7 @@ class SingleFitQuantileConformalEstimator:
         random_state: Optional[int] = None,
     ):
         """
-        Fit the single-fit quantile estimator for multiple intervals with one model.
+        Fit the quantile estimator for all specified intervals.
         """
         # Prepare all quantiles needed for all intervals
         all_quantiles = []
@@ -200,58 +205,62 @@ class SingleFitQuantileConformalEstimator:
             # Use an empty dict to get the default estimator as-is
             initialization_params = {}
 
-        # Initialize and fit a single quantile estimator
+        # Initialize the quantile estimator
         self.quantile_estimator = initialize_estimator(
             estimator_architecture=self.quantile_estimator_architecture,
             initialization_params=initialization_params,
             random_state=random_state,
         )
 
-        # Initialize nonconformity scores list
-        self.nonconformity_scores = []
+        # Initialize nonconformity scores for each interval
+        self.nonconformity_scores = [np.array([]) for _ in self.intervals]
 
         # Fit the model and calculate nonconformity scores if enough data
         if len(X_train) + len(X_val) > self.n_pre_conformal_trials:
-            # Pass quantiles to fit
+            # Pass quantiles to fit - same interface for both estimator types
             self.quantile_estimator.fit(X_train, y_train, quantiles=all_quantiles)
 
             # Calculate nonconformity scores for each interval on validation data
-            for interval in self.intervals:
+            for i, interval in enumerate(self.intervals):
                 # Get the indices of lower and upper quantiles in the all_quantiles list
                 lower_idx = all_quantiles.index(interval.lower_quantile)
                 upper_idx = all_quantiles.index(interval.upper_quantile)
 
+                # Get predictions - handle differently based on estimator type
                 val_prediction = self.quantile_estimator.predict(X_val)
+
                 lower_conformal_deviations = val_prediction[:, lower_idx] - y_val
                 upper_conformal_deviations = y_val - val_prediction[:, upper_idx]
+
                 # Store deviations for this interval
-                self.nonconformity_scores.append(
-                    np.maximum(lower_conformal_deviations, upper_conformal_deviations)
+                self.nonconformity_scores[i] = np.maximum(
+                    lower_conformal_deviations, upper_conformal_deviations
                 )
 
             self.conformalize_predictions = True
         else:
+            # For small datasets, use all data without conformalization
             self.quantile_estimator.fit(
                 X=np.vstack((X_train, X_val)),
                 y=np.concatenate((y_train, y_val)),
                 quantiles=all_quantiles,
             )
-            # Initialize empty nonconformity scores for each interval
-            self.nonconformity_scores = [np.array([]) for _ in self.intervals]
             self.conformalize_predictions = False
 
         # Store all_quantiles for later lookup
         self.all_quantiles = all_quantiles
 
-        # TODO: TEMP: Calculate performance metrics
+        # Calculate performance metrics
         scores = []
         for interval in self.intervals:
             lower_idx = self.all_quantiles.index(interval.lower_quantile)
             upper_idx = self.all_quantiles.index(interval.upper_quantile)
 
             predictions = self.quantile_estimator.predict(X_val)
+
             lo_y_pred = predictions[:, lower_idx]
             hi_y_pred = predictions[:, upper_idx]
+
             lo_score = mean_pinball_loss(
                 y_val, lo_y_pred, alpha=interval.lower_quantile
             )
@@ -288,6 +297,7 @@ class SingleFitQuantileConformalEstimator:
 
         prediction = self.quantile_estimator.predict(X)
 
+        # Apply conformalization if possible
         if (
             self.conformalize_predictions
             and len(self.nonconformity_scores[interval_index]) > 0
@@ -306,114 +316,11 @@ class SingleFitQuantileConformalEstimator:
 
         return lower_interval_bound, upper_interval_bound
 
+    # def calculate_non_conformity_score(y, ):
+    #     lower_conformal_deviations = val_prediction[:, lower_idx] - y
+    #     upper_conformal_deviations = y - val_prediction[:, upper_idx]
 
-class MultiFitQuantileConformalEstimator:
-    """
-    Multi-fit quantile conformal estimator for a single interval.
-
-    Uses a dedicated quantile estimator for a specific interval.
-    """
-
-    def __init__(
-        self,
-        quantile_estimator_architecture: str,
-        interval: QuantileInterval,
-        n_pre_conformal_trials: int = 20,
-    ):
-        self.quantile_estimator_architecture = quantile_estimator_architecture
-        self.interval = interval
-        self.n_pre_conformal_trials = n_pre_conformal_trials
-
-    def fit(
-        self,
-        X_train: np.array,
-        y_train: np.array,
-        X_val: np.array,
-        y_val: np.array,
-        tuning_iterations: Optional[int] = 0,
-        min_obs_for_tuning: int = 15,
-        random_state: Optional[int] = None,
-    ):
-        """
-        Fit a dedicated quantile estimator for this interval.
-        """
-        # Prepare quantiles for this specific interval
-        quantiles = [self.interval.lower_quantile, self.interval.upper_quantile]
-
-        # Tune model parameters if requested
-        if tuning_iterations > 1 and len(X_train) > min_obs_for_tuning:
-            initialization_params = tune(
-                X=X_train,
-                y=y_train,
-                estimator_architecture=self.quantile_estimator_architecture,
-                n_searches=tuning_iterations,
-                quantiles=quantiles,
-                random_state=random_state,
-            )
-        else:
-            # Use an empty dict to get the default estimator as-is
-            initialization_params = {}
-
-        # Initialize the quantile estimator without passing quantiles
-        self.quantile_estimator = initialize_estimator(
-            estimator_architecture=self.quantile_estimator_architecture,
-            initialization_params=initialization_params,
-            random_state=random_state,
-        )
-
-        # Fit the model and calculate nonconformity scores if enough data
-        if len(X_train) + len(X_val) > self.n_pre_conformal_trials:
-            # Pass quantiles directly to fit
-            self.quantile_estimator.fit(X_train, y_train, quantiles=quantiles)
-
-            # Calculate nonconformity scores on validation data
-            val_prediction = self.quantile_estimator.predict(X_val)
-            lower_conformal_deviations = val_prediction[:, 0] - y_val
-            upper_conformal_deviations = y_val - val_prediction[:, 1]
-            self.nonconformity_scores = np.maximum(
-                lower_conformal_deviations, upper_conformal_deviations
-            )
-            self.conformalize_predictions = True
-        else:
-            # Pass quantiles directly to fit
-            self.quantile_estimator.fit(
-                np.vstack((X_train, X_val)),
-                np.concatenate((y_train, y_val)),
-                quantiles=quantiles,
-            )
-            self.conformalize_predictions = False
-
-        # Calculate performance metrics
-        predictions = self.quantile_estimator.predict(X_val)
-        lo_y_pred = predictions[:, 0]
-        hi_y_pred = predictions[:, 1]
-        lo_score = mean_pinball_loss(
-            y_val, lo_y_pred, alpha=self.interval.lower_quantile
-        )
-        hi_score = mean_pinball_loss(
-            y_val, hi_y_pred, alpha=self.interval.upper_quantile
-        )
-        self.primary_estimator_error = (lo_score + hi_score) / 2
-
-    def predict_interval(self, X: np.array):
-        """
-        Predict conformal intervals.
-        """
-        if self.quantile_estimator is None:
-            raise ValueError("Estimator must be fitted before prediction")
-
-        prediction = self.quantile_estimator.predict(X)
-
-        if self.conformalize_predictions:
-            # Calculate conformity adjustment based on validation scores
-            score = np.quantile(
-                self.nonconformity_scores,
-                self.interval.upper_quantile - self.interval.lower_quantile,
-            )
-            lower_interval = np.array(prediction[:, 0]) - score
-            upper_interval = np.array(prediction[:, 1]) + score
-        else:
-            lower_interval = np.array(prediction[:, 0])
-            upper_interval = np.array(prediction[:, 1])
-
-        return lower_interval, upper_interval
+    #     # Store deviations for this interval
+    #     self.nonconformity_scores[i] = np.maximum(
+    #         lower_conformal_deviations, upper_conformal_deviations
+    #     )

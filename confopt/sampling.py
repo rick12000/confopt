@@ -1,6 +1,6 @@
-from typing import Optional, List, Literal, Union
+from typing import Optional, List, Literal
 import numpy as np
-from confopt.adaptation import ACI, DtACI
+from confopt.adaptation import DtACI
 from confopt.data_classes import QuantileInterval
 
 
@@ -8,35 +8,23 @@ class PessimisticLowerBoundSampler:
     def __init__(
         self,
         interval_width: float = 0.8,
-        adapter_framework: Optional[Literal["ACI", "DtACI"]] = None,
+        adapter: Optional[DtACI] = None,
     ):
         self.interval_width = interval_width
 
         self.alpha = 1 - interval_width
-        self.adapter = self._initialize_adapter(adapter_framework)
+        self.adapter = self._initialize_adapter(adapter)
         self.quantiles = self._calculate_quantiles()
 
-    def _initialize_adapter(
-        self, framework: Optional[Literal["ACI", "DtACI"]] = None
-    ) -> Optional[Union[ACI, DtACI]]:
-        if framework == "ACI":
-            adapter = ACI(alpha=self.alpha)
-        elif framework == "DtACI":
-            adapter = DtACI(alpha=self.alpha)
-            self.expert_alphas = adapter.alpha_t_values
-        elif framework is None:
-            adapter = None
+    def _initialize_adapter(self, adapter: Optional[DtACI] = None) -> DtACI:
+        if adapter is None:
+            adapter = DtACI(alpha=self.alpha, gamma_values=[0.05, 0.01, 0.1])
         else:
-            raise ValueError(f"Unknown adapter framework: {framework}")
+            adapter = adapter
         return adapter
 
     def fetch_alpha(self) -> float:
         return self.alpha
-
-    def fetch_expert_alphas(self) -> List[float]:
-        if hasattr(self, "expert_alphas"):
-            return self.expert_alphas
-        return [self.alpha]
 
     def _calculate_quantiles(self) -> QuantileInterval:
         return QuantileInterval(
@@ -46,13 +34,8 @@ class PessimisticLowerBoundSampler:
     def fetch_quantile_interval(self) -> QuantileInterval:
         return self.quantiles
 
-    def update_interval_width(self, breaches: list[int]) -> None:
-        if isinstance(self.adapter, ACI):
-            if len(breaches) != 1:
-                raise ValueError("ACI adapter requires a single breach indicator.")
-            self.alpha = self.adapter.update(breach_indicator=breaches[0])
-        elif isinstance(self.adapter, DtACI):
-            self.alpha = self.adapter.update(breach_indicators=breaches)
+    def update_interval_width(self, beta: float) -> None:
+        self.alpha = self.adapter.update(beta=beta)
         self.quantiles = self._calculate_quantiles()
 
 
@@ -64,7 +47,7 @@ class LowerBoundSampler(PessimisticLowerBoundSampler):
         ] = "logarithmic_decay",
         c: float = 1,
         interval_width: float = 0.8,
-        adapter_framework: Optional[Literal["ACI", "DtACI"]] = None,
+        adapter: Optional[DtACI] = None,
         upper_quantile_cap: Optional[float] = None,
     ):
         self.beta_decay = beta_decay
@@ -75,7 +58,7 @@ class LowerBoundSampler(PessimisticLowerBoundSampler):
 
         # Call at this position, there are initialization methods
         # in the base class:
-        super().__init__(interval_width, adapter_framework)
+        super().__init__(interval_width, adapter)
 
     def _calculate_quantiles(self) -> QuantileInterval:
         if self.upper_quantile_cap:
@@ -100,7 +83,7 @@ class ThompsonSampler:
     def __init__(
         self,
         n_quantiles: int = 4,
-        adapter_framework: Optional[Literal["ACI"]] = None,
+        adapter: Optional[DtACI] = None,
         enable_optimistic_sampling: bool = False,
     ):
         if n_quantiles % 2 != 0:
@@ -110,7 +93,7 @@ class ThompsonSampler:
         self.enable_optimistic_sampling = enable_optimistic_sampling
 
         self.quantiles, self.alphas = self._initialize_quantiles_and_alphas()
-        self.adapters = self._initialize_adapters(adapter_framework)
+        self.adapters = self._initialize_adapters(adapter)
 
     def _initialize_quantiles_and_alphas(
         self,
@@ -131,15 +114,15 @@ class ThompsonSampler:
         return quantiles, alphas
 
     def _initialize_adapters(
-        self, framework: Optional[Literal["ACI"]] = None
-    ) -> Optional[List[Union[ACI]]]:
-        if framework == "ACI":
-            adapter_class = ACI
-            adapters = [adapter_class(alpha=alpha) for alpha in self.alphas]
-        elif framework is None:
-            adapters = None
+        self, adapter: Optional[DtACI] = None
+    ) -> Optional[List[DtACI]]:
+        if adapter is not None:
+            adapters = [
+                DtACI(alpha=alpha, gamma_values=[0.05, 0.01, 0.1])
+                for alpha in self.alphas
+            ]
         else:
-            raise ValueError(f"Unknown adapter framework: {framework}")
+            adapters = None
 
         return adapters
 
@@ -149,10 +132,12 @@ class ThompsonSampler:
     def fetch_intervals(self) -> List[QuantileInterval]:
         return self.quantiles
 
-    def update_interval_width(self, breaches: List[int]):
-        for i, (adapter, breach) in enumerate(zip(self.adapters, breaches)):
-            updated_alpha = adapter.update(breach_indicator=breach)
-            self.alphas[i] = updated_alpha
-            self.quantiles[i] = QuantileInterval(
-                lower_quantile=updated_alpha / 2, upper_quantile=1 - (updated_alpha / 2)
-            )
+    def update_interval_width(self, betas: List[float]):
+        if self.adapters:
+            for i, (adapter, beta) in enumerate(zip(self.adapters, betas)):
+                updated_alpha = adapter.update(beta=beta)
+                self.alphas[i] = updated_alpha
+                self.quantiles[i] = QuantileInterval(
+                    lower_quantile=updated_alpha / 2,
+                    upper_quantile=1 - (updated_alpha / 2),
+                )
