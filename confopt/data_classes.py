@@ -1,5 +1,6 @@
 from typing import List, TypeVar, Union, Generic
 from pydantic import BaseModel, validator
+import numpy as np
 
 T = TypeVar("T")
 
@@ -49,3 +50,11 @@ ParameterRange = Union[IntRange, FloatRange, CategoricalRange]
 class QuantileInterval(BaseModel):
     lower_quantile: float
     upper_quantile: float
+
+
+class ConformalBounds(BaseModel):
+    lower_bounds: np.ndarray
+    upper_bounds: np.ndarray
+
+    class Config:
+        arbitrary_types_allowed = True

@@ -1,11 +1,12 @@
 import logging
-from typing import Optional, Union
+from typing import Optional, Union, List
 import numpy as np
 from confopt.adaptation import DtACI
 from confopt.conformalization import (
     LocallyWeightedConformalEstimator,
     QuantileConformalEstimator,
 )
+from confopt.data_classes import ConformalBounds
 from confopt.sampling import (
     LowerBoundSampler,
     ThompsonSampler,
@@ -16,7 +17,67 @@ from confopt.estimation import initialize_estimator
 logger = logging.getLogger(__name__)
 
 
-class LocallyWeightedConformalSearcher:
+class BaseConformalSearcher:
+    """Base class for conformal searchers with common functionality"""
+
+    def __init__(
+        self,
+        sampler: Union[
+            LowerBoundSampler, ThompsonSampler, PessimisticLowerBoundSampler
+        ],
+    ):
+        self.sampler = sampler
+        self.predictions_per_interval = None
+        self.primary_estimator_error = None
+
+    def predict(self, X: np.array):
+        """Generic prediction method that delegates to sampler-specific methods"""
+        if isinstance(self.sampler, LowerBoundSampler):
+            return self._predict_with_ucb(X)
+        elif isinstance(self.sampler, ThompsonSampler):
+            return self._predict_with_thompson(X)
+        elif isinstance(self.sampler, PessimisticLowerBoundSampler):
+            return self._predict_with_pessimistic_lower_bound(X)
+        else:
+            raise ValueError(f"Unsupported sampler type: {type(self.sampler)}")
+
+    def _predict_with_ucb(self, X: np.array):
+        """Predict using UCB strategy, to be implemented by subclasses"""
+        raise NotImplementedError("Subclasses must implement this method")
+
+    def _predict_with_thompson(self, X: np.array):
+        """Predict using Thompson sampling, to be implemented by subclasses"""
+        raise NotImplementedError("Subclasses must implement this method")
+
+    def _predict_with_pessimistic_lower_bound(self, X: np.array):
+        """Predict using pessimistic lower bound, to be implemented by subclasses"""
+        raise NotImplementedError("Subclasses must implement this method")
+
+    def _get_interval_predictions(self, X: np.array) -> List[ConformalBounds]:
+        """Helper method to get predictions for all alphas"""
+        raise NotImplementedError("Subclasses must implement this method")
+
+    def update_interval_width(self, sampled_idx: int, sampled_performance: float):
+        """Update interval width based on performance feedback"""
+        breaches = []
+        for interval in self.predictions_per_interval:
+            sampled_lower_bound = interval.lower_bounds[sampled_idx]
+            sampled_upper_bound = interval.upper_bounds[sampled_idx]
+
+            # Use the contains method from ConformalInterval
+            breach = (
+                0
+                if (sampled_lower_bound <= sampled_performance)
+                & (sampled_performance <= sampled_upper_bound)
+                else 1
+            )
+            breaches.append(breach)
+
+        # Update the sampler with the breach information
+        self.sampler.update_interval_width(beta=breaches)
+
+
+class LocallyWeightedConformalSearcher(BaseConformalSearcher):
     def __init__(
         self,
         point_estimator_architecture: str,
@@ -25,12 +86,12 @@ class LocallyWeightedConformalSearcher:
             LowerBoundSampler, ThompsonSampler, PessimisticLowerBoundSampler
         ],
     ):
+        super().__init__(sampler)
         self.conformal_estimator = LocallyWeightedConformalEstimator(
             point_estimator_architecture=point_estimator_architecture,
             variance_estimator_architecture=variance_estimator_architecture,
+            alphas=self.sampler.fetch_alphas(),
         )
-        self.sampler = sampler
-        self.predictions_per_interval = None
 
     def fit(
         self,
@@ -51,77 +112,35 @@ class LocallyWeightedConformalSearcher:
         )
         self.primary_estimator_error = self.conformal_estimator.primary_estimator_error
 
-    def predict(self, X: np.array):
-        if isinstance(self.sampler, LowerBoundSampler):
-            return self._predict_with_ucb(X)
-        elif isinstance(self.sampler, ThompsonSampler):
-            return self._predict_with_thompson(X)
-        elif isinstance(self.sampler, PessimisticLowerBoundSampler):
-            return self._predict_with_pessimistic_lower_bound(X)
+    def _get_interval_predictions(self, X: np.array) -> List[ConformalBounds]:
+        """Helper method to get predictions for all alphas"""
+        self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
+        return self.predictions_per_interval
 
     def _predict_with_ucb(self, X: np.array):
+        interval_predictions = self._get_interval_predictions(X)
+
+        # Get point estimates for beta scaling
         point_estimate = np.array(
             self.conformal_estimator.pe_estimator.predict(X)
         ).reshape(-1, 1)
-        if isinstance(self.sampler.adapter, DtACI):
-            self.predictions_per_interval = []
-            for alpha in self.sampler.fetch_expert_alphas():
-                (
-                    lower_quantile_value,
-                    upper_quantile_value,
-                ) = self.conformal_estimator.predict_interval(X=X, alpha=alpha)
-                # Apply beta scaling for exploration to the lower bound
-                lower_bound = (
-                    point_estimate
-                    + self.sampler.beta
-                    * (upper_quantile_value - lower_quantile_value)
-                    / 2
-                )
 
-                self.predictions_per_interval.append(
-                    np.hstack([lower_quantile_value, upper_quantile_value])
-                )
-                # Use the current best alpha as the bound
-                if self.sampler.fetch_alpha() == alpha:
-                    tracked_lower_bound = lower_quantile_value
-
-        else:
-            alpha = self.sampler.fetch_alpha()
-            (
-                lower_quantile_value,
-                upper_quantile_value,
-            ) = self.conformal_estimator.predict_interval(X=X, alpha=alpha)
-            # Apply beta scaling for exploration to the lower bound
-            lower_bound = (
-                point_estimate
-                + self.sampler.beta * (lower_quantile_value - upper_quantile_value) / 2
-            )
-
-            self.predictions_per_interval = [
-                np.hstack([lower_quantile_value, upper_quantile_value])
-            ]
-            tracked_lower_bound = lower_bound
+        # For standard UCB, just use the first interval
+        interval_width = (
+            interval_predictions[0].upper_bounds - interval_predictions[0].lower_bounds
+        )
+        # Apply beta scaling
+        tracked_lower_bound = point_estimate - self.sampler.beta * interval_width / 2
 
         self.sampler.update_exploration_step()
         return tracked_lower_bound
 
     def _predict_with_thompson(self, X: np.array):
-        self.predictions_per_interval = []
-
-        # Get all intervals from the Thompson sampler
-        intervals = self.sampler.fetch_intervals()
-
-        # Get predictions for all intervals
-        for interval in intervals:
-            alpha = 1 - (interval.upper_quantile - interval.lower_quantile)
-            lower_bound, upper_bound = self.conformal_estimator.predict_interval(
-                X=X, alpha=alpha
-            )
-            self.predictions_per_interval.append(np.hstack([lower_bound, upper_bound]))
+        self._get_interval_predictions(X)
 
         # Vectorized approach for sampling
         n_samples = X.shape[0]
-        n_intervals = len(intervals)
+        n_intervals = len(self.predictions_per_interval)
 
         # Generate random indices for all samples at once
         interval_indices = np.random.choice(n_intervals, size=n_samples)
@@ -129,7 +148,7 @@ class LocallyWeightedConformalSearcher:
         # Extract the lower bounds using vectorized operations
         lower_bounds = np.array(
             [
-                self.predictions_per_interval[idx][i, 0]
+                self.predictions_per_interval[idx].lower_bounds[i]
                 for i, idx in enumerate(interval_indices)
             ]
         )
@@ -137,48 +156,25 @@ class LocallyWeightedConformalSearcher:
         return lower_bounds
 
     def _predict_with_pessimistic_lower_bound(self, X: np.array):
-        """
-        Predict using Pessimistic Lower Bound sampling strategy.
-        """
+        interval_predictions = self._get_interval_predictions(X)
+
         if isinstance(self.sampler.adapter, DtACI):
-            self.predictions_per_interval = []
-            for alpha in self.sampler.fetch_expert_alphas():
-                lower_bound, upper_bound = self.conformal_estimator.predict_interval(
-                    X=X, alpha=alpha
-                )
-                self.predictions_per_interval.append(
-                    np.hstack([lower_bound, upper_bound])
-                )
-                # Use the current best alpha as the bound
-                if self.sampler.fetch_alpha() == alpha:
-                    result_lower_bound = lower_bound
+            best_alpha = self.sampler.fetch_alphas()[
+                0
+            ]  # Get first element for PessimisticLowerBoundSampler
+            for i, alpha in enumerate(self.sampler.fetch_alphas()):
+                # When we find the current best alpha, use its lower bound
+                if best_alpha == alpha:
+                    result_lower_bound = interval_predictions[i].lower_bounds
+                    break
         else:
-            alpha = self.sampler.fetch_alpha()
-            lower_bound, upper_bound = self.conformal_estimator.predict_interval(
-                X=X, alpha=alpha
-            )
-            self.predictions_per_interval = [np.hstack([lower_bound, upper_bound])]
-            result_lower_bound = lower_bound
+            # For standard pessimistic approach, use the first interval
+            result_lower_bound = interval_predictions[0].lower_bounds
 
         return result_lower_bound
 
-    def update_interval_width(self, sampled_idx: int, sampled_performance: float):
-        breaches = []
-        for predictions in self.predictions_per_interval:
-            sampled_predictions = predictions[sampled_idx, :]
-            lower_quantile, upper_quantile = (
-                sampled_predictions[0],
-                sampled_predictions[1],
-            )
-            if lower_quantile <= sampled_performance <= upper_quantile:
-                breach = 0
-            else:
-                breach = 1
-            breaches.append(breach)
-        self.sampler.update_interval_width(breaches=breaches)
 
-
-class QuantileConformalSearcher:
+class QuantileConformalSearcher(BaseConformalSearcher):
     def __init__(
         self,
         quantile_estimator_architecture: str,
@@ -188,36 +184,22 @@ class QuantileConformalSearcher:
         n_pre_conformal_trials: int = 20,
         single_fit: bool = False,
     ):
+        super().__init__(sampler)
         self.quantile_estimator_architecture = quantile_estimator_architecture
-        self.sampler = sampler
         self.n_pre_conformal_trials = n_pre_conformal_trials
         self.single_fit = single_fit
+        self.point_estimator = None
 
         if isinstance(self.sampler, LowerBoundSampler):
             self.sampler.upper_quantile_cap = 0.5
             self.sampler.quantiles = self.sampler._calculate_quantiles()
 
-        # Determine intervals to use based on the sampler type
-        if isinstance(self.sampler, LowerBoundSampler) or isinstance(
-            self.sampler, PessimisticLowerBoundSampler
-        ):
-            intervals = [self.sampler.fetch_quantile_interval()]
-        elif isinstance(self.sampler, ThompsonSampler):
-            intervals = self.sampler.fetch_intervals()
-        else:
-            raise ValueError("Unknown sampler type.")
-
-        # Create the conformal estimator with the proper settings
+        # Create the conformal estimator with alphas from the sampler
         self.conformal_estimator = QuantileConformalEstimator(
             quantile_estimator_architecture=quantile_estimator_architecture,
-            intervals=intervals,
+            alphas=self.sampler.fetch_alphas(),
             n_pre_conformal_trials=n_pre_conformal_trials,
-            single_fit=single_fit,
         )
-
-        self.point_estimator = None
-        self.primary_estimator_error = None
-        self.predictions_per_interval = None
 
     def fit(
         self,
@@ -228,9 +210,7 @@ class QuantileConformalSearcher:
         tuning_iterations: Optional[int] = 0,
         random_state: Optional[int] = None,
     ):
-        """
-        Fit the conformal estimator.
-        """
+        """Fit the conformal estimator."""
         # Initialize and fit optimistic estimator if needed for Thompson sampling
         if (
             isinstance(self.sampler, ThompsonSampler)
@@ -256,54 +236,30 @@ class QuantileConformalSearcher:
 
         self.primary_estimator_error = self.conformal_estimator.primary_estimator_error
 
-    def predict(self, X: np.array):
-        if isinstance(self.sampler, LowerBoundSampler):
-            return self._predict_with_ucb(X)
-        elif isinstance(self.sampler, ThompsonSampler):
-            return self._predict_with_thompson(X)
-        elif isinstance(self.sampler, PessimisticLowerBoundSampler):
-            return self._predict_with_pessimistic_lower_bound(X)
+    def _get_interval_predictions(self, X: np.array) -> List[ConformalBounds]:
+        """Helper method to get predictions for all alphas"""
+        self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
+        return self.predictions_per_interval
 
     def _predict_with_ucb(self, X: np.array):
-        # Get the interval from the UCB sampler
-        interval = self.sampler.fetch_quantile_interval()
+        interval_predictions = self._get_interval_predictions(X)
 
-        # Predict interval using the conformal estimator
-        lower_interval, upper_interval = self.conformal_estimator.predict_interval(
-            X=X, interval=interval
-        )
+        # For UCB, use the first interval
+        interval = interval_predictions[0]
+        interval_width = interval.upper_bounds - interval.lower_bounds
 
         # Apply beta scaling for exploration
-        lower_bound = upper_interval - self.sampler.beta * (
-            upper_interval - lower_interval
-        )
-
-        # Store predictions for later breach checking
-        self.predictions_per_interval = [
-            np.column_stack((lower_interval, upper_interval))
-        ]
+        result_lower_bound = interval.upper_bounds - self.sampler.beta * interval_width
 
         self.sampler.update_exploration_step()
-        return lower_bound
+        return result_lower_bound
 
     def _predict_with_thompson(self, X: np.array):
-        # Get all intervals from the Thompson sampler
-        intervals = self.sampler.fetch_intervals()
-
-        # Get predictions for all intervals
-        self.predictions_per_interval = []
-
-        for interval in intervals:
-            lower_bound, upper_bound = self.conformal_estimator.predict_interval(
-                X=X, interval=interval
-            )
-            self.predictions_per_interval.append(
-                np.column_stack((lower_bound, upper_bound))
-            )
+        self._get_interval_predictions(X)
 
         # Vectorized approach for sampling
         n_samples = X.shape[0]
-        n_intervals = len(intervals)
+        n_intervals = len(self.predictions_per_interval)
 
         # Generate random indices for all samples at once
         interval_indices = np.random.choice(n_intervals, size=n_samples)
@@ -311,7 +267,7 @@ class QuantileConformalSearcher:
         # Extract the lower bounds using vectorized operations
         lower_bounds = np.array(
             [
-                self.predictions_per_interval[idx][i, 0]
+                self.predictions_per_interval[idx].lower_bounds[i]
                 for i, idx in enumerate(interval_indices)
             ]
         )
@@ -324,35 +280,7 @@ class QuantileConformalSearcher:
         return lower_bounds
 
     def _predict_with_pessimistic_lower_bound(self, X: np.array):
-        # Get the interval from the pessimistic sampler
-        interval = self.sampler.fetch_quantile_interval()
+        interval_predictions = self._get_interval_predictions(X)
 
-        # Predict interval using the conformal estimator
-        (
-            lower_interval_bound,
-            upper_interval_bound,
-        ) = self.conformal_estimator.predict_interval(X=X, interval=interval)
-
-        # Store predictions for later breach checking
-        self.predictions_per_interval = [
-            np.column_stack((lower_interval_bound, upper_interval_bound))
-        ]
-
-        return lower_interval_bound
-
-    def update_interval_width(self, sampled_idx: int, sampled_performance: float):
-        breaches = []
-        for predictions in self.predictions_per_interval:
-            sampled_predictions = predictions[sampled_idx, :]
-            lower_bound, upper_bound = sampled_predictions[0], sampled_predictions[1]
-
-            # Check if the actual performance is within the predicted interval
-            breach = 0 if lower_bound <= sampled_performance <= upper_bound else 1
-            breaches.append(breach)
-
-        # Update the sampler with the breach information
-        self.sampler.update_interval_width(breaches=breaches)
-
-
-# TODO: The old SingleFitQuantileConformalSearcher and MultiFitQuantileConformalSearcher
-# classes can be removed once the new implementation is verified.
+        # For pessimistic approach, use the first interval's lower bound
+        return interval_predictions[0].lower_bounds

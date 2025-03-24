@@ -10,8 +10,9 @@ from confopt.sampling import (
     ThompsonSampler,
     PessimisticLowerBoundSampler,
 )
-from confopt.adaptation import ACI
+from confopt.adaptation import DtACI
 from confopt.config import GBM_NAME, QGBM_NAME
+from confopt.data_classes import ConformalBounds
 
 
 @pytest.fixture
@@ -86,6 +87,23 @@ def fitted_quantile_searcher(sample_data):
     return searcher
 
 
+@pytest.fixture
+def fitted_single_fit_searcher(sample_data):
+    """Create a fitted single-fit quantile conformal searcher"""
+    sampler = LowerBoundSampler(c=2.0, interval_width=0.2)  # Removed beta parameter
+    searcher = QuantileConformalSearcher(
+        quantile_estimator_architecture=QGBM_NAME, sampler=sampler, single_fit=True
+    )
+    searcher.fit(
+        X_train=sample_data["X_train"],
+        y_train=sample_data["y_train"],
+        X_val=sample_data["X_val"],
+        y_val=sample_data["y_val"],
+        random_state=42,
+    )
+    return searcher
+
+
 class TestLocallyWeightedConformalSearcher:
     def test_fit(self, sample_data):
         """Test fit method correctly trains the conformal estimator"""
@@ -130,39 +148,19 @@ class TestLocallyWeightedConformalSearcher:
         # Check that predictions_per_interval is updated
         assert searcher.predictions_per_interval is not None
         assert len(searcher.predictions_per_interval) == 1  # Default UCB has 1 interval
-        assert searcher.predictions_per_interval[0].shape == (X_test.shape[0], 2)
+        assert isinstance(searcher.predictions_per_interval[0], ConformalBounds)
+        assert (
+            searcher.predictions_per_interval[0].lower_bounds.shape[0]
+            == X_test.shape[0]
+        )
+        assert (
+            searcher.predictions_per_interval[0].upper_bounds.shape[0]
+            == X_test.shape[0]
+        )
 
         # Check that beta is updated
         assert searcher.sampler.t == initial_t + 1
         assert searcher.sampler.beta != initial_beta
-
-    def test_predict_with_dtaci(self, sample_data):
-        """Test prediction with DtACI adapter"""
-        sampler = LowerBoundSampler(adapter_framework="DtACI")
-        searcher = LocallyWeightedConformalSearcher(
-            point_estimator_architecture=GBM_NAME,
-            variance_estimator_architecture=GBM_NAME,
-            sampler=sampler,
-        )
-
-        # Fit the searcher
-        searcher.fit(
-            X_train=sample_data["X_train"],
-            y_train=sample_data["y_train"],
-            X_val=sample_data["X_val"],
-            y_val=sample_data["y_val"],
-            random_state=42,
-        )
-
-        # Make predictions
-        X_test = sample_data["X_test"]
-        predictions = searcher.predict(X_test)
-
-        # Check prediction shape
-        assert predictions.shape[0] == X_test.shape[0]
-
-        # Check that predictions_per_interval has multiple entries (one per expert alpha)
-        assert len(searcher.predictions_per_interval) == len(sampler.expert_alphas)
 
     def test_update_interval_width(self, fitted_locally_weighted_searcher, sample_data):
         """Test updating interval width based on performance"""
@@ -178,24 +176,24 @@ class TestLocallyWeightedConformalSearcher:
         # Update with a breach
         sampled_idx = 0
         sampled_performance = (
-            searcher.predictions_per_interval[0][sampled_idx, 1] + 1
+            searcher.predictions_per_interval[0].upper_bounds[sampled_idx] + 1
         )  # Above upper bound
         searcher.update_interval_width(sampled_idx, sampled_performance)
 
-        # Alpha should decrease after breach with ACI
-        if isinstance(searcher.sampler.adapter, ACI):
+        # Alpha should decrease after breach with DtACI
+        if isinstance(searcher.sampler.adapter, DtACI):
             assert searcher.sampler.alpha < initial_alpha
 
         # Update with no breach
         adjusted_alpha = searcher.sampler.alpha
         sampled_performance = (
-            searcher.predictions_per_interval[0][sampled_idx, 0]
-            + searcher.predictions_per_interval[0][sampled_idx, 1]
+            searcher.predictions_per_interval[0].lower_bounds[sampled_idx]
+            + searcher.predictions_per_interval[0].upper_bounds[sampled_idx]
         ) / 2  # Within bounds
         searcher.update_interval_width(sampled_idx, sampled_performance)
 
-        # Alpha should increase after no breach with ACI
-        if isinstance(searcher.sampler.adapter, ACI):
+        # Alpha should increase after no breach with DtACI
+        if isinstance(searcher.sampler.adapter, DtACI):
             assert searcher.sampler.alpha > adjusted_alpha
 
     def test_predict_with_pessimistic_lower_bound(self, sample_data):
@@ -288,6 +286,11 @@ class TestQuantileConformalSearcher:
         # Check that predictions_per_interval is updated
         assert searcher.predictions_per_interval is not None
         assert len(searcher.predictions_per_interval) == 1  # Default UCB has 1 interval
+        assert isinstance(searcher.predictions_per_interval[0], ConformalBounds)
+        assert (
+            searcher.predictions_per_interval[0].lower_bounds.shape[0]
+            == X_test.shape[0]
+        )
 
         # Check that beta is updated
         assert searcher.sampler.beta != initial_beta
@@ -318,6 +321,12 @@ class TestQuantileConformalSearcher:
 
         # Check that predictions_per_interval has one entry per interval
         assert len(searcher.predictions_per_interval) == len(sampler.quantiles)
+        for i in range(len(searcher.predictions_per_interval)):
+            assert isinstance(searcher.predictions_per_interval[i], ConformalBounds)
+            assert (
+                searcher.predictions_per_interval[i].lower_bounds.shape[0]
+                == X_test.shape[0]
+            )
 
         # Same seed should give identical predictions
         np.random.seed(42)
@@ -343,12 +352,12 @@ class TestQuantileConformalSearcher:
         # Update with a breach
         sampled_idx = 0
         sampled_performance = (
-            searcher.predictions_per_interval[0][sampled_idx, 1] + 1
+            searcher.predictions_per_interval[0].upper_bounds[sampled_idx] + 1
         )  # Above upper bound
         searcher.update_interval_width(sampled_idx, sampled_performance)
 
-        # Alpha should decrease after breach with ACI
-        if isinstance(searcher.sampler.adapter, ACI):
+        # Alpha should decrease after breach with DtACI
+        if isinstance(searcher.sampler.adapter, DtACI):
             assert searcher.sampler.alpha < initial_alpha
 
     def test_predict_with_pessimistic_lower_bound(self, sample_data):

@@ -618,9 +618,13 @@ class ObjectiveConformalSearcher:
             # Handle UCBSampler breach calculation
             if isinstance(searcher.sampler, LowerBoundSampler):
                 if (
-                    searcher.predictions_per_interval[0][minimal_searchable_idx][0]
+                    searcher.predictions_per_interval[0].lower_bounds[
+                        minimal_searchable_idx
+                    ]
                     <= validation_performance
-                    <= searcher.predictions_per_interval[0][minimal_searchable_idx][1]
+                    <= searcher.predictions_per_interval[0].upper_bounds[
+                        minimal_searchable_idx
+                    ]
                 ):
                     breach = 0
                 else:

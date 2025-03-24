@@ -23,16 +23,13 @@ class PessimisticLowerBoundSampler:
             adapter = adapter
         return adapter
 
-    def fetch_alpha(self) -> float:
-        return self.alpha
+    def fetch_alphas(self) -> List[float]:
+        return [self.alpha]
 
     def _calculate_quantiles(self) -> QuantileInterval:
         return QuantileInterval(
             lower_quantile=self.alpha / 2, upper_quantile=1 - (self.alpha / 2)
         )
-
-    def fetch_quantile_interval(self) -> QuantileInterval:
-        return self.quantiles
 
     def update_interval_width(self, beta: float) -> None:
         self.alpha = self.adapter.update(beta=beta)
@@ -128,9 +125,6 @@ class ThompsonSampler:
 
     def fetch_alphas(self) -> List[float]:
         return self.alphas
-
-    def fetch_intervals(self) -> List[QuantileInterval]:
-        return self.quantiles
 
     def update_interval_width(self, betas: List[float]):
         if self.adapters:

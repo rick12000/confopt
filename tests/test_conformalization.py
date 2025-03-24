@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 from confopt.conformalization import (
     LocallyWeightedConformalEstimator,
-    QuantileInterval,
     QuantileConformalEstimator,
 )
 
@@ -68,9 +67,13 @@ class TestLocallyWeightedConformalEstimator:
         dummy_expanding_quantile_gaussian_dataset,
     ):
         """Test complete fit and predict_interval workflow with variable tuning iterations"""
+        # Set the alpha values
+        alphas = [0.2]  # 80% coverage
+
         estimator = LocallyWeightedConformalEstimator(
             point_estimator_architecture=point_arch,
             variance_estimator_architecture=variance_arch,
+            alphas=alphas,
         )
 
         # Prepare data - use smaller subset for testing
@@ -96,17 +99,22 @@ class TestLocallyWeightedConformalEstimator:
             random_state=42,
         )
 
-        # Test predict_interval with just one confidence level
-        alphas = [0.8]  # Reduced from three levels to just one
-        for alpha in alphas:
-            lower_bound, upper_bound = estimator.predict_interval(X=X_val, alpha=alpha)
+        # Test predict_intervals
+        intervals = estimator.predict_intervals(X=X_val)
+
+        # Ensure we got one interval per alpha
+        assert len(intervals) == len(alphas)
+
+        for i, alpha in enumerate(alphas):
+            lower_bound = intervals[i].lower_bounds
+            upper_bound = intervals[i].upper_bounds
 
             assert np.all(lower_bound <= upper_bound)
 
             coverage = np.mean(
                 (y_val >= lower_bound.flatten()) & (y_val <= upper_bound.flatten())
             )
-            assert abs((1 - coverage) - alpha) < COVERAGE_TOLERANCE
+            assert abs(coverage - (1 - alpha)) < COVERAGE_TOLERANCE
 
 
 class TestSingleFitQuantileConformalEstimator:
@@ -123,14 +131,12 @@ class TestSingleFitQuantileConformalEstimator:
         dummy_expanding_quantile_gaussian_dataset,
     ):
         """Test complete fit and predict_interval workflow with variable tuning iterations"""
-        # Create intervals for testing
-        intervals = [
-            QuantileInterval(lower_quantile=0.1, upper_quantile=0.9),
-        ]
+        # Use alphas directly instead of intervals
+        alphas = [0.2]  # 80% coverage
 
         estimator = QuantileConformalEstimator(
             quantile_estimator_architecture=estimator_architecture,
-            intervals=intervals,
+            alphas=alphas,
             n_pre_conformal_trials=5,  # Reduced from 20 to 5
         )
 
@@ -157,18 +163,21 @@ class TestSingleFitQuantileConformalEstimator:
             random_state=42,
         )
 
-        assert len(estimator.nonconformity_scores) == len(intervals)
+        assert len(estimator.nonconformity_scores) == len(alphas)
 
-        # Test predict_interval for the interval
-        for interval in intervals:
-            lower_bound, upper_bound = estimator.predict_interval(
-                X=X_val, interval=interval
-            )
+        # Test predict_intervals for all alphas
+        intervals = estimator.predict_intervals(X=X_val)
+
+        # Ensure we got one interval per alpha
+        assert len(intervals) == len(alphas)
+
+        for i, alpha in enumerate(alphas):
+            lower_bound = intervals[i].lower_bounds
+            upper_bound = intervals[i].upper_bounds
 
             # Check that lower bounds are <= upper bounds
             assert np.all(lower_bound <= upper_bound)
 
-            # Check interval coverage (approximate)
-            target_coverage = interval.upper_quantile - interval.lower_quantile
+            # Check interval coverage (should be 1-alpha)
             actual_coverage = np.mean((y_val >= lower_bound) & (y_val <= upper_bound))
-            assert abs(actual_coverage - target_coverage) < COVERAGE_TOLERANCE
+            assert abs(actual_coverage - (1 - alpha)) < COVERAGE_TOLERANCE
