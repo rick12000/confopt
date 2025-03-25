@@ -1,18 +1,18 @@
 import logging
 from typing import Optional, Union, List
 import numpy as np
-from confopt.adaptation import DtACI
-from confopt.conformalization import (
+from confopt.selection.adaptation import DtACI
+from confopt.selection.conformalization import (
     LocallyWeightedConformalEstimator,
     QuantileConformalEstimator,
 )
 from confopt.data_classes import ConformalBounds
-from confopt.sampling import (
+from confopt.selection.sampling import (
     LowerBoundSampler,
     ThompsonSampler,
     PessimisticLowerBoundSampler,
 )
-from confopt.estimation import initialize_estimator
+from confopt.selection.estimation import initialize_estimator
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,12 @@ class BaseConformalSearcher:
     def _get_interval_predictions(self, X: np.array) -> List[ConformalBounds]:
         raise NotImplementedError()
 
-    def update_interval_width(self, sampled_idx: int, sampled_performance: float):
+    def update_interval_width(
+        self,
+        sampled_idx: int,
+        sampled_performance: float,
+        sampled_X: Optional[np.array] = None,
+    ):
         """Update interval width based on performance feedback"""
         breaches = []
         for interval in self.predictions_per_interval:
@@ -71,6 +76,19 @@ class BaseConformalSearcher:
 
         # Update the sampler with the breach information
         self.sampler.update_interval_width(beta=breaches)
+
+        # If we have an instance of DtACI and the sampled_X is provided, calculate and update beta
+        if isinstance(self.sampler.adapter, DtACI) and sampled_X is not None:
+            # Calculate beta using the conformal estimator's method
+            beta = self._calculate_conformal_beta(sampled_X, sampled_performance)
+
+            # Update the DtACI adapter with this beta
+            self.sampler.adapter.update(beta=beta)
+
+    def _calculate_conformal_beta(self, X: np.array, y_true: float) -> float:
+        """Calculate beta using the conformal estimator's calculate_beta method"""
+        # Default implementation (to be overridden by subclasses)
+        return 0.5
 
 
 class LocallyWeightedConformalSearcher(BaseConformalSearcher):
@@ -169,6 +187,10 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
 
         return result_lower_bound
 
+    def _calculate_conformal_beta(self, X: np.array, y_true: float) -> float:
+        """Calculate beta using the locally weighted conformal estimator"""
+        return self.conformal_estimator.calculate_beta(X, y_true)
+
 
 class QuantileConformalSearcher(BaseConformalSearcher):
     def __init__(
@@ -221,6 +243,9 @@ class QuantileConformalSearcher(BaseConformalSearcher):
                 y=np.concatenate((y_train, y_val)),
             )
 
+        # Get upper_quantile_cap from sampler if available
+        upper_quantile_cap = getattr(self.sampler, "upper_quantile_cap", None)
+
         self.conformal_estimator.fit(
             X_train=X_train,
             y_train=y_train,
@@ -228,6 +253,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             y_val=y_val,
             tuning_iterations=tuning_iterations,
             random_state=random_state,
+            upper_quantile_cap=upper_quantile_cap,
         )
 
         self.primary_estimator_error = self.conformal_estimator.primary_estimator_error
@@ -280,3 +306,8 @@ class QuantileConformalSearcher(BaseConformalSearcher):
 
         # For pessimistic approach, use the first interval's lower bound
         return interval_predictions[0].lower_bounds
+
+    def _calculate_conformal_beta(self, X: np.array, y_true: float) -> float:
+        """Calculate beta using the quantile conformal estimator"""
+        # Use the first alpha index by default
+        return self.conformal_estimator.calculate_beta(X, y_true, alpha_idx=0)

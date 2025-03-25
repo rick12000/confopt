@@ -3,10 +3,11 @@ import numpy as np
 from typing import Optional, Tuple, List
 from sklearn.metrics import mean_squared_error, mean_pinball_loss
 from confopt.data_classes import ConformalBounds
-from confopt.preprocessing import train_val_split
-from confopt.estimation import (
+from confopt.utils.preprocessing import train_val_split
+from confopt.selection.estimation import (
     initialize_estimator,
-    tune,
+    PointTuner,
+    QuantileTuner,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,13 +46,13 @@ class LocallyWeightedConformalEstimator:
         Fit component estimator with option to tune.
         """
         if tuning_iterations > 1 and len(X) > min_obs_for_tuning:
-            initialization_params = tune(
+            # Initialize tuner when needed, don't keep as instance attribute
+            tuner = PointTuner(random_state=random_state)
+            initialization_params = tuner.tune(
                 X=X,
                 y=y,
                 estimator_architecture=estimator_architecture,
                 n_searches=tuning_iterations,
-                quantiles=None,
-                random_state=random_state,
             )
         else:
             # Use an empty dict to get the default estimator as-is
@@ -156,6 +157,39 @@ class LocallyWeightedConformalEstimator:
 
         return results
 
+    def calculate_beta(self, X: np.array, y_true: float) -> float:
+        """
+        Calculate beta value as the percentile rank of the current observation's
+        nonconformity score compared to validation set nonconformity scores.
+
+        Parameters
+        ----------
+        X : np.array
+            Input feature vector for a single observation
+        y_true : float
+            Actual observed value
+
+        Returns
+        -------
+        float
+            Beta value (percentile rank from 0 to 1)
+        """
+        if self.pe_estimator is None or self.ve_estimator is None:
+            raise ValueError("Estimators must be fitted before calculating beta")
+
+        # Calculate prediction and variance
+        X = X.reshape(1, -1) if X.ndim == 1 else X  # Ensure 2D
+        y_pred = self.pe_estimator.predict(X)[0]
+        var_pred = max(1e-6, self.ve_estimator.predict(X)[0])  # Avoid division by zero
+
+        # Calculate nonconformity score for this observation
+        nonconformity = abs(y_true - y_pred) / var_pred
+
+        # Calculate beta as percentile rank
+        beta = np.mean(self.nonconformity_scores >= nonconformity)
+
+        return beta
+
 
 class QuantileConformalEstimator:
     """
@@ -169,10 +203,12 @@ class QuantileConformalEstimator:
         quantile_estimator_architecture: str,
         alphas: List[float],
         n_pre_conformal_trials: int = 20,
+        upper_quantile_cap: Optional[float] = None,
     ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
         self.alphas = alphas
         self.n_pre_conformal_trials = n_pre_conformal_trials
+        self.upper_quantile_cap = upper_quantile_cap
 
         self.quantile_estimator = None
         self.nonconformity_scores = None
@@ -182,8 +218,12 @@ class QuantileConformalEstimator:
 
     def _alpha_to_quantiles(self, alpha: float) -> Tuple[float, float]:
         """Convert alpha to lower and upper quantiles"""
-        lower_quantile = (1 - alpha) / 2
-        upper_quantile = 1 - lower_quantile
+        lower_quantile = alpha / 2
+        upper_quantile = (
+            self.upper_quantile_cap
+            if self.upper_quantile_cap is not None
+            else 1 - lower_quantile
+        )
         return lower_quantile, upper_quantile
 
     def fit(
@@ -212,13 +252,13 @@ class QuantileConformalEstimator:
 
         # Tune model parameters if requested
         if tuning_iterations > 1 and len(X_train) > min_obs_for_tuning:
-            initialization_params = tune(
+            # Initialize tuner with required quantiles when needed, don't keep as instance attribute
+            tuner = QuantileTuner(random_state=random_state, quantiles=all_quantiles)
+            initialization_params = tuner.tune(
                 X=X_train,
                 y=y_train,
                 estimator_architecture=self.quantile_estimator_architecture,
                 n_searches=tuning_iterations,
-                quantiles=all_quantiles,
-                random_state=random_state,
             )
         else:
             # Use an empty dict to get the default estimator as-is
@@ -236,7 +276,7 @@ class QuantileConformalEstimator:
 
         # Fit the model and calculate nonconformity scores if enough data
         if len(X_train) + len(X_val) > self.n_pre_conformal_trials:
-            # Pass quantiles to fit
+            # Pass quantiles and upper_quantile_cap to fit
             self.quantile_estimator.fit(X_train, y_train, quantiles=all_quantiles)
 
             # Calculate nonconformity scores for each alpha on validation data
@@ -338,3 +378,55 @@ class QuantileConformalEstimator:
             )
 
         return results
+
+    def calculate_beta(self, X: np.array, y_true: float, alpha_idx: int = 0) -> float:
+        """
+        Calculate beta value as the percentile rank of the current observation's
+        nonconformity score compared to validation set nonconformity scores.
+
+        Parameters
+        ----------
+        X : np.array
+            Input feature vector for a single observation
+        y_true : float
+            Actual observed value
+        alpha_idx : int, optional
+            Index of alpha to use for nonconformity calculation (default: 0)
+
+        Returns
+        -------
+        float
+            Beta value (percentile rank from 0 to 1)
+        """
+        if self.quantile_estimator is None:
+            raise ValueError("Estimator must be fitted before calculating beta")
+
+        if (
+            not self.conformalize_predictions
+            or len(self.nonconformity_scores[alpha_idx]) == 0
+        ):
+            return 0.5  # Default value when conformalization is not possible
+
+        # Ensure X is properly shaped
+        X = X.reshape(1, -1) if X.ndim == 1 else X
+
+        # Get the alpha and corresponding quantiles
+        alpha = self.alphas[alpha_idx]
+        lower_quantile, upper_quantile = self._alpha_to_quantiles(alpha)
+        lower_idx = self.quantile_indices[lower_quantile]
+        upper_idx = self.quantile_indices[upper_quantile]
+
+        # Get predictions for this point
+        prediction = self.quantile_estimator.predict(X)
+        lower_bound = prediction[0, lower_idx]
+        upper_bound = prediction[0, upper_idx]
+
+        # Calculate nonconformity score (maximum of lower and upper deviations)
+        lower_deviation = lower_bound - y_true
+        upper_deviation = y_true - upper_bound
+        nonconformity = max(lower_deviation, upper_deviation)
+
+        # Calculate beta as percentile rank compared to validation nonconformities
+        beta = np.mean(self.nonconformity_scores[alpha_idx] >= nonconformity)
+
+        return beta

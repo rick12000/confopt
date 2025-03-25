@@ -8,7 +8,7 @@ from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.kernel_ridge import KernelRidge
 from sklearn.neighbors import KNeighborsRegressor
 from lightgbm import LGBMRegressor
-from confopt.quantile_wrappers import (
+from confopt.selection.quantile_estimators import (
     BaseSingleFitQuantileEstimator,
     BaseMultiFitQuantileEstimator,
     QuantileGBM,
@@ -18,10 +18,9 @@ from confopt.quantile_wrappers import (
     QuantileLasso,
 )
 from confopt.data_classes import ParameterRange
-from confopt.ensembling import (
+from confopt.selection.ensembling import (
     BaseEnsembleEstimator,
-    SingleFitQuantileEnsembleEstimator,
-    MultiFitQuantileEnsembleEstimator,
+    QuantileEnsembleEstimator,
     PointEnsembleEstimator,
 )
 from copy import deepcopy
@@ -44,8 +43,7 @@ class EstimatorConfig(BaseModel):
             (
                 BaseSingleFitQuantileEstimator,
                 BaseMultiFitQuantileEstimator,
-                MultiFitQuantileEnsembleEstimator,
-                SingleFitQuantileEnsembleEstimator,
+                QuantileEnsembleEstimator,
             ),
         )
 
@@ -270,7 +268,7 @@ ESTIMATOR_REGISTRY = {
     ),
     SFQENS_NAME: EstimatorConfig(
         estimator_name=SFQENS_NAME,
-        estimator_instance=SingleFitQuantileEnsembleEstimator(
+        estimator_instance=QuantileEnsembleEstimator(
             estimators=[
                 deepcopy(
                     QuantileForest(
@@ -298,7 +296,7 @@ ESTIMATOR_REGISTRY = {
     ),
     MFENS_NAME: EstimatorConfig(
         estimator_name=MFENS_NAME,
-        estimator_instance=MultiFitQuantileEnsembleEstimator(
+        estimator_instance=QuantileEnsembleEstimator(
             estimators=[
                 deepcopy(
                     QuantileLightGBM(

@@ -1,14 +1,20 @@
 import logging
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Any
 import copy
 
 import numpy as np
 from sklearn.metrics import mean_pinball_loss, mean_squared_error
 from sklearn.model_selection import KFold
 
-from confopt.config import ESTIMATOR_REGISTRY, EstimatorConfig
-from confopt.quantile_wrappers import BaseSingleFitQuantileEstimator
-from confopt.utils import get_tuning_configurations
+from confopt.selection.estimator_configuration import (
+    ESTIMATOR_REGISTRY,
+    EstimatorConfig,
+)
+from confopt.selection.quantile_estimators import (
+    BaseSingleFitQuantileEstimator,
+    BaseMultiFitQuantileEstimator,
+)
+from confopt.utils.encoding import get_tuning_configurations
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +35,7 @@ def initialize_estimator(
 
     # Add random_state if provided and the estimator supports it
     if random_state is not None and hasattr(estimator, "random_state"):
+        initialization_params = initialization_params or {}
         initialization_params["random_state"] = random_state
 
     # Apply all parameters
@@ -71,109 +78,172 @@ def average_scores_across_folds(
     return aggregated_configurations, aggregated_scores
 
 
-def cross_validate_configurations(
-    configurations: List[Dict],
-    estimator_config: EstimatorConfig,
-    X: np.array,
-    y: np.array,
-    k_fold_splits: int = 3,
-    quantiles: Optional[List[float]] = None,
-    random_state: Optional[int] = None,
-) -> Tuple[List[Dict], List[float]]:
-    scored_configurations, scores = [], []
-    kf = KFold(n_splits=k_fold_splits, random_state=random_state, shuffle=True)
+class RandomTuner:
+    """
+    Base class for tuning estimator hyperparameters with common functionality.
+    """
 
-    for train_index, test_index in kf.split(X):
-        X_train, X_val = X[train_index, :], X[test_index, :]
-        Y_train, Y_val = y[train_index], y[test_index]
+    def __init__(self, random_state: Optional[int] = None):
+        self.random_state = random_state
 
-        for configuration in configurations:
-            logger.debug(
-                f"Evaluating search model parameter configuration: {configuration}"
-            )
+    def tune(
+        self,
+        X: np.array,
+        y: np.array,
+        estimator_architecture: str,
+        n_searches: int,
+        k_fold_splits: int = 3,
+    ) -> Dict:
+        """
+        Tune an estimator's hyperparameters and return the best configuration.
 
-            # Initialize the estimator with the configuration
-            model = initialize_estimator(
-                estimator_architecture=estimator_config.estimator_name,
-                initialization_params=configuration,
-                random_state=random_state,
-            )
+        Args:
+            X: Feature matrix
+            y: Target values
+            estimator_architecture: Name of the estimator
+            n_searches: Number of hyperparameter configurations to try
+            k_fold_splits: Number of folds for cross-validation
 
-            try:
-                is_quantile_model = estimator_config.is_quantile_estimator()
-                # For multi-fit quantile estimators, pass quantiles to fit
-                if is_quantile_model:
-                    model.fit(X_train, Y_train, quantiles=quantiles)
-                else:
-                    model.fit(X_train, Y_train)
+        Returns:
+            Best configuration dictionary
+        """
+        estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
+        # Generate configurations using the tuning space
+        tuning_configurations = get_tuning_configurations(
+            parameter_grid=estimator_config.estimator_parameter_space,
+            n_configurations=n_searches,
+            random_state=self.random_state,
+        )
 
-                # Evaluate the model
-                if is_quantile_model:
-                    # Then evaluate on pinball loss:
-                    prediction = model.predict(X_val)
-                    lo_y_pred = prediction[:, 0]
-                    hi_y_pred = prediction[:, 1]
-                    lo_score = mean_pinball_loss(Y_val, lo_y_pred, alpha=quantiles[0])
-                    hi_score = mean_pinball_loss(Y_val, hi_y_pred, alpha=quantiles[1])
-                    score = (lo_score + hi_score) / 2
-                elif isinstance(model, BaseSingleFitQuantileEstimator):
-                    prediction = model.predict(X_val, quantiles=quantiles)
-                    scores_list = []
-                    for i, quantile in enumerate(quantiles):
-                        y_pred = prediction[:, i]
-                        quantile_score = mean_pinball_loss(
-                            Y_val, y_pred, alpha=quantile
-                        )
-                        scores_list.append(quantile_score)
-                    score = sum(scores_list) / len(scores_list)
-                else:
-                    # Then evaluate on MSE:
-                    y_pred = model.predict(X=X_val)
-                    score = mean_squared_error(Y_val, y_pred)
+        scored_configurations, scores = self._cross_validate_configurations(
+            configurations=tuning_configurations,
+            estimator_config=estimator_config,
+            X=X,
+            y=y,
+            k_fold_splits=k_fold_splits,
+        )
 
-                scored_configurations.append(configuration)
-                scores.append(score)
+        best_configuration = scored_configurations[scores.index(min(scores))]
+        return best_configuration
 
-            except Exception as e:
-                logger.warning(
-                    "Scoring failed and result was not appended. "
-                    f"Caught exception: {e}"
+    def _cross_validate_configurations(
+        self,
+        configurations: List[Dict],
+        estimator_config: EstimatorConfig,
+        X: np.array,
+        y: np.array,
+        k_fold_splits: int = 3,
+    ) -> Tuple[List[Dict], List[float]]:
+        """
+        Cross-validate multiple configurations and return scores.
+
+        Args:
+            configurations: List of parameter configurations to evaluate
+            estimator_config: Configuration of the estimator
+            X: Feature matrix
+            y: Target values
+            k_fold_splits: Number of folds for cross-validation
+
+        Returns:
+            Tuple of (configurations, scores)
+        """
+        scored_configurations, scores = [], []
+        kf = KFold(n_splits=k_fold_splits, random_state=self.random_state, shuffle=True)
+
+        for train_index, test_index in kf.split(X):
+            X_train, X_val = X[train_index, :], X[test_index, :]
+            Y_train, Y_val = y[train_index], y[test_index]
+
+            for configuration in configurations:
+                logger.debug(
+                    f"Evaluating search model parameter configuration: {configuration}"
                 )
-                continue
 
-    cross_fold_scored_configurations, cross_fold_scores = average_scores_across_folds(
-        scored_configurations=scored_configurations, scores=scores
-    )
+                # Initialize the estimator with the configuration
+                model = initialize_estimator(
+                    estimator_architecture=estimator_config.estimator_name,
+                    initialization_params=configuration,
+                    random_state=self.random_state,
+                )
 
-    return cross_fold_scored_configurations, cross_fold_scores
+                try:
+                    # Fit and evaluate the model using subclass-specific methods
+                    self._fit_model(model, X_train, Y_train)
+                    score = self._evaluate_model(model, X_val, Y_val)
+
+                    scored_configurations.append(configuration)
+                    scores.append(score)
+
+                except Exception as e:
+                    logger.warning(
+                        "Scoring failed and result was not appended. "
+                        f"Caught exception: {e}"
+                    )
+                    continue
+
+        (
+            cross_fold_scored_configurations,
+            cross_fold_scores,
+        ) = average_scores_across_folds(
+            scored_configurations=scored_configurations, scores=scores
+        )
+
+        return cross_fold_scored_configurations, cross_fold_scores
+
+    def _fit_model(self, model: Any, X_train: np.array, Y_train: np.array) -> None:
+        """Abstract method to fit a model. Must be implemented by subclasses."""
+        raise NotImplementedError("Subclasses must implement _fit_model")
+
+    def _evaluate_model(self, model: Any, X_val: np.array, Y_val: np.array) -> float:
+        """Abstract method to evaluate a model. Must be implemented by subclasses."""
+        raise NotImplementedError("Subclasses must implement _evaluate_model")
 
 
-def tune(
-    X: np.array,
-    y: np.array,
-    estimator_architecture: str,
-    n_searches: int,
-    k_fold_splits: int = 3,
-    quantiles: Optional[List[float]] = None,
-    random_state: Optional[int] = None,
-) -> Dict:
-    estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
-    # Generate configurations using the tuning space
-    tuning_configurations = get_tuning_configurations(
-        parameter_grid=estimator_config.estimator_parameter_space,
-        n_configurations=n_searches,
-        random_state=random_state,
-    )
+class PointTuner(RandomTuner):
+    """Tuner specialized for point estimators using MSE as the evaluation metric."""
 
-    scored_configurations, scores = cross_validate_configurations(
-        configurations=tuning_configurations,
-        estimator_config=estimator_config,
-        X=X,
-        y=y,
-        k_fold_splits=k_fold_splits,
-        quantiles=quantiles,
-        random_state=random_state,
-    )
+    def _fit_model(self, model: Any, X_train: np.array, Y_train: np.array) -> None:
+        """Fit a standard point estimator model."""
+        model.fit(X_train, Y_train)
 
-    best_configuration = scored_configurations[scores.index(min(scores))]
-    return best_configuration
+    def _evaluate_model(self, model: Any, X_val: np.array, Y_val: np.array) -> float:
+        """Evaluate a standard point estimator model using MSE."""
+        y_pred = model.predict(X=X_val)
+        return mean_squared_error(Y_val, y_pred)
+
+
+class QuantileTuner(RandomTuner):
+    """Tuner specialized for quantile estimators using pinball loss as the evaluation metric."""
+
+    def __init__(
+        self, random_state: Optional[int] = None, quantiles: List[float] = None
+    ):
+        super().__init__(random_state)
+        if quantiles is None or len(quantiles) == 0:
+            raise ValueError("Quantiles must be provided for QuantileTuner")
+        self.quantiles = quantiles
+
+    def _fit_model(self, model: Any, X_train: np.array, Y_train: np.array) -> None:
+        """Fit a quantile estimator model with the configured quantiles."""
+        model.fit(X_train, Y_train, quantiles=self.quantiles)
+
+    def _evaluate_model(self, model: Any, X_val: np.array, Y_val: np.array) -> float:
+        """Evaluate a quantile model using pinball loss."""
+
+        if isinstance(model, BaseMultiFitQuantileEstimator):
+            prediction = model.predict(X_val)
+            lo_y_pred = prediction[:, 0]
+            hi_y_pred = prediction[:, 1]
+            lo_score = mean_pinball_loss(Y_val, lo_y_pred, alpha=self.quantiles[0])
+            hi_score = mean_pinball_loss(Y_val, hi_y_pred, alpha=self.quantiles[1])
+            return (lo_score + hi_score) / 2
+        elif isinstance(model, BaseSingleFitQuantileEstimator):
+            prediction = model.predict(X_val, quantiles=self.quantiles)
+            scores_list = []
+            for i, quantile in enumerate(self.quantiles):
+                y_pred = prediction[:, i]
+                quantile_score = mean_pinball_loss(Y_val, y_pred, alpha=quantile)
+                scores_list.append(quantile_score)
+            return sum(scores_list) / len(scores_list)
+        else:
+            raise ValueError("Unknown quantile model type")

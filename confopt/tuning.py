@@ -7,11 +7,16 @@ from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 from datetime import datetime
 import inspect
-from confopt.utils import ConfigurationEncoder
-from confopt.preprocessing import train_val_split, remove_iqr_outliers
-from confopt.utils import get_tuning_configurations
-from confopt.tracking import Trial, Study, RuntimeTracker, derive_optimal_tuning_count
-from confopt.acquisition import (
+from confopt.utils.encoding import ConfigurationEncoder
+from confopt.utils.preprocessing import train_val_split, remove_iqr_outliers
+from confopt.utils.encoding import get_tuning_configurations
+from confopt.utils.tracking import (
+    Trial,
+    Study,
+    RuntimeTracker,
+    derive_optimal_tuning_count,
+)
+from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
     LowerBoundSampler,
@@ -586,6 +591,9 @@ class ObjectiveConformalSearcher:
             minimal_searchable_idx = np.argmin(parameter_performance_bounds)
             minimal_starting_idx = self.searchable_indices[minimal_searchable_idx]
             minimal_parameter = self.tuning_configurations[minimal_starting_idx].copy()
+            minimal_tabularized_configuration = tabularized_searchable_configurations[
+                minimal_starting_idx
+            ]
 
             # Evaluate with objective function
             validation_performance = self.objective_function(
@@ -613,6 +621,7 @@ class ObjectiveConformalSearcher:
                 searcher.update_interval_width(
                     sampled_idx=minimal_searchable_idx,
                     sampled_performance=validation_performance,
+                    sampled_X=minimal_tabularized_configuration,
                 )
 
             # Handle UCBSampler breach calculation
