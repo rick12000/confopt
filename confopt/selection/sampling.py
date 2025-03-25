@@ -1,6 +1,6 @@
 from typing import Optional, List, Literal
 import numpy as np
-from confopt.adaptation import DtACI
+from confopt.selection.adaptation import DtACI
 from confopt.data_classes import QuantileInterval
 
 
