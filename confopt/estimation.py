@@ -27,38 +27,20 @@ def initialize_estimator(
     # Create a deep copy of the default estimator
     estimator = copy.deepcopy(estimator_config.estimator_instance)
 
-    # Apply any parameter updates
+    # Add random_state if provided and the estimator supports it
+    if random_state is not None and hasattr(estimator, "random_state"):
+        initialization_params["random_state"] = random_state
+
+    # Apply all parameters
     if initialization_params:
-        # For ensemble estimators, apply parameters to the ensemble and components
-        if estimator_config.is_ensemble_estimator():
-            for param_name, param_value in initialization_params.items():
-                if param_name.startswith("component_"):
-                    # Parse component index and parameter name
-                    parts = param_name.split(".")
-                    comp_idx = int(parts[0].split("_")[1])
-                    comp_param = parts[1]
-
-                    # Set parameter on the specific component
-                    if hasattr(estimator.estimators[comp_idx], "set_params"):
-                        estimator.estimators[comp_idx].set_params(
-                            **{comp_param: param_value}
-                        )
-                else:
-                    # Set parameter on the ensemble itself
-                    if hasattr(estimator, "set_params"):
-                        estimator.set_params(**{param_name: param_value})
-        else:
-            # For non-ensemble estimators, set parameters directly
-            if hasattr(estimator, "set_params"):
-                estimator.set_params(**initialization_params)
-
-    # Set random state if applicable and provided
-    if (
-        random_state is not None
-        and hasattr(estimator, "set_params")
-        and hasattr(estimator, "random_state")
-    ):
-        estimator.set_params(random_state=random_state)
+        # Directly set attributes if set_params is not available
+        for param_name, param_value in initialization_params.items():
+            if hasattr(estimator, param_name):
+                setattr(estimator, param_name, param_value)
+            else:
+                logger.warning(
+                    f"Estimator {estimator_architecture} does not have attribute {param_name}"
+                )
 
     return estimator
 

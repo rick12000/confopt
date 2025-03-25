@@ -42,20 +42,16 @@ class BaseConformalSearcher:
             raise ValueError(f"Unsupported sampler type: {type(self.sampler)}")
 
     def _predict_with_ucb(self, X: np.array):
-        """Predict using UCB strategy, to be implemented by subclasses"""
         raise NotImplementedError("Subclasses must implement this method")
 
     def _predict_with_thompson(self, X: np.array):
-        """Predict using Thompson sampling, to be implemented by subclasses"""
         raise NotImplementedError("Subclasses must implement this method")
 
     def _predict_with_pessimistic_lower_bound(self, X: np.array):
-        """Predict using pessimistic lower bound, to be implemented by subclasses"""
         raise NotImplementedError("Subclasses must implement this method")
 
     def _get_interval_predictions(self, X: np.array) -> List[ConformalBounds]:
-        """Helper method to get predictions for all alphas"""
-        raise NotImplementedError("Subclasses must implement this method")
+        raise NotImplementedError()
 
     def update_interval_width(self, sampled_idx: int, sampled_performance: float):
         """Update interval width based on performance feedback"""

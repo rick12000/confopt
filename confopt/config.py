@@ -24,6 +24,7 @@ from confopt.ensembling import (
     MultiFitQuantileEnsembleEstimator,
     PointEnsembleEstimator,
 )
+from copy import deepcopy
 
 
 class EstimatorConfig(BaseModel):
@@ -236,63 +237,97 @@ ESTIMATOR_REGISTRY = {
             "p_tol": FloatRange(min_value=1e-5, max_value=1e-3, log_scale=True),
         },
     ),
+    # Ensemble estimators - added directly to the registry
+    PENS_NAME: EstimatorConfig(
+        estimator_name=PENS_NAME,
+        estimator_instance=PointEnsembleEstimator(
+            estimators=[
+                deepcopy(
+                    GradientBoostingRegressor(
+                        learning_rate=0.1,
+                        n_estimators=25,
+                        min_samples_split=3,
+                        min_samples_leaf=3,
+                        max_depth=2,
+                        subsample=0.9,
+                    )
+                ),
+                deepcopy(
+                    KNeighborsRegressor(
+                        n_neighbors=5,
+                        weights="distance",
+                    )
+                ),
+            ],
+            weighting_strategy="inverse_error",
+            cv=3,
+        ),
+        estimator_parameter_space={
+            "weighting_strategy": CategoricalRange(
+                choices=["inverse_error", "rank", "uniform", "meta_learner"]
+            ),
+        },
+    ),
+    SFQENS_NAME: EstimatorConfig(
+        estimator_name=SFQENS_NAME,
+        estimator_instance=SingleFitQuantileEnsembleEstimator(
+            estimators=[
+                deepcopy(
+                    QuantileForest(
+                        n_estimators=25,
+                        max_depth=5,
+                        max_features=0.8,
+                        min_samples_split=2,
+                        bootstrap=True,
+                    )
+                ),
+                deepcopy(
+                    QuantileKNN(
+                        n_neighbors=5,
+                    )
+                ),
+            ],
+            weighting_strategy="inverse_error",
+            cv=3,
+        ),
+        estimator_parameter_space={
+            "weighting_strategy": CategoricalRange(
+                choices=["inverse_error", "rank", "uniform", "meta_learner"]
+            ),
+        },
+    ),
+    MFENS_NAME: EstimatorConfig(
+        estimator_name=MFENS_NAME,
+        estimator_instance=MultiFitQuantileEnsembleEstimator(
+            estimators=[
+                deepcopy(
+                    QuantileLightGBM(
+                        learning_rate=0.1,
+                        n_estimators=20,
+                        max_depth=2,
+                        min_child_samples=5,
+                        subsample=0.8,
+                        colsample_bytree=0.7,
+                        reg_alpha=0.1,
+                        reg_lambda=0.1,
+                        min_child_weight=3,
+                    )
+                ),
+                deepcopy(
+                    QuantileLasso(
+                        alpha=0.05,
+                        max_iter=200,
+                        p_tol=1e-4,
+                    )
+                ),
+            ],
+            weighting_strategy="inverse_error",
+            cv=3,
+        ),
+        estimator_parameter_space={
+            "weighting_strategy": CategoricalRange(
+                choices=["inverse_error", "rank", "uniform", "meta_learner"]
+            ),
+        },
+    ),
 }
-
-# Create point ensemble estimator with GBM and KNN components
-point_ensemble = PointEnsembleEstimator(weighting_strategy="inverse_error", cv=3)
-point_ensemble.add_estimator(ESTIMATOR_REGISTRY[GBM_NAME].estimator_instance)
-point_ensemble.add_estimator(ESTIMATOR_REGISTRY[KNN_NAME].estimator_instance)
-
-# Create single-fit quantile ensemble with QRF and QKNN components
-sfq_ensemble = SingleFitQuantileEnsembleEstimator(
-    weighting_strategy="inverse_error", cv=3
-)
-sfq_ensemble.add_estimator(ESTIMATOR_REGISTRY[QRF_NAME].estimator_instance)
-sfq_ensemble.add_estimator(ESTIMATOR_REGISTRY[QKNN_NAME].estimator_instance)
-
-# Create multi-fit quantile ensemble with QLGBM and QL components
-mfq_ensemble = MultiFitQuantileEnsembleEstimator(
-    weighting_strategy="inverse_error", cv=3
-)
-mfq_ensemble.add_estimator(ESTIMATOR_REGISTRY[QLGBM_NAME].estimator_instance)
-mfq_ensemble.add_estimator(ESTIMATOR_REGISTRY[QL_NAME].estimator_instance)
-
-# Add ensemble estimators to registry
-ESTIMATOR_REGISTRY[PENS_NAME] = EstimatorConfig(
-    estimator_name=PENS_NAME,
-    estimator_instance=point_ensemble,
-    estimator_parameter_space={
-        "weighting_strategy": CategoricalRange(
-            choices=["inverse_error", "rank", "uniform", "meta_learner"]
-        ),
-        "component_0.learning_rate": FloatRange(min_value=0.05, max_value=0.3),
-        "component_0.n_estimators": IntRange(min_value=10, max_value=50),
-        "component_1.n_neighbors": IntRange(min_value=3, max_value=9),
-    },
-)
-
-ESTIMATOR_REGISTRY[SFQENS_NAME] = EstimatorConfig(
-    estimator_name=SFQENS_NAME,
-    estimator_instance=sfq_ensemble,
-    estimator_parameter_space={
-        "weighting_strategy": CategoricalRange(
-            choices=["inverse_error", "rank", "uniform", "meta_learner"]
-        ),
-        "component_0.n_estimators": IntRange(min_value=10, max_value=50),
-        "component_0.max_depth": IntRange(min_value=3, max_value=5),
-        "component_1.n_neighbors": IntRange(min_value=3, max_value=10),
-    },
-)
-
-ESTIMATOR_REGISTRY[MFENS_NAME] = EstimatorConfig(
-    estimator_name=MFENS_NAME,
-    estimator_instance=mfq_ensemble,
-    estimator_parameter_space={
-        "weighting_strategy": CategoricalRange(
-            choices=["inverse_error", "rank", "uniform", "meta_learner"]
-        ),
-        "component_0.learning_rate": FloatRange(min_value=0.05, max_value=0.2),
-        "component_0.n_estimators": IntRange(min_value=10, max_value=30),
-        "component_1.alpha": FloatRange(min_value=0.01, max_value=0.3, log_scale=True),
-    },
-)
