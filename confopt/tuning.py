@@ -34,44 +34,6 @@ def process_and_split_estimation_data(
     outlier_scope: str = "top_and_bottom",
     random_state: Optional[int] = None,
 ) -> Tuple[np.array, np.array, np.array, np.array]:
-    """
-    Preprocess configuration data used to train conformal search estimators.
-
-    Data is split into training and validation sets, with optional
-    outlier filtering.
-
-    Parameters
-    ----------
-    searched_configurations :
-        Parameter configurations selected for search as part
-        of conformal hyperparameter optimization framework.
-    searched_performances :
-        Validation performance of each parameter configuration.
-    train_split :
-        Proportion of overall configurations that should be allocated
-        to the training set.
-    filter_outliers :
-        Whether to remove outliers from the input configuration
-        data based on performance.
-    outlier_scope :
-        Determines which outliers are removed. Takes:
-            - 'top_only': Only upper threshold outliers are removed.
-            - 'bottom_only': Only lower threshold outliers are removed.
-            - 'top_and_bottom': All outliers are removed.
-    random_state :
-        Random generation seed.
-
-    Returns
-    -------
-    X_train :
-        Training portion of configurations.
-    y_train :
-        Training portion of configuration performances.
-    X_val :
-        Validation portion of configurations.
-    y_val :
-        Validation portion of configuration performances.
-    """
     X = searched_configurations.copy()
     y = searched_performances.copy()
     logger.debug(f"Minimum performance in searcher data: {y.min()}")
@@ -92,14 +54,7 @@ def process_and_split_estimation_data(
     return X_train, y_train, X_val, y_val
 
 
-class ObjectiveConformalSearcher:
-    """
-    Conformal hyperparameter searcher.
-
-    Tunes a desired model by inferentially searching a
-    specified hyperparameter space using conformal estimators.
-    """
-
+class ConformalTuner:
     def __init__(
         self,
         objective_function: callable,
@@ -108,27 +63,6 @@ class ObjectiveConformalSearcher:
         n_candidate_configurations: int = 10000,
         warm_start_configurations: Optional[List[Tuple[Dict, float]]] = None,
     ):
-        """
-        Create a conformal searcher instance.
-
-        Parameters
-        ----------
-        objective_function : callable
-            Function that evaluates a configuration and returns a performance metric.
-        search_space : Dict[str, ParameterRange]
-            Dictionary mapping parameter names to their range definitions:
-            - IntRange: For integer parameters with min/max values
-            - FloatRange: For float parameters with min/max values
-            - CategoricalRange: For categorical parameters with a list of choices
-        metric_optimization : Literal["direct", "inverse"]
-            Whether the metric should be maximized ("direct") or minimized ("inverse").
-        n_candidate_configurations : int, default=10000
-            Number of candidate configurations to generate for the search space.
-        warm_start_configurations : List[Tuple[Dict, float]], optional
-            List of tuples where each tuple contains a configuration dictionary
-            and its corresponding performance value.
-            These configurations will be added to the search history without re-evaluation.
-        """
         self.objective_function = objective_function
         self._check_objective_function()
 
@@ -136,7 +70,6 @@ class ObjectiveConformalSearcher:
         self.metric_optimization = metric_optimization
         self.n_candidate_configurations = n_candidate_configurations
 
-        # Extract warm start configs if provided
         self.warm_start_configs = []
         self.warm_start_performances = []
         if warm_start_configurations:
@@ -144,7 +77,6 @@ class ObjectiveConformalSearcher:
                 self.warm_start_configs.append(config)
                 self.warm_start_performances.append(perf)
 
-        # Generate tuning configurations including warm starts
         self.tuning_configurations = get_tuning_configurations(
             parameter_grid=self.search_space,
             n_configurations=self.n_candidate_configurations,
@@ -152,24 +84,19 @@ class ObjectiveConformalSearcher:
             warm_start_configs=self.warm_start_configs,
         )
 
-        # Tabularize all configurations:
         self.encoder = ConfigurationEncoder()
         self.encoder.fit(self.tuning_configurations)
         self.tabularized_configurations = self.encoder.transform(
             self.tuning_configurations
         ).to_numpy()
 
-        # Create efficient index tracking
         self.searchable_indices = np.arange(len(self.tuning_configurations))
         self.searched_indices = np.array([], dtype=int)
         self.searched_performances = np.array([])
-        self.forbidden_indices = np.array(
-            [], dtype=int
-        )  # Track non-numerical performances
+        self.forbidden_indices = np.array([], dtype=int)
 
         self.study = Study()
 
-        # Process warm start configurations
         if warm_start_configurations:
             self._process_warm_start_configurations()
 
@@ -206,50 +133,17 @@ class ObjectiveConformalSearcher:
         verbose: bool = True,
         max_runtime: Optional[int] = None,
     ) -> list[Trial]:
-        """
-        Randomly search a portion of the model's hyperparameter space.
-
-        Parameters
-        ----------
-        n_searches :
-            Number of random searches to perform.
-        max_runtime :
-            Maximum runtime after which search stops.
-        verbose :
-            Whether to print updates during code execution.
-        random_state :
-            Random generation seed.
-
-        Returns
-        -------
-        searched_configurations :
-            List of parameter configurations that were randomly
-            selected and searched.
-        searched_performances :
-            Search performance of each searched configuration,
-            consisting of out of sample, validation performance
-            of a model trained using the searched configuration.
-        searched_timestamps :
-            List of timestamps corresponding to each searched
-            hyperparameter configuration.
-        runtime_per_search :
-            Average time taken to train the model being tuned
-            across configurations, in seconds.
-        """
         rs_trials = []
 
-        # Use numpy for faster sampling without replacement
         n_sample = min(n_searches, len(self.searchable_indices))
         random_indices = np.random.choice(
             self.searchable_indices, size=n_sample, replace=False
         )
 
-        # Update available indices immediately
         self.searchable_indices = np.setdiff1d(
             self.searchable_indices, random_indices, assume_unique=True
         )
 
-        # Store sampled configurations
         randomly_sampled_indices = random_indices.tolist()
 
         if verbose:
@@ -271,13 +165,11 @@ class ObjectiveConformalSearcher:
                     "Obtained non-numerical performance, forbidding configuration."
                 )
                 self.forbidden_indices = np.append(self.forbidden_indices, idx)
-                # Ensure it's removed from available indices
                 self.searchable_indices = np.setdiff1d(
                     self.searchable_indices, [idx], assume_unique=True
                 )
                 continue
 
-            # Track this as a searched index
             self.searched_indices = np.append(self.searched_indices, idx)
             self.searched_performances = np.append(
                 self.searched_performances, validation_performance
@@ -316,19 +208,12 @@ class ObjectiveConformalSearcher:
         return validation_split
 
     def _process_warm_start_configurations(self):
-        """
-        Process warm start configurations and add them to the search history.
-        This method assumes warm start configurations have been included in
-        tuning_configurations during initialization.
-        """
         if not self.warm_start_configs:
             return
 
-        # Find the indices of warm start configurations in tuning_configurations
         warm_start_trials = []
         warm_start_indices = []
 
-        # Create a function to compare configurations
         def configs_equal(config1, config2):
             if set(config1.keys()) != set(config2.keys()):
                 return False
@@ -337,16 +222,13 @@ class ObjectiveConformalSearcher:
                     return False
             return True
 
-        # Identify each warm start configuration in tuning_configurations
         for i, (config, performance) in enumerate(
             zip(self.warm_start_configs, self.warm_start_performances)
         ):
-            # Find the index of this warm start config in tuning_configurations
             for idx, tuning_config in enumerate(self.tuning_configurations):
                 if configs_equal(config, tuning_config):
                     warm_start_indices.append(idx)
 
-                    # Create a trial for this configuration
                     warm_start_trials.append(
                         Trial(
                             iteration=i,
@@ -362,31 +244,27 @@ class ObjectiveConformalSearcher:
                     f"Could not locate warm start configuration in tuning configurations: {config}"
                 )
 
-        # Convert to numpy array for efficient operations
         warm_start_indices = np.array(warm_start_indices)
         warm_start_perfs = np.array(
             self.warm_start_performances[: len(warm_start_indices)]
         )
 
-        # Update indices and performances
         self.searched_indices = np.append(self.searched_indices, warm_start_indices)
         self.searched_performances = np.append(
             self.searched_performances, warm_start_perfs
         )
 
-        # Remove these configurations from available indices
         self.searchable_indices = np.setdiff1d(
             self.searchable_indices, warm_start_indices, assume_unique=True
         )
 
-        # Add trials to study
         self.study.batch_append_trials(trials=warm_start_trials)
 
         logger.debug(
             f"Added {len(warm_start_trials)} warm start configurations to search history"
         )
 
-    def search(
+    def tune(
         self,
         searcher: Union[LocallyWeightedConformalSearcher, QuantileConformalSearcher],
         n_random_searches: int = 20,
@@ -397,71 +275,6 @@ class ObjectiveConformalSearcher:
         max_iter: Optional[int] = None,
         runtime_budget: Optional[int] = None,
     ):
-        """
-        Search model hyperparameter space using conformal estimators.
-
-        Model and hyperparameter space are defined in the initialization
-        of this class. This method takes as inputs a limit on the duration
-        of search and several overrides for search behaviour.
-
-        Search involves randomly evaluating an initial number of hyperparameter
-        configurations, then training a conformal estimator on the relationship
-        between configurations and performance to optimally select the next
-        best configuration to sample at each subsequent sampling event.
-        Upon exceeding the maximum search duration, search results are stored
-        in the class instance and accessible via dedicated externalizing methods.
-
-        Parameters
-        ----------
-        runtime_budget :
-            Maximum time budget to allocate to hyperparameter search in seconds.
-            After the budget is exceeded, search stops and results are stored in
-            the instance for later access.
-            An error will be raised if the budget is not sufficient to carry out
-            conformal search, in which case it should be raised.
-        confidence_level :
-            Confidence level used during construction of conformal searchers'
-            intervals. The confidence level controls the exploration/exploitation
-            tradeoff, with smaller values making search greedier.
-            Confidence level must be bound between [0, 1].
-        conformal_search_estimator :
-            String identifier specifying which type of estimator should be
-            used to infer model hyperparameter performance.
-            Supported estimators include:
-                - 'qgbm' (default): quantile gradient boosted machine.
-                - 'qrf': quantile random forest.
-                - 'kr': kernel ridge.
-                - 'gp': gaussian process.
-                - 'gbm': gradient boosted machine.
-                - 'knn': k-nearest neighbours.
-                - 'rf': random forest.
-                - 'dnn': dense neural network.
-        n_random_searches :
-            Number of initial random searches to perform before switching
-            to inferential search. A larger number delays the beginning of
-            conformal search, but provides the search estimator with more
-            data and more robust patterns. The more parameters are being
-            optimized during search, the more random search observations
-            are needed before the conformal searcher can extrapolate
-            effectively. This value defaults to 20, which is the minimum
-            advisable number before the estimator will struggle to train.
-        conformal_retraining_frequency :
-            Sampling interval after which conformal search estimators should be
-            retrained. Eg. an interval of 5, would mean conformal estimators
-            are retrained after every 5th sampled/searched parameter configuration.
-            A lower retraining frequency is always desirable, but may be increased
-            to reduce runtime.
-        enable_adaptive_intervals :
-            Whether to allow conformal intervals used for configuration sampling
-            to change after each sampling event. This allows for better interval
-            coverage under covariate shift and is enabled by default.
-        conformal_learning_rate :
-            Learning rate dictating how rapidly adaptive intervals are updated.
-        verbose :
-            Whether to print updates during code execution.
-        random_state :
-            Random generation seed.
-        """
         self.search_timer = RuntimeTracker()
 
         if random_state is not None:
@@ -475,11 +288,9 @@ class ObjectiveConformalSearcher:
         )
         self.study.batch_append_trials(trials=rs_trials)
 
-        # Pre-allocate storage for efficiency
         search_model_tuning_count = 0
         scaler = StandardScaler()
 
-        # Setup progress bar
         if verbose:
             if runtime_budget is not None:
                 search_progress_bar = tqdm(
@@ -490,12 +301,10 @@ class ObjectiveConformalSearcher:
                     total=max_iter - n_random_searches, desc="Conformal search: "
                 )
 
-        # Get initial searched configurations in tabular form once
         tabularized_searched_configurations = self.tabularized_configurations[
             self.searched_indices
         ]
 
-        # Main search loop
         max_iterations = min(
             len(self.searchable_indices),
             len(self.tuning_configurations) - n_random_searches,
@@ -509,25 +318,18 @@ class ObjectiveConformalSearcher:
                 elif max_iter is not None:
                     search_progress_bar.update(1)
 
-            # Check if we've exhausted all configurations
             if len(self.searchable_indices) == 0:
                 logger.info("All configurations have been searched. Stopping early.")
                 break
 
-            # Get tabularized searchable configurations more efficiently
-            # We can index the pre-tabularized configurations directly
             tabularized_searchable_configurations = self.tabularized_configurations[
                 self.searchable_indices
             ]
 
-            # Calculate validation split based on number of searched configurations
-            validation_split = (
-                ObjectiveConformalSearcher._set_conformal_validation_split(
-                    tabularized_searched_configurations
-                )
+            validation_split = ConformalTuner._set_conformal_validation_split(
+                tabularized_searched_configurations
             )
 
-            # Process data and normalize
             (
                 X_train_conformal,
                 y_train_conformal,
@@ -540,7 +342,6 @@ class ObjectiveConformalSearcher:
                 filter_outliers=False,
             )
 
-            # Fit scaler on training data and transform all datasets
             scaler.fit(X_train_conformal)
             X_train_conformal = scaler.transform(X_train_conformal)
             X_val_conformal = scaler.transform(X_val_conformal)
@@ -548,7 +349,6 @@ class ObjectiveConformalSearcher:
                 tabularized_searchable_configurations
             )
 
-            # Handle model retraining
             hit_retraining_interval = config_idx % conformal_retraining_frequency == 0
             if config_idx == 0 or hit_retraining_interval:
                 runtime_tracker = RuntimeTracker()
@@ -566,7 +366,6 @@ class ObjectiveConformalSearcher:
             else:
                 searcher_runtime = None
 
-            # Determine tuning count if necessary
             if searcher_tuning_framework is not None:
                 if searcher_tuning_framework == "runtime":
                     search_model_tuning_count = derive_optimal_tuning_count(
@@ -582,12 +381,10 @@ class ObjectiveConformalSearcher:
             else:
                 search_model_tuning_count = 0
 
-            # Get performance predictions for searchable configurations
             parameter_performance_bounds = searcher.predict(
                 X=tabularized_searchable_configurations
             )
 
-            # Find minimum performing configuration
             minimal_searchable_idx = np.argmin(parameter_performance_bounds)
             minimal_starting_idx = self.searchable_indices[minimal_searchable_idx]
             minimal_parameter = self.tuning_configurations[minimal_starting_idx].copy()
@@ -595,7 +392,6 @@ class ObjectiveConformalSearcher:
                 minimal_starting_idx
             ]
 
-            # Evaluate with objective function
             validation_performance = self.objective_function(
                 configuration=minimal_parameter
             )
@@ -608,13 +404,11 @@ class ObjectiveConformalSearcher:
                 self.forbidden_indices = np.append(
                     self.forbidden_indices, minimal_starting_idx
                 )
-                # Remove from available indices
                 self.searchable_indices = np.setdiff1d(
                     self.searchable_indices, minimal_starting_idx, assume_unique=True
                 )
                 continue
 
-            # Update intervals if needed - moved after NaN check
             if hasattr(searcher.sampler, "adapter") or hasattr(
                 searcher.sampler, "adapters"
             ):
@@ -624,7 +418,6 @@ class ObjectiveConformalSearcher:
                     sampled_X=minimal_tabularized_configuration,
                 )
 
-            # Handle UCBSampler breach calculation
             if isinstance(searcher.sampler, LowerBoundSampler):
                 if (
                     searcher.predictions_per_interval[0].lower_bounds[
@@ -643,19 +436,15 @@ class ObjectiveConformalSearcher:
 
             estimator_error = searcher.primary_estimator_error
 
-            # Update indices efficiently
-            # Remove the global index from available indices
             self.searchable_indices = self.searchable_indices[
                 self.searchable_indices != minimal_starting_idx
             ]
-            # Add to searched indices
             self.searched_indices = np.append(
                 self.searched_indices, minimal_starting_idx
             )
             self.searched_performances = np.append(
                 self.searched_performances, validation_performance
             )
-            # Update the tabularized searched configurations for next iteration
             tabularized_searched_configurations = np.vstack(
                 [
                     tabularized_searched_configurations,
@@ -665,7 +454,6 @@ class ObjectiveConformalSearcher:
                 ]
             )
 
-            # Add trial to study
             self.study.append_trial(
                 Trial(
                     iteration=config_idx,
@@ -679,7 +467,6 @@ class ObjectiveConformalSearcher:
                 )
             )
 
-            # Check stopping criteria
             if runtime_budget is not None:
                 if self.search_timer.return_runtime() > runtime_budget:
                     if verbose:
@@ -704,25 +491,7 @@ class ObjectiveConformalSearcher:
                     break
 
     def get_best_params(self) -> Dict:
-        """
-        Extract hyperparameters from best performing parameter
-        configuration identified during conformal search.
-
-        Returns
-        -------
-        best_params :
-            Best performing model hyperparameters.
-        """
         return self.study.get_best_configuration()
 
     def get_best_value(self) -> float:
-        """
-        Extract validation performance of best performing parameter
-        configuration identified during conformal search.
-
-        Returns
-        -------
-        best_performance :
-            Best predictive performance achieved.
-        """
         return self.study.get_best_performance()

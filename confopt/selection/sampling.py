@@ -1,59 +1,57 @@
 from typing import Optional, List, Literal
 import numpy as np
 from confopt.selection.adaptation import DtACI
-from confopt.data_classes import QuantileInterval
+import warnings
 
 
 class PessimisticLowerBoundSampler:
     def __init__(
         self,
         interval_width: float = 0.8,
-        adapter: Optional[DtACI] = None,
+        adapter: Optional[Literal["DtACI"]] = None,
     ):
         self.interval_width = interval_width
 
         self.alpha = 1 - interval_width
         self.adapter = self._initialize_adapter(adapter)
-        self.quantiles = self._calculate_quantiles()
 
-    def _initialize_adapter(self, adapter: Optional[DtACI] = None) -> DtACI:
+    def _initialize_adapter(
+        self, adapter: Optional[Literal["DtACI"]] = None
+    ) -> Optional[DtACI]:
         if adapter is None:
-            adapter = DtACI(alpha=self.alpha, gamma_values=[0.05, 0.01, 0.1])
+            return None
+        elif adapter == "DtACI":
+            return DtACI(alpha=self.alpha, gamma_values=[0.05, 0.01, 0.1])
         else:
-            adapter = adapter
-        return adapter
+            raise ValueError("adapter must be None or 'DtACI'")
 
     def fetch_alphas(self) -> List[float]:
         return [self.alpha]
 
-    def _calculate_quantiles(self) -> QuantileInterval:
-        return QuantileInterval(
-            lower_quantile=self.alpha / 2, upper_quantile=1 - (self.alpha / 2)
-        )
-
     def update_interval_width(self, beta: float) -> None:
-        self.alpha = self.adapter.update(beta=beta)
-        self.quantiles = self._calculate_quantiles()
+        if self.adapter is not None:
+            self.alpha = self.adapter.update(beta=beta)
+        else:
+            warnings.warn(
+                "'update_interval_width()' method was called, but no adapter was initialized."
+            )
 
 
 class LowerBoundSampler(PessimisticLowerBoundSampler):
     def __init__(
         self,
+        interval_width: float = 0.8,
+        adapter: Optional[Literal["DtACI"]] = None,
         beta_decay: Literal[
             "inverse_square_root_decay", "logarithmic_decay"
         ] = "logarithmic_decay",
         c: float = 1,
-        interval_width: float = 0.8,
-        adapter: Optional[DtACI] = None,
     ):
+        super().__init__(interval_width, adapter)
         self.beta_decay = beta_decay
         self.c = c
         self.t = 1
         self.beta = 1
-
-        # Call at this position, there are initialization methods
-        # in the base class:
-        super().__init__(interval_width, adapter)
 
     def update_exploration_step(self):
         self.t += 1
@@ -67,7 +65,7 @@ class ThompsonSampler:
     def __init__(
         self,
         n_quantiles: int = 4,
-        adapter: Optional[DtACI] = None,
+        adapter: Optional[Literal["DtACI"]] = None,
         enable_optimistic_sampling: bool = False,
     ):
         if n_quantiles % 2 != 0:
@@ -76,39 +74,33 @@ class ThompsonSampler:
         self.n_quantiles = n_quantiles
         self.enable_optimistic_sampling = enable_optimistic_sampling
 
-        self.quantiles, self.alphas = self._initialize_quantiles_and_alphas()
+        self.alphas = self._initialize_alphas()
         self.adapters = self._initialize_adapters(adapter)
 
-    def _initialize_quantiles_and_alphas(
-        self,
-    ) -> tuple[list[QuantileInterval], list[float]]:
+    def _initialize_alphas(self) -> list[float]:
         starting_quantiles = [
             round(i / (self.n_quantiles + 1), 2) for i in range(1, self.n_quantiles + 1)
         ]
-        quantiles = []
         alphas = []
         half_length = len(starting_quantiles) // 2
 
         for i in range(half_length):
             lower, upper = starting_quantiles[i], starting_quantiles[-(i + 1)]
-            quantiles.append(
-                QuantileInterval(lower_quantile=lower, upper_quantile=upper)
-            )
             alphas.append(1 - (upper - lower))
-        return quantiles, alphas
+        return alphas
 
     def _initialize_adapters(
-        self, adapter: Optional[DtACI] = None
+        self, adapter: Optional[Literal["DtACI"]] = None
     ) -> Optional[List[DtACI]]:
-        if adapter is not None:
-            adapters = [
+        if adapter is None:
+            return None
+        elif adapter == "DtACI":
+            return [
                 DtACI(alpha=alpha, gamma_values=[0.05, 0.01, 0.1])
                 for alpha in self.alphas
             ]
         else:
-            adapters = None
-
-        return adapters
+            raise ValueError("adapter must be None or 'DtACI'")
 
     def fetch_alphas(self) -> List[float]:
         return self.alphas
@@ -118,7 +110,3 @@ class ThompsonSampler:
             for i, (adapter, beta) in enumerate(zip(self.adapters, betas)):
                 updated_alpha = adapter.update(beta=beta)
                 self.alphas[i] = updated_alpha
-                self.quantiles[i] = QuantileInterval(
-                    lower_quantile=updated_alpha / 2,
-                    upper_quantile=1 - (updated_alpha / 2),
-                )

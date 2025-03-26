@@ -8,7 +8,7 @@ import pytest
 from confopt.utils.tracking import RuntimeTracker, Trial
 from confopt.tuning import (
     process_and_split_estimation_data,
-    ObjectiveConformalSearcher,
+    ConformalTuner,
 )
 from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
@@ -46,7 +46,7 @@ def search_space():
 @pytest.fixture
 def dummy_tuner(objective_function, search_space):
     """Create a dummy ObjectiveConformalSearcher for testing"""
-    tuner = ObjectiveConformalSearcher(
+    tuner = ConformalTuner(
         objective_function=objective_function,
         search_space=search_space,
         metric_optimization="inverse",
@@ -361,7 +361,7 @@ def test_check_objective_function():
         return sum(config.values())
 
     with pytest.raises(ValueError, match="must take exactly one argument"):
-        ObjectiveConformalSearcher(
+        ConformalTuner(
             objective_function=invalid_obj_args,
             search_space={"param1": FloatRange(min_value=0.1, max_value=1.0)},
             metric_optimization="inverse",
@@ -374,7 +374,7 @@ def test_check_objective_function():
     with pytest.raises(
         ValueError, match="must take exactly one argument named 'configuration'"
     ):
-        ObjectiveConformalSearcher(
+        ConformalTuner(
             objective_function=invalid_obj_param_name,
             search_space={"param1": FloatRange(min_value=0.1, max_value=1.0)},
             metric_optimization="inverse",
@@ -385,12 +385,12 @@ def test_set_conformal_validation_split():
     """Test the validation split calculation based on dataset size"""
     # For small datasets
     X_small = np.random.rand(20, 5)
-    split_small = ObjectiveConformalSearcher._set_conformal_validation_split(X_small)
+    split_small = ConformalTuner._set_conformal_validation_split(X_small)
     assert split_small == 4 / 20
 
     # For larger datasets
     X_large = np.random.rand(100, 5)
-    split_large = ObjectiveConformalSearcher._set_conformal_validation_split(X_large)
+    split_large = ConformalTuner._set_conformal_validation_split(X_large)
     assert split_large == 0.20
 
 
@@ -409,7 +409,7 @@ def test_process_warm_start_configurations():
     ]
 
     # Create a searcher with warm starts
-    searcher = ObjectiveConformalSearcher(
+    searcher = ConformalTuner(
         objective_function=lambda configuration: sum(
             v for v in configuration.values() if isinstance(v, (int, float))
         ),
@@ -449,7 +449,7 @@ def test_warm_start_with_search():
     ]
 
     # Create a searcher with warm starts
-    searcher = ObjectiveConformalSearcher(
+    searcher = ConformalTuner(
         objective_function=lambda configuration: sum(
             v for v in configuration.values() if isinstance(v, (int, float))
         ),
@@ -493,7 +493,7 @@ def test_search_with_runtime_budget():
     }
 
     # Create a simple searcher
-    searcher = ObjectiveConformalSearcher(
+    searcher = ConformalTuner(
         objective_function=lambda configuration: sum(
             v for v in configuration.values() if isinstance(v, (int, float))
         ),
@@ -528,7 +528,7 @@ def test_searcher_tuning_framework():
     }
 
     # Create searcher with simple settings
-    searcher = ObjectiveConformalSearcher(
+    searcher = ConformalTuner(
         objective_function=lambda configuration: sum(
             v for v in configuration.values() if isinstance(v, (int, float))
         ),
