@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from confopt.tracking import derive_optimal_tuning_count, RuntimeTracker
+from confopt.utils.tracking import derive_optimal_tuning_count, RuntimeTracker
 
 
 def test_runtime_tracker__return_runtime():

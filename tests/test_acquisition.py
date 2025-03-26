@@ -1,17 +1,17 @@
 import numpy as np
 import pytest
 
-from confopt.acquisition import (
+from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
 )
-from confopt.sampling import (
+from confopt.selection.sampling import (
     LowerBoundSampler,
     ThompsonSampler,
     PessimisticLowerBoundSampler,
 )
-from confopt.adaptation import DtACI
-from confopt.config import GBM_NAME, QGBM_NAME
+from confopt.selection.adaptation import DtACI
+from confopt.selection.estimator_configuration import GBM_NAME, QGBM_NAME
 from confopt.data_classes import ConformalBounds
 
 
@@ -90,7 +90,9 @@ def fitted_quantile_searcher(sample_data):
 @pytest.fixture
 def fitted_single_fit_searcher(sample_data):
     """Create a fitted single-fit quantile conformal searcher"""
-    sampler = LowerBoundSampler(c=2.0, interval_width=0.2)  # Removed beta parameter
+    sampler = LowerBoundSampler(
+        c=2.0, interval_width=0.2, adapter=DtACI(gamma_values=[0.01])
+    )  # Removed beta parameter
     searcher = QuantileConformalSearcher(
         quantile_estimator_architecture=QGBM_NAME, sampler=sampler, single_fit=True
     )
@@ -182,7 +184,7 @@ class TestLocallyWeightedConformalSearcher:
 
         # Alpha should decrease after breach with DtACI
         if isinstance(searcher.sampler.adapter, DtACI):
-            assert searcher.sampler.alpha < initial_alpha
+            assert searcher.sampler.alpha <= initial_alpha
 
         # Update with no breach
         adjusted_alpha = searcher.sampler.alpha

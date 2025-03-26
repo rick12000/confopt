@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 from sklearn.linear_model import LinearRegression
-from confopt.adaptation import DtACI
+from confopt.selection.adaptation import DtACI
 
 
 COVERAGE_TOLERANCE: float = 0.03

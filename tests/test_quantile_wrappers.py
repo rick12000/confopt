@@ -1,5 +1,5 @@
 import numpy as np
-from confopt.quantile_wrappers import QuantRegressionWrapper, QuantileLasso
+from confopt.selection.quantile_estimators import QuantRegressionWrapper, QuantileLasso
 
 
 def test_quantreg_wrapper_intercept_handling():

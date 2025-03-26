@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from confopt.conformalization import (
+from confopt.selection.conformalization import (
     LocallyWeightedConformalEstimator,
     QuantileConformalEstimator,
 )

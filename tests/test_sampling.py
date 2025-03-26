@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from confopt.sampling import (
+from confopt.selection.sampling import (
     PessimisticLowerBoundSampler,
     LowerBoundSampler,
     ThompsonSampler,
@@ -28,15 +28,11 @@ class TestPessimisticLowerBoundSampler:
 
 class TestLowerBoundSampler:
     @pytest.mark.parametrize(
-        "interval_width,cap,expected_lower,expected_upper",
-        [(0.8, 0.5, 0.1, 0.5), (0.8, None, 0.1, 0.9)],
+        "interval_width,expected_lower,expected_upper",
+        [(0.8, 0.1, 0.9)],
     )
-    def test_calculate_quantiles(
-        self, interval_width, cap, expected_lower, expected_upper
-    ):
-        sampler = LowerBoundSampler(
-            interval_width=interval_width, upper_quantile_cap=cap
-        )
+    def test_calculate_quantiles(self, interval_width, expected_lower, expected_upper):
+        sampler = LowerBoundSampler(interval_width=interval_width)
         interval = sampler._calculate_quantiles()
         assert interval.lower_quantile == pytest.approx(expected_lower)
         assert interval.upper_quantile == pytest.approx(expected_upper)

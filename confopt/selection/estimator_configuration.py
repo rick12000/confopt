@@ -257,13 +257,11 @@ ESTIMATOR_REGISTRY = {
                     )
                 ),
             ],
-            weighting_strategy="inverse_error",
+            weighting_strategy="meta_learner",
             cv=3,
         ),
         estimator_parameter_space={
-            "weighting_strategy": CategoricalRange(
-                choices=["inverse_error", "rank", "uniform", "meta_learner"]
-            ),
+            "weighting_strategy": CategoricalRange(choices=["uniform", "meta_learner"]),
         },
     ),
     SFQENS_NAME: EstimatorConfig(
@@ -285,13 +283,11 @@ ESTIMATOR_REGISTRY = {
                     )
                 ),
             ],
-            weighting_strategy="inverse_error",
+            weighting_strategy="meta_learner",
             cv=3,
         ),
         estimator_parameter_space={
-            "weighting_strategy": CategoricalRange(
-                choices=["inverse_error", "rank", "uniform", "meta_learner"]
-            ),
+            "weighting_strategy": CategoricalRange(choices=["uniform", "meta_learner"]),
         },
     ),
     MFENS_NAME: EstimatorConfig(
@@ -319,13 +315,11 @@ ESTIMATOR_REGISTRY = {
                     )
                 ),
             ],
-            weighting_strategy="inverse_error",
+            weighting_strategy="meta_learner",
             cv=3,
         ),
         estimator_parameter_space={
-            "weighting_strategy": CategoricalRange(
-                choices=["inverse_error", "rank", "uniform", "meta_learner"]
-            ),
+            "weighting_strategy": CategoricalRange(choices=["uniform", "meta_learner"]),
         },
     ),
 }

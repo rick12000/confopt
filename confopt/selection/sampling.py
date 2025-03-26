@@ -45,28 +45,15 @@ class LowerBoundSampler(PessimisticLowerBoundSampler):
         c: float = 1,
         interval_width: float = 0.8,
         adapter: Optional[DtACI] = None,
-        upper_quantile_cap: Optional[float] = None,
     ):
         self.beta_decay = beta_decay
         self.c = c
         self.t = 1
         self.beta = 1
-        self.upper_quantile_cap = upper_quantile_cap
 
         # Call at this position, there are initialization methods
         # in the base class:
         super().__init__(interval_width, adapter)
-
-    def _calculate_quantiles(self) -> QuantileInterval:
-        if self.upper_quantile_cap:
-            interval = QuantileInterval(
-                lower_quantile=self.alpha / 2, upper_quantile=self.upper_quantile_cap
-            )
-        else:
-            interval = QuantileInterval(
-                lower_quantile=self.alpha / 2, upper_quantile=1 - (self.alpha / 2)
-            )
-        return interval
 
     def update_exploration_step(self):
         self.t += 1

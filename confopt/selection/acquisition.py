@@ -208,10 +208,6 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         self.single_fit = single_fit
         self.point_estimator = None
 
-        if isinstance(self.sampler, LowerBoundSampler):
-            self.sampler.upper_quantile_cap = 0.5
-            self.sampler.quantiles = self.sampler._calculate_quantiles()
-
         # Create the conformal estimator with alphas from the sampler
         self.conformal_estimator = QuantileConformalEstimator(
             quantile_estimator_architecture=quantile_estimator_architecture,
@@ -228,6 +224,11 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         tuning_iterations: Optional[int] = 0,
         random_state: Optional[int] = None,
     ):
+        if isinstance(self.sampler, (PessimisticLowerBoundSampler, LowerBoundSampler)):
+            upper_quantile_cap = 0.5
+        else:
+            upper_quantile_cap = None
+
         """Fit the conformal estimator."""
         # Initialize and fit optimistic estimator if needed for Thompson sampling
         if (
@@ -242,9 +243,6 @@ class QuantileConformalSearcher(BaseConformalSearcher):
                 X=np.vstack((X_train, X_val)),
                 y=np.concatenate((y_train, y_val)),
             )
-
-        # Get upper_quantile_cap from sampler if available
-        upper_quantile_cap = getattr(self.sampler, "upper_quantile_cap", None)
 
         self.conformal_estimator.fit(
             X_train=X_train,

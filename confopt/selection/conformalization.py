@@ -203,12 +203,10 @@ class QuantileConformalEstimator:
         quantile_estimator_architecture: str,
         alphas: List[float],
         n_pre_conformal_trials: int = 20,
-        upper_quantile_cap: Optional[float] = None,
     ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
         self.alphas = alphas
         self.n_pre_conformal_trials = n_pre_conformal_trials
-        self.upper_quantile_cap = upper_quantile_cap
 
         self.quantile_estimator = None
         self.nonconformity_scores = None
@@ -216,13 +214,13 @@ class QuantileConformalEstimator:
         self.conformalize_predictions = False
         self.primary_estimator_error = None
 
-    def _alpha_to_quantiles(self, alpha: float) -> Tuple[float, float]:
+    def _alpha_to_quantiles(
+        self, alpha: float, upper_quantile_cap: Optional[float] = None
+    ) -> Tuple[float, float]:
         """Convert alpha to lower and upper quantiles"""
         lower_quantile = alpha / 2
         upper_quantile = (
-            self.upper_quantile_cap
-            if self.upper_quantile_cap is not None
-            else 1 - lower_quantile
+            upper_quantile_cap if upper_quantile_cap is not None else 1 - lower_quantile
         )
         return lower_quantile, upper_quantile
 
@@ -234,15 +232,20 @@ class QuantileConformalEstimator:
         y_val: np.array,
         tuning_iterations: Optional[int] = 0,
         min_obs_for_tuning: int = 15,
+        upper_quantile_cap: Optional[float] = None,
         random_state: Optional[int] = None,
     ):
         """
         Fit the quantile estimator for all specified alphas.
         """
+        self.upper_quantile_cap = upper_quantile_cap
+
         # Prepare all quantiles needed for all alphas
         all_quantiles = []
         for alpha in self.alphas:
-            lower_quantile, upper_quantile = self._alpha_to_quantiles(alpha)
+            lower_quantile, upper_quantile = self._alpha_to_quantiles(
+                alpha, upper_quantile_cap
+            )
             all_quantiles.append(lower_quantile)
             all_quantiles.append(upper_quantile)
         all_quantiles = sorted(list(set(all_quantiles)))  # Remove duplicates and sort
@@ -276,12 +279,13 @@ class QuantileConformalEstimator:
 
         # Fit the model and calculate nonconformity scores if enough data
         if len(X_train) + len(X_val) > self.n_pre_conformal_trials:
-            # Pass quantiles and upper_quantile_cap to fit
             self.quantile_estimator.fit(X_train, y_train, quantiles=all_quantiles)
 
             # Calculate nonconformity scores for each alpha on validation data
             for i, alpha in enumerate(self.alphas):
-                lower_quantile, upper_quantile = self._alpha_to_quantiles(alpha)
+                lower_quantile, upper_quantile = self._alpha_to_quantiles(
+                    alpha, upper_quantile_cap
+                )
 
                 # Get the indices of lower and upper quantiles using dictionary lookup
                 lower_idx = self.quantile_indices[lower_quantile]
@@ -314,7 +318,9 @@ class QuantileConformalEstimator:
         # Calculate performance metrics
         scores = []
         for alpha in self.alphas:
-            lower_quantile, upper_quantile = self._alpha_to_quantiles(alpha)
+            lower_quantile, upper_quantile = self._alpha_to_quantiles(
+                alpha, upper_quantile_cap
+            )
             lower_idx = self.quantile_indices[lower_quantile]
             upper_idx = self.quantile_indices[upper_quantile]
 
@@ -351,7 +357,9 @@ class QuantileConformalEstimator:
         prediction = self.quantile_estimator.predict(X)
 
         for i, alpha in enumerate(self.alphas):
-            lower_quantile, upper_quantile = self._alpha_to_quantiles(alpha)
+            lower_quantile, upper_quantile = self._alpha_to_quantiles(
+                alpha, self.upper_quantile_cap
+            )
 
             # Get the indices of lower and upper quantiles using dictionary lookup
             lower_idx = self.quantile_indices[lower_quantile]
@@ -412,7 +420,9 @@ class QuantileConformalEstimator:
 
         # Get the alpha and corresponding quantiles
         alpha = self.alphas[alpha_idx]
-        lower_quantile, upper_quantile = self._alpha_to_quantiles(alpha)
+        lower_quantile, upper_quantile = self._alpha_to_quantiles(
+            alpha, self.upper_quantile_cap
+        )
         lower_idx = self.quantile_indices[lower_quantile]
         upper_idx = self.quantile_indices[upper_quantile]
 

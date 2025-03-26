@@ -1,6 +1,6 @@
 import numpy as np
 
-from confopt.utils import (
+from confopt.utils.encoding import (
     get_tuning_configurations,
     ConfigurationEncoder,
 )

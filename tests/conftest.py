@@ -6,19 +6,18 @@ import pytest
 from confopt.tuning import (
     ObjectiveConformalSearcher,
 )
-from confopt.utils import get_tuning_configurations
+from confopt.utils.encoding import get_tuning_configurations
 from hashlib import sha256
 
 from confopt.data_classes import FloatRange
 from sklearn.base import BaseEstimator
-from confopt.config import ESTIMATOR_REGISTRY
-from confopt.quantile_wrappers import (
+from confopt.selection.estimator_configuration import ESTIMATOR_REGISTRY
+from confopt.selection.quantile_estimators import (
     BaseSingleFitQuantileEstimator,
     BaseMultiFitQuantileEstimator,
 )
-from confopt.ensembling import (
-    MultiFitQuantileEnsembleEstimator,
-    SingleFitQuantileEnsembleEstimator,
+from confopt.selection.ensembling import (
+    QuantileEnsembleEstimator,
     PointEnsembleEstimator,
 )
 
@@ -30,12 +29,12 @@ MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES = []
 for estimator_name, estimator_config in ESTIMATOR_REGISTRY.items():
     if isinstance(
         estimator_config.estimator_instance,
-        (BaseMultiFitQuantileEstimator, MultiFitQuantileEnsembleEstimator),
+        (BaseMultiFitQuantileEstimator, QuantileEnsembleEstimator),
     ):
         MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
     elif isinstance(
         estimator_config.estimator_instance,
-        (BaseSingleFitQuantileEstimator, SingleFitQuantileEnsembleEstimator),
+        (BaseSingleFitQuantileEstimator, QuantileEnsembleEstimator),
     ):
         SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
     elif isinstance(

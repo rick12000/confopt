@@ -238,7 +238,7 @@ class QuantileTuner(RandomTuner):
             hi_score = mean_pinball_loss(Y_val, hi_y_pred, alpha=self.quantiles[1])
             return (lo_score + hi_score) / 2
         elif isinstance(model, BaseSingleFitQuantileEstimator):
-            prediction = model.predict(X_val, quantiles=self.quantiles)
+            prediction = model.predict(X_val)
             scores_list = []
             for i, quantile in enumerate(self.quantiles):
                 y_pred = prediction[:, i]

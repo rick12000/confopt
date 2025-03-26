@@ -28,7 +28,7 @@ class BaseEnsembleEstimator:
         self,
         estimators: List[BaseEstimator],
         cv: int = 3,
-        weighting_strategy: Literal["uniform", "meta_learner"] = "uniform",
+        weighting_strategy: Literal["uniform", "meta_learner"] = "meta_learner",
         random_state: Optional[int] = None,
     ):
         if len(estimators) < 2:

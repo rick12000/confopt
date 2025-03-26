@@ -5,12 +5,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from confopt.tracking import RuntimeTracker, Trial
+from confopt.utils.tracking import RuntimeTracker, Trial
 from confopt.tuning import (
     process_and_split_estimation_data,
     ObjectiveConformalSearcher,
 )
-from confopt.acquisition import (
+from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
     LowerBoundSampler,
 )
@@ -146,7 +146,7 @@ def test_process_and_split_estimation_data__reproducibility(dummy_tuner):
 
 def test_get_tuning_configurations__reproducibility(search_space):
     """Test reproducibility of configuration generation"""
-    from confopt.utils import get_tuning_configurations
+    from confopt.utils.encoding import get_tuning_configurations
 
     # First call with seed
     np.random.seed(DEFAULT_SEED)
