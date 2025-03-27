@@ -413,8 +413,7 @@ class ConformalTuner:
                 searcher.sampler, "adapters"
             ):
                 searcher.update_interval_width(
-                    sampled_idx=minimal_searchable_idx,
-                    sampled_performance=validation_performance,
+                    sampled_y=validation_performance,
                     sampled_X=minimal_tabularized_configuration,
                 )
 
