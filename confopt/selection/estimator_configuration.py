@@ -8,7 +8,7 @@ from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.kernel_ridge import KernelRidge
 from sklearn.neighbors import KNeighborsRegressor
 from lightgbm import LGBMRegressor
-from confopt.selection.quantile_estimators import (
+from confopt.selection.quantile_estimation import (
     BaseSingleFitQuantileEstimator,
     BaseMultiFitQuantileEstimator,
     QuantileGBM,
@@ -257,11 +257,11 @@ ESTIMATOR_REGISTRY = {
                     )
                 ),
             ],
-            weighting_strategy="meta_learner",
+            weighting_strategy="linear_stack",
             cv=3,
         ),
         estimator_parameter_space={
-            "weighting_strategy": CategoricalRange(choices=["uniform", "meta_learner"]),
+            "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
         },
     ),
     SFQENS_NAME: EstimatorConfig(
@@ -283,11 +283,11 @@ ESTIMATOR_REGISTRY = {
                     )
                 ),
             ],
-            weighting_strategy="meta_learner",
+            weighting_strategy="linear_stack",
             cv=3,
         ),
         estimator_parameter_space={
-            "weighting_strategy": CategoricalRange(choices=["uniform", "meta_learner"]),
+            "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
         },
     ),
     MFENS_NAME: EstimatorConfig(
@@ -315,11 +315,11 @@ ESTIMATOR_REGISTRY = {
                     )
                 ),
             ],
-            weighting_strategy="meta_learner",
+            weighting_strategy="linear_stack",
             cv=3,
         ),
         estimator_parameter_space={
-            "weighting_strategy": CategoricalRange(choices=["uniform", "meta_learner"]),
+            "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
         },
     ),
 }
