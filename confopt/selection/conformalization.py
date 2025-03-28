@@ -100,6 +100,7 @@ class LocallyWeightedConformalEstimator:
             abs(y_val - self.pe_estimator.predict(X_val)) / var_pred
         )
 
+        # TODO: Temporary, for paper calculations:
         self.primary_estimator_error = mean_squared_error(
             self.pe_estimator.predict(X=X_val), y_val
         )
@@ -143,6 +144,16 @@ class LocallyWeightedConformalEstimator:
         return betas
 
 
+def alpha_to_quantiles(
+    alpha: float, upper_quantile_cap: Optional[float] = None
+) -> Tuple[float, float]:
+    lower_quantile = alpha / 2
+    upper_quantile = (
+        upper_quantile_cap if upper_quantile_cap is not None else 1 - lower_quantile
+    )
+    return lower_quantile, upper_quantile
+
+
 class QuantileConformalEstimator:
     def __init__(
         self,
@@ -160,15 +171,6 @@ class QuantileConformalEstimator:
         self.conformalize_predictions = False
         self.primary_estimator_error = None
 
-    def _alpha_to_quantiles(
-        self, alpha: float, upper_quantile_cap: Optional[float] = None
-    ) -> Tuple[float, float]:
-        lower_quantile = alpha / 2
-        upper_quantile = (
-            upper_quantile_cap if upper_quantile_cap is not None else 1 - lower_quantile
-        )
-        return lower_quantile, upper_quantile
-
     def fit(
         self,
         X_train: np.array,
@@ -184,12 +186,12 @@ class QuantileConformalEstimator:
 
         all_quantiles = []
         for alpha in self.alphas:
-            lower_quantile, upper_quantile = self._alpha_to_quantiles(
+            lower_quantile, upper_quantile = alpha_to_quantiles(
                 alpha, upper_quantile_cap
             )
             all_quantiles.append(lower_quantile)
             all_quantiles.append(upper_quantile)
-        all_quantiles = sorted(list(set(all_quantiles)))
+        all_quantiles = sorted(all_quantiles)
 
         self.quantile_indices = {q: i for i, q in enumerate(all_quantiles)}
 
@@ -202,7 +204,7 @@ class QuantileConformalEstimator:
                 n_searches=tuning_iterations,
             )
         else:
-            initialization_params = {}
+            initialization_params = None
 
         self.quantile_estimator = initialize_estimator(
             estimator_architecture=self.quantile_estimator_architecture,
@@ -211,12 +213,11 @@ class QuantileConformalEstimator:
         )
 
         self.nonconformity_scores = [np.array([]) for _ in self.alphas]
-
         if len(X_train) + len(X_val) > self.n_pre_conformal_trials:
             self.quantile_estimator.fit(X_train, y_train, quantiles=all_quantiles)
 
             for i, alpha in enumerate(self.alphas):
-                lower_quantile, upper_quantile = self._alpha_to_quantiles(
+                lower_quantile, upper_quantile = alpha_to_quantiles(
                     alpha, upper_quantile_cap
                 )
 
@@ -231,7 +232,6 @@ class QuantileConformalEstimator:
                 self.nonconformity_scores[i] = np.maximum(
                     lower_conformal_deviations, upper_conformal_deviations
                 )
-
             self.conformalize_predictions = True
         else:
             self.quantile_estimator.fit(
@@ -241,11 +241,10 @@ class QuantileConformalEstimator:
             )
             self.conformalize_predictions = False
 
-        self.all_quantiles = all_quantiles
-
+        # TODO: Temporary, for paper calculations:
         scores = []
         for alpha in self.alphas:
-            lower_quantile, upper_quantile = self._alpha_to_quantiles(
+            lower_quantile, upper_quantile = alpha_to_quantiles(
                 alpha, upper_quantile_cap
             )
             lower_idx = self.quantile_indices[lower_quantile]
@@ -258,7 +257,7 @@ class QuantileConformalEstimator:
 
             lo_score = mean_pinball_loss(y_val, lo_y_pred, alpha=lower_quantile)
             hi_score = mean_pinball_loss(y_val, hi_y_pred, alpha=upper_quantile)
-            scores.append((lo_score + hi_score) / 2)
+            scores.extend([lo_score, hi_score])
 
         self.primary_estimator_error = np.mean(scores)
 
@@ -266,18 +265,18 @@ class QuantileConformalEstimator:
         if self.quantile_estimator is None:
             raise ValueError("Estimator must be fitted before prediction")
 
-        results = []
+        intervals = []
         prediction = self.quantile_estimator.predict(X)
 
         for i, alpha in enumerate(self.alphas):
-            lower_quantile, upper_quantile = self._alpha_to_quantiles(
+            lower_quantile, upper_quantile = alpha_to_quantiles(
                 alpha, self.upper_quantile_cap
             )
 
             lower_idx = self.quantile_indices[lower_quantile]
             upper_idx = self.quantile_indices[upper_quantile]
 
-            if self.conformalize_predictions and len(self.nonconformity_scores[i]) > 0:
+            if self.conformalize_predictions:
                 score = np.quantile(
                     self.nonconformity_scores[i],
                     1 - alpha,
@@ -288,23 +287,23 @@ class QuantileConformalEstimator:
                 lower_interval_bound = np.array(prediction[:, lower_idx])
                 upper_interval_bound = np.array(prediction[:, upper_idx])
 
-            results.append(
+            intervals.append(
                 ConformalBounds(
                     lower_bounds=lower_interval_bound, upper_bounds=upper_interval_bound
                 )
             )
 
-        return results
+        return intervals
 
     def calculate_betas(self, X: np.array, y_true: float) -> list[float]:
         if self.quantile_estimator is None:
             raise ValueError("Estimator must be fitted before calculating beta")
 
-        X = X.reshape(1, -1) if X.ndim == 1 else X
+        X = X.reshape(1, -1)
 
         betas = []
         for i, alpha in enumerate(self.alphas):
-            lower_quantile, upper_quantile = self._alpha_to_quantiles(
+            lower_quantile, upper_quantile = alpha_to_quantiles(
                 alpha, self.upper_quantile_cap
             )
             lower_idx = self.quantile_indices[lower_quantile]

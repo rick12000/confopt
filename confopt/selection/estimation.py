@@ -1,7 +1,8 @@
 import logging
-from typing import Dict, Optional, List, Tuple, Any
+from typing import Dict, Optional, List, Union, Tuple, Any
 import copy
 
+from sklearn.base import BaseEstimator
 import numpy as np
 from sklearn.metrics import mean_pinball_loss, mean_squared_error
 from sklearn.model_selection import KFold
@@ -14,6 +15,7 @@ from confopt.selection.quantile_estimators import (
     BaseSingleFitQuantileEstimator,
     BaseMultiFitQuantileEstimator,
 )
+from confopt.selection.ensembling import QuantileEnsembleEstimator
 from confopt.utils.encoding import get_tuning_configurations
 
 logger = logging.getLogger(__name__)
@@ -24,11 +26,11 @@ def initialize_estimator(
     initialization_params: Dict = None,
     random_state: Optional[int] = None,
 ):
+    if initialization_params is not None:
+        initialization_params["random_state"] = random_state
+
     estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
     estimator = copy.deepcopy(estimator_config.estimator_instance)
-    if random_state is not None and hasattr(estimator, "random_state"):
-        initialization_params = initialization_params or {}
-        initialization_params["random_state"] = random_state
     if initialization_params:
         for param_name, param_value in initialization_params.items():
             if hasattr(estimator, param_name):
@@ -41,8 +43,9 @@ def initialize_estimator(
 
 
 def average_scores_across_folds(
-    scored_configurations: List[List[Tuple[str, float]]], scores: List[float]
-) -> Tuple[List[List[Tuple[str, float]]], List[float]]:
+    scored_configurations: List[List[Dict]], scores: List[float]
+) -> Tuple[List[Dict], List[float]]:
+    # TODO: Not the nicest way to do this
     aggregated_scores = []
     fold_counts = []
     aggregated_configurations = []
@@ -102,9 +105,6 @@ class RandomTuner:
             X_train, X_val = X[train_index, :], X[test_index, :]
             Y_train, Y_val = y[train_index], y[test_index]
             for configuration in configurations:
-                logger.debug(
-                    f"Evaluating search model parameter configuration: {configuration}"
-                )
                 model = initialize_estimator(
                     estimator_architecture=estimator_config.estimator_name,
                     initialization_params=configuration,
@@ -129,15 +129,17 @@ class RandomTuner:
         )
         return cross_fold_scored_configurations, cross_fold_scores
 
-    def _fit_model(self, model: Any, X_train: np.array, Y_train: np.array) -> None:
+    def _fit_model(self, model, X_train: np.array, Y_train: np.array) -> None:
         raise NotImplementedError("Subclasses must implement _fit_model")
 
-    def _evaluate_model(self, model: Any, X_val: np.array, Y_val: np.array) -> float:
+    def _evaluate_model(self, model, X_val: np.array, Y_val: np.array) -> float:
         raise NotImplementedError("Subclasses must implement _evaluate_model")
 
 
 class PointTuner(RandomTuner):
-    def _fit_model(self, model: Any, X_train: np.array, Y_train: np.array) -> None:
+    def _fit_model(
+        self, model: BaseEstimator, X_train: np.array, Y_train: np.array
+    ) -> None:
         model.fit(X_train, Y_train)
 
     def _evaluate_model(self, model: Any, X_val: np.array, Y_val: np.array) -> float:
@@ -146,32 +148,36 @@ class PointTuner(RandomTuner):
 
 
 class QuantileTuner(RandomTuner):
-    def __init__(
-        self, random_state: Optional[int] = None, quantiles: List[float] = None
-    ):
+    def __init__(self, quantiles: List[float], random_state: Optional[int] = None):
         super().__init__(random_state)
-        if quantiles is None or len(quantiles) == 0:
-            raise ValueError("Quantiles must be provided for QuantileTuner")
         self.quantiles = quantiles
 
-    def _fit_model(self, model: Any, X_train: np.array, Y_train: np.array) -> None:
+    def _fit_model(
+        self,
+        model: Union[
+            QuantileEnsembleEstimator,
+            BaseMultiFitQuantileEstimator,
+            BaseSingleFitQuantileEstimator,
+        ],
+        X_train: np.array,
+        Y_train: np.array,
+    ) -> None:
         model.fit(X_train, Y_train, quantiles=self.quantiles)
 
-    def _evaluate_model(self, model: Any, X_val: np.array, Y_val: np.array) -> float:
-        if isinstance(model, BaseMultiFitQuantileEstimator):
-            prediction = model.predict(X_val)
-            lo_y_pred = prediction[:, 0]
-            hi_y_pred = prediction[:, 1]
-            lo_score = mean_pinball_loss(Y_val, lo_y_pred, alpha=self.quantiles[0])
-            hi_score = mean_pinball_loss(Y_val, hi_y_pred, alpha=self.quantiles[1])
-            return (lo_score + hi_score) / 2
-        elif isinstance(model, BaseSingleFitQuantileEstimator):
-            prediction = model.predict(X_val)
-            scores_list = []
-            for i, quantile in enumerate(self.quantiles):
-                y_pred = prediction[:, i]
-                quantile_score = mean_pinball_loss(Y_val, y_pred, alpha=quantile)
-                scores_list.append(quantile_score)
-            return sum(scores_list) / len(scores_list)
-        else:
-            raise ValueError("Unknown quantile model type")
+    def _evaluate_model(
+        self,
+        model: Union[
+            QuantileEnsembleEstimator,
+            BaseMultiFitQuantileEstimator,
+            BaseSingleFitQuantileEstimator,
+        ],
+        X_val: np.array,
+        Y_val: np.array,
+    ) -> float:
+        prediction = model.predict(X_val)
+        scores_list = []
+        for i, quantile in enumerate(self.quantiles):
+            y_pred = prediction[:, i]
+            quantile_score = mean_pinball_loss(Y_val, y_pred, alpha=quantile)
+            scores_list.append(quantile_score)
+        return sum(scores_list) / len(scores_list)

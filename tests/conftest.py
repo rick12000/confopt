@@ -7,7 +7,6 @@ from confopt.tuning import (
     ConformalTuner,
 )
 from confopt.utils.encoding import get_tuning_configurations
-from hashlib import sha256
 
 from confopt.data_classes import FloatRange
 from sklearn.base import BaseEstimator
@@ -26,36 +25,37 @@ DEFAULT_SEED = 1234
 POINT_ESTIMATOR_ARCHITECTURES = []
 SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES = []
 MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES = []
+QUANTILE_ESTIMATOR_ARCHITECTURES = []
 for estimator_name, estimator_config in ESTIMATOR_REGISTRY.items():
     if isinstance(
         estimator_config.estimator_instance,
-        (BaseMultiFitQuantileEstimator, QuantileEnsembleEstimator),
+        (
+            BaseMultiFitQuantileEstimator,
+            BaseSingleFitQuantileEstimator,
+            QuantileEnsembleEstimator,
+        ),
+    ):
+        QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
+    if isinstance(
+        estimator_config.estimator_instance,
+        (BaseMultiFitQuantileEstimator),
     ):
         MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
     elif isinstance(
         estimator_config.estimator_instance,
-        (BaseSingleFitQuantileEstimator, QuantileEnsembleEstimator),
+        (BaseSingleFitQuantileEstimator),
     ):
         SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
     elif isinstance(
         estimator_config.estimator_instance, (BaseEstimator, PointEnsembleEstimator)
     ):
         POINT_ESTIMATOR_ARCHITECTURES.append(estimator_name)
-    else:
-        raise ValueError(
-            f"Unknown estimator type: {estimator_config.estimator_instance}"
-        )
 
 
-def noisy_rastrigin(x, A=20, noise_seed=42, noise=0):
+def rastrigin(x, A=20):
     n = len(x)
-    x_bytes = x.tobytes()
-    combined_bytes = x_bytes + noise_seed.to_bytes(4, "big")
-    hash_value = int.from_bytes(sha256(combined_bytes).digest()[:4], "big")
-    rng = np.random.default_rng(hash_value)
     rastrigin_value = A * n + np.sum(x**2 - A * np.cos(2 * np.pi * x))
-    noise = rng.normal(loc=0.0, scale=noise)
-    return rastrigin_value + noise
+    return rastrigin_value
 
 
 class ObjectiveSurfaceGenerator:
@@ -66,7 +66,7 @@ class ObjectiveSurfaceGenerator:
         x = np.array(list(params.values()), dtype=float)
 
         if self.generator == "rastrigin":
-            y = noisy_rastrigin(x=x)
+            y = rastrigin(x=x)
 
         return y
 

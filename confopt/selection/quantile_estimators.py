@@ -13,14 +13,8 @@ class BaseMultiFitQuantileEstimator:
         self.trained_estimators = []
         self.quantiles = None
 
-    def fit(self, X: np.array, y: np.array, quantiles: List[float] = None):
-        if quantiles is not None:
-            self.quantiles = quantiles
-        if self.quantiles is None or len(self.quantiles) == 0:
-            raise ValueError(
-                "Quantiles must be provided either in initialization or fit method"
-            )
-        self._validate_quantiles()
+    def fit(self, X: np.array, y: np.array, quantiles: List[float]):
+        self.quantiles = quantiles
         self.trained_estimators = []
         for quantile in self.quantiles:
             params_with_quantile = {**self.model_params, "alpha": quantile}
@@ -29,13 +23,10 @@ class BaseMultiFitQuantileEstimator:
             self.trained_estimators.append(quantile_estimator)
         return self
 
-    def _validate_quantiles(self):
-        if not all(0 <= q <= 1 for q in self.quantiles):
-            raise ValueError("All quantiles must be between 0 and 1")
-
     def predict(self, X: np.array) -> np.array:
         if not self.trained_estimators:
             raise RuntimeError("Model must be fitted before prediction")
+
         y_pred = np.column_stack(
             [estimator.predict(X) for estimator in self.trained_estimators]
         )
@@ -47,14 +38,8 @@ class BaseSingleFitQuantileEstimator:
         self.fitted_model = None
         self.quantiles = None
 
-    def fit(self, X: np.ndarray, y: np.ndarray, quantiles: List[float] = None):
+    def fit(self, X: np.ndarray, y: np.ndarray, quantiles: List[float]):
         self.quantiles = quantiles
-        if self.quantiles is None or len(self.quantiles) == 0:
-            raise ValueError("Quantiles must be provided in fit method")
-        # Validate quantiles
-        if not all(0 <= q <= 1 for q in self.quantiles):
-            raise ValueError("All quantiles must be between 0 and 1")
-        # Call implementation-specific fit
         self._fit_implementation(X, y)
         return self
 
@@ -69,11 +54,8 @@ class BaseSingleFitQuantileEstimator:
         )
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        if self.quantiles is None:
-            raise ValueError("Model must be fitted with quantiles before prediction")
         candidate_distribution = self._get_candidate_local_distribution(X)
-        percentiles = [q * 100 for q in self.quantiles]
-        quantile_preds = np.percentile(candidate_distribution, percentiles, axis=1).T
+        quantile_preds = np.quantile(candidate_distribution, self.quantiles, axis=1).T
         return quantile_preds
 
 
