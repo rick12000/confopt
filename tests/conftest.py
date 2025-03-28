@@ -8,7 +8,7 @@ from confopt.tuning import (
 )
 from confopt.utils.encoding import get_tuning_configurations
 
-from confopt.data_classes import FloatRange
+from confopt.data_classes import FloatRange, ConformalBounds
 from sklearn.base import BaseEstimator
 from confopt.selection.estimator_configuration import ESTIMATOR_REGISTRY
 from confopt.selection.quantile_estimators import (
@@ -146,3 +146,16 @@ def linear_data_drift():
     y[second_segment:] = 2.5 * X[second_segment:].flatten() + 8 + noise[second_segment:]
 
     return X, y
+
+
+@pytest.fixture
+def conformal_bounds():
+    # Create three deterministic conformal bounds
+    predictions = []
+    for i in range(3):
+        bounds = ConformalBounds(
+            lower_bounds=np.array([0.1, 0.2, 0.3, 0.4, 0.5]) * (i + 1),
+            upper_bounds=np.array([1.1, 1.2, 1.3, 1.4, 1.5]) * (i + 1),
+        )
+        predictions.append(bounds)
+    return predictions

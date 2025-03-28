@@ -1,6 +1,6 @@
 import logging
 from typing import Dict, Optional, List, Union, Tuple, Any
-import copy
+from copy import deepcopy
 
 from sklearn.base import BaseEstimator
 import numpy as np
@@ -26,13 +26,14 @@ def initialize_estimator(
     initialization_params: Dict = None,
     random_state: Optional[int] = None,
 ):
-    if initialization_params is not None:
-        initialization_params["random_state"] = random_state
+    initialization_params_copy = deepcopy(initialization_params)
+    if initialization_params_copy is not None:
+        initialization_params_copy["random_state"] = random_state
 
     estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
-    estimator = copy.deepcopy(estimator_config.estimator_instance)
-    if initialization_params:
-        for param_name, param_value in initialization_params.items():
+    estimator = deepcopy(estimator_config.estimator_instance)
+    if initialization_params_copy:
+        for param_name, param_value in initialization_params_copy.items():
             if hasattr(estimator, param_name):
                 setattr(estimator, param_name, param_value)
             else:

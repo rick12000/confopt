@@ -18,6 +18,35 @@ from confopt.selection.estimation import initialize_estimator
 logger = logging.getLogger(__name__)
 
 
+def calculate_ucb_predictions(
+    lower_bound: np.ndarray, interval_width: np.ndarray, beta: float
+) -> np.ndarray:
+    return lower_bound - beta * interval_width
+
+
+def calculate_thompson_predictions(
+    predictions_per_interval: List[ConformalBounds],
+    enable_optimistic_sampling: bool = False,
+    point_predictions: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    # Get the number of samples from the first interval's bounds
+    n_samples = len(predictions_per_interval[0].lower_bounds)
+    n_intervals = len(predictions_per_interval)
+
+    interval_indices = np.random.choice(n_intervals, size=n_samples)
+    lower_bounds = np.array(
+        [
+            predictions_per_interval[idx].lower_bounds[i]
+            for i, idx in enumerate(interval_indices)
+        ]
+    )
+
+    if enable_optimistic_sampling and point_predictions is not None:
+        lower_bounds = np.minimum(lower_bounds, point_predictions)
+
+    return lower_bounds
+
+
 class BaseConformalSearcher(ABC):
     def __init__(
         self,
@@ -112,7 +141,6 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
 
     def _predict_with_pessimistic_lower_bound(self, X: np.array):
         self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
-
         return self.predictions_per_interval[0].lower_bounds
 
     def _predict_with_ucb(self, X: np.array):
@@ -122,11 +150,16 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
             self.conformal_estimator.pe_estimator.predict(X)
         ).reshape(-1, 1)
 
-        interval_width = (
-            self.predictions_per_interval[0].upper_bounds
-            - self.predictions_per_interval[0].lower_bounds
+        interval = self.predictions_per_interval[0]
+        interval_width = (interval.upper_bounds - interval.lower_bounds).reshape(
+            -1, 1
+        ) / 2
+
+        tracked_lower_bounds = calculate_ucb_predictions(
+            lower_bound=point_estimates,
+            interval_width=interval_width,
+            beta=self.sampler.beta,
         )
-        tracked_lower_bounds = point_estimates - self.sampler.beta * interval_width / 2
 
         self.sampler.update_exploration_step()
 
@@ -135,24 +168,15 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
     def _predict_with_thompson(self, X: np.array):
         self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
 
-        n_samples = X.shape[0]
-        n_intervals = len(self.predictions_per_interval)
-
-        interval_indices = np.random.choice(n_intervals, size=n_samples)
-
-        tracked_lower_bounds = np.array(
-            [
-                self.predictions_per_interval[idx].lower_bounds[i]
-                for i, idx in enumerate(interval_indices)
-            ]
-        )
+        point_predictions = None
         if self.sampler.enable_optimistic_sampling:
-            point_estimates = np.array(
-                self.conformal_estimator.pe_estimator.predict(X)
-            ).reshape(-1, 1)
-            tracked_lower_bounds = np.minimum(tracked_lower_bounds, point_estimates)
+            point_predictions = self.conformal_estimator.pe_estimator.predict(X)
 
-        return tracked_lower_bounds
+        return calculate_thompson_predictions(
+            predictions_per_interval=self.predictions_per_interval,
+            enable_optimistic_sampling=self.sampler.enable_optimistic_sampling,
+            point_predictions=point_predictions,
+        )
 
     def _calculate_betas(self, X: np.array, y_true: float) -> float:
         return self.conformal_estimator.calculate_betas(X, y_true)
@@ -216,7 +240,6 @@ class QuantileConformalSearcher(BaseConformalSearcher):
 
     def _predict_with_pessimistic_lower_bound(self, X: np.array):
         self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
-
         return self.predictions_per_interval[0].lower_bounds
 
     def _predict_with_ucb(self, X: np.array):
@@ -225,8 +248,10 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         interval = self.predictions_per_interval[0]
         interval_width = interval.upper_bounds - interval.lower_bounds
 
-        tracked_lower_bounds = (
-            interval.upper_bounds - self.sampler.beta * interval_width
+        tracked_lower_bounds = calculate_ucb_predictions(
+            lower_bound=interval.upper_bounds,
+            interval_width=interval_width,
+            beta=self.sampler.beta,
         )
 
         self.sampler.update_exploration_step()
@@ -236,21 +261,17 @@ class QuantileConformalSearcher(BaseConformalSearcher):
     def _predict_with_thompson(self, X: np.array):
         self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
 
-        n_samples = X.shape[0]
-        n_intervals = len(self.predictions_per_interval)
-
-        interval_indices = np.random.choice(n_intervals, size=n_samples)
-
-        lower_bounds = np.array(
-            [
-                self.predictions_per_interval[idx].lower_bounds[i]
-                for i, idx in enumerate(interval_indices)
-            ]
-        )
-
+        point_predictions = None
         if self.sampler.enable_optimistic_sampling:
-            median_predictions = self.point_estimator.predict(X)
-            lower_bounds = np.minimum(lower_bounds, median_predictions)
+            point_predictions = getattr(self, "point_estimator", None)
+            if point_predictions:
+                point_predictions = point_predictions.predict(X)
+
+        lower_bounds = calculate_thompson_predictions(
+            predictions_per_interval=self.predictions_per_interval,
+            enable_optimistic_sampling=self.sampler.enable_optimistic_sampling,
+            point_predictions=point_predictions,
+        )
 
         return lower_bounds
 

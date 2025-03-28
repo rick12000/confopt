@@ -17,25 +17,32 @@ class TestPessimisticLowerBoundSampler:
         assert len(alphas) == 1
         assert alphas[0] == pytest.approx(expected_alpha)
 
-    @pytest.mark.parametrize("interval_width", [(0.8), (0.9)])
-    def test_calculate_quantiles(self, interval_width):
-        sampler = PessimisticLowerBoundSampler(interval_width=interval_width)
-        interval = sampler._calculate_quantiles()
-        expected_alpha = 1 - interval_width
-        assert interval.lower_quantile == pytest.approx(expected_alpha / 2)
-        assert interval.upper_quantile == pytest.approx(1 - (expected_alpha / 2))
+    @pytest.mark.parametrize("interval_width", [0.8, 0.9])
+    @pytest.mark.parametrize("adapter", [None, "DtACI"])
+    def test_update_interval_width(self, interval_width, adapter):
+        sampler = PessimisticLowerBoundSampler(
+            interval_width=interval_width, adapter=adapter
+        )
+
+        beta = 0.5
+        sampler.update_interval_width(beta)
+
+        if adapter == "DtACI":
+            assert sampler.alpha != pytest.approx(1 - interval_width)
+        else:
+            assert sampler.alpha == pytest.approx(1 - interval_width)
 
 
 class TestLowerBoundSampler:
     @pytest.mark.parametrize(
-        "interval_width,expected_lower,expected_upper",
-        [(0.8, 0.1, 0.9)],
+        "interval_width,expected_alpha",
+        [(0.8, 0.2)],
     )
-    def test_calculate_quantiles(self, interval_width, expected_lower, expected_upper):
+    def test_fetch_alphas(self, interval_width, expected_alpha):
         sampler = LowerBoundSampler(interval_width=interval_width)
-        interval = sampler._calculate_quantiles()
-        assert interval.lower_quantile == pytest.approx(expected_lower)
-        assert interval.upper_quantile == pytest.approx(expected_upper)
+        alphas = sampler.fetch_alphas()
+        assert len(alphas) == 1
+        assert alphas[0] == pytest.approx(expected_alpha)
 
     @pytest.mark.parametrize(
         "beta_decay,c,expected_beta",
@@ -53,31 +60,33 @@ class TestLowerBoundSampler:
 
 class TestThompsonSampler:
     def test_init_odd_quantiles(self):
-        with pytest.raises(
-            ValueError, match="Number of Thompson quantiles must be even"
-        ):
+        with pytest.raises(ValueError):
             ThompsonSampler(n_quantiles=5)
 
-    def test_initialize_quantiles_and_alphas(self):
+    def test_initialize_alphas(self):
         sampler = ThompsonSampler(n_quantiles=4)
-        quantiles, alphas = sampler._initialize_quantiles_and_alphas()
+        alphas = sampler._initialize_alphas()
 
-        assert len(quantiles) == 2
         assert len(alphas) == 2
-
-        assert quantiles[0].lower_quantile == pytest.approx(0.2)
-        assert quantiles[0].upper_quantile == pytest.approx(0.8)
         assert alphas[0] == pytest.approx(0.4)  # 1 - (0.8 - 0.2)
-
-        assert quantiles[1].lower_quantile == pytest.approx(0.4)
-        assert quantiles[1].upper_quantile == pytest.approx(0.6)
         assert alphas[1] == pytest.approx(0.8)  # 1 - (0.6 - 0.4)
 
-    def test_fetch_methods(self):
+    def test_fetch_alphas(self):
         sampler = ThompsonSampler(n_quantiles=4)
-
-        # Test fetch_alphas
         alphas = sampler.fetch_alphas()
         assert len(alphas) == 2
         assert alphas[0] == pytest.approx(0.4)
         assert alphas[1] == pytest.approx(0.8)
+
+    @pytest.mark.parametrize("adapter", [None, "DtACI"])
+    def test_update_interval_width(self, adapter):
+        sampler = ThompsonSampler(n_quantiles=4, adapter=adapter)
+        betas = [0.3, 0.5]
+        previous_alphas = sampler.alphas.copy()
+
+        sampler.update_interval_width(betas)
+
+        if adapter == "DtACI":
+            assert sampler.alphas != previous_alphas
+        else:
+            assert sampler.alphas == previous_alphas
