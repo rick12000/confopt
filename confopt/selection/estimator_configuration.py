@@ -1,7 +1,7 @@
 from typing import Dict, Any
 from pydantic import BaseModel
 
-from confopt.data_classes import IntRange, FloatRange, CategoricalRange
+from confopt.wrapping import IntRange, FloatRange, CategoricalRange
 
 # Import estimator classes
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
@@ -17,7 +17,7 @@ from confopt.selection.quantile_estimation import (
     QuantileKNN,
     QuantileLasso,
 )
-from confopt.data_classes import ParameterRange
+from confopt.wrapping import ParameterRange
 from confopt.selection.ensembling import (
     BaseEnsembleEstimator,
     QuantileEnsembleEstimator,
@@ -225,7 +225,6 @@ ESTIMATOR_REGISTRY = {
     QL_NAME: EstimatorConfig(
         estimator_name=QL_NAME,
         estimator_instance=QuantileLasso(
-            alpha=0.05,
             max_iter=200,
             p_tol=1e-4,
         ),
@@ -309,7 +308,6 @@ ESTIMATOR_REGISTRY = {
                 ),
                 deepcopy(
                     QuantileLasso(
-                        alpha=0.05,
                         max_iter=200,
                         p_tol=1e-4,
                     )

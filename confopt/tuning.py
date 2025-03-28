@@ -21,7 +21,7 @@ from confopt.selection.acquisition import (
     QuantileConformalSearcher,
     LowerBoundSampler,
 )
-from confopt.data_classes import ParameterRange
+from confopt.wrapping import ParameterRange
 
 logger = logging.getLogger(__name__)
 

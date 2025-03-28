@@ -128,7 +128,9 @@ class PointEnsembleEstimator(BaseEnsembleEstimator):
 class QuantileEnsembleEstimator(BaseEnsembleEstimator):
     def __init__(
         self,
-        estimators: List[BaseMultiFitQuantileEstimator, BaseSingleFitQuantileEstimator],
+        estimators: List[
+            Union[BaseMultiFitQuantileEstimator, BaseSingleFitQuantileEstimator]
+        ],
         cv: int = 3,
         weighting_strategy: Literal["uniform", "linear_stack"] = "linear_stack",
         random_state: Optional[int] = None,

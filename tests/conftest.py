@@ -8,10 +8,10 @@ from confopt.tuning import (
 )
 from confopt.utils.encoding import get_tuning_configurations
 
-from confopt.data_classes import FloatRange, ConformalBounds
+from confopt.wrapping import FloatRange, ConformalBounds
 from sklearn.base import BaseEstimator
 from confopt.selection.estimator_configuration import ESTIMATOR_REGISTRY
-from confopt.selection.quantile_estimators import (
+from confopt.selection.quantile_estimation import (
     BaseSingleFitQuantileEstimator,
     BaseMultiFitQuantileEstimator,
 )
@@ -19,6 +19,7 @@ from confopt.selection.ensembling import (
     QuantileEnsembleEstimator,
     PointEnsembleEstimator,
 )
+from unittest.mock import Mock
 
 DEFAULT_SEED = 1234
 
@@ -69,6 +70,19 @@ class ObjectiveSurfaceGenerator:
             y = rastrigin(x=x)
 
         return y
+
+
+@pytest.fixture
+def toy_dataset():
+    # Create a small toy dataset with deterministic values
+    X = np.array([[1, 2], [3, 4], [5, 6], [7, 8]])
+    y = np.array([2, 4, 6, 8])
+    return X, y
+
+
+@pytest.fixture
+def quantiles():
+    return [0.1, 0.5, 0.9]
 
 
 @pytest.fixture
@@ -159,3 +173,83 @@ def conformal_bounds():
         )
         predictions.append(bounds)
     return predictions
+
+
+@pytest.fixture
+def estimator1():
+    """Mock point estimator that returns deterministic values scaled to input size."""
+    mock = Mock()
+
+    def scaled_predict(X):
+        # Return values that scale based on input length
+        n_samples = len(X)
+        return np.arange(1, n_samples + 1) * 2  # [2, 4, 6, 8, ...] based on input size
+
+    mock.predict = Mock(side_effect=scaled_predict)
+    mock.fit = Mock(return_value=mock)
+    return mock
+
+
+@pytest.fixture
+def estimator2():
+    """Mock point estimator that returns different deterministic values scaled to input size."""
+    mock = Mock()
+
+    def scaled_predict(X):
+        # Return values that scale based on input length
+        n_samples = len(X)
+        return np.arange(2, n_samples + 2) * 2  # [4, 6, 8, 10, ...] based on input size
+
+    mock.predict = Mock(side_effect=scaled_predict)
+    mock.fit = Mock(return_value=mock)
+    return mock
+
+
+@pytest.fixture
+def quantile_estimator1(quantiles):
+    """Mock quantile estimator that returns deterministic quantile predictions for any input size."""
+    mock = Mock()
+
+    def scaled_predict(X):
+        # Return values for any size of X
+        n_samples = len(X)
+        result = np.zeros((n_samples, len(quantiles)))
+        for i, q in enumerate(quantiles):
+            result[:, i] = (i + 1) * 2  # Values 2, 4, 6 for quantiles
+        return result
+
+    mock.fit = Mock(return_value=mock)
+    mock.predict = Mock(side_effect=scaled_predict)
+    return mock
+
+
+@pytest.fixture
+def quantile_estimator2(quantiles):
+    """Mock quantile estimator that returns constant values across quantiles."""
+    mock = Mock()
+
+    def scaled_predict(X):
+        # Return values for any size of X
+        n_samples = len(X)
+        return np.ones((n_samples, len(quantiles))) * 4
+
+    mock.fit = Mock(return_value=mock)
+    mock.predict = Mock(side_effect=scaled_predict)
+    return mock
+
+
+@pytest.fixture
+def competing_estimator():
+    """Mock point estimator with different performance characteristics."""
+    mock = Mock()
+
+    def scaled_predict(X):
+        # Return values that scale based on input length
+        n_samples = len(X)
+        return (
+            np.arange(0.5, n_samples + 0.5) * 2
+        )  # [1, 3, 5, 7, ...] based on input size
+
+    mock.predict = Mock(side_effect=scaled_predict)
+    mock.fit = Mock(return_value=mock)
+    return mock

@@ -7,7 +7,7 @@ from confopt.selection.conformalization import (
     LocallyWeightedConformalEstimator,
     QuantileConformalEstimator,
 )
-from confopt.data_classes import ConformalBounds
+from confopt.wrapping import ConformalBounds
 from confopt.selection.sampling import (
     LowerBoundSampler,
     ThompsonSampler,

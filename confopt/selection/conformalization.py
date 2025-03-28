@@ -2,7 +2,7 @@ import logging
 import numpy as np
 from typing import Optional, Tuple, List
 from sklearn.metrics import mean_squared_error, mean_pinball_loss
-from confopt.data_classes import ConformalBounds
+from confopt.wrapping import ConformalBounds
 from confopt.utils.preprocessing import train_val_split
 from confopt.selection.estimation import (
     initialize_estimator,

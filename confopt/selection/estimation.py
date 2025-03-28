@@ -11,7 +11,7 @@ from confopt.selection.estimator_configuration import (
     ESTIMATOR_REGISTRY,
     EstimatorConfig,
 )
-from confopt.selection.quantile_estimators import (
+from confopt.selection.quantile_estimation import (
     BaseSingleFitQuantileEstimator,
     BaseMultiFitQuantileEstimator,
 )

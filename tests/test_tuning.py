@@ -14,7 +14,7 @@ from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
     LowerBoundSampler,
 )
-from confopt.data_classes import IntRange, FloatRange, CategoricalRange
+from confopt.wrapping import IntRange, FloatRange, CategoricalRange
 
 DEFAULT_SEED = 1234
 

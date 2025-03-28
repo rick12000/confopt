@@ -47,11 +47,6 @@ class CategoricalRange(BaseModel, Generic[T]):
 ParameterRange = Union[IntRange, FloatRange, CategoricalRange]
 
 
-class QuantileInterval(BaseModel):
-    lower_quantile: float
-    upper_quantile: float
-
-
 class ConformalBounds(BaseModel):
     lower_bounds: np.ndarray
     upper_bounds: np.ndarray

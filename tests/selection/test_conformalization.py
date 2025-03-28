@@ -57,12 +57,12 @@ def test_alpha_to_quantiles():
 
 
 class TestLocallyWeightedConformalEstimator:
+    @staticmethod
     @pytest.mark.parametrize("point_arch", POINT_ESTIMATOR_ARCHITECTURES)
     @pytest.mark.parametrize("variance_arch", POINT_ESTIMATOR_ARCHITECTURES)
     @pytest.mark.parametrize("tuning_iterations", [0, 2])
     @pytest.mark.parametrize("alphas", [[0.2], [0.1, 0.2]])
     def test_fit_predict_and_betas(
-        self,
         point_arch,
         variance_arch,
         tuning_iterations,
@@ -97,12 +97,12 @@ class TestLocallyWeightedConformalEstimator:
 
 
 class TestQuantileConformalEstimator:
+    @staticmethod
     @pytest.mark.parametrize("estimator_architecture", QUANTILE_ESTIMATOR_ARCHITECTURES)
     @pytest.mark.parametrize("tuning_iterations", [0, 2])
     @pytest.mark.parametrize("alphas", [[0.2], [0.1, 0.2]])
     @pytest.mark.parametrize("upper_quantile_cap", [None, 0.95])
     def test_fit_predict_and_betas(
-        self,
         estimator_architecture,
         tuning_iterations,
         alphas,
@@ -138,7 +138,8 @@ class TestQuantileConformalEstimator:
         betas = estimator.calculate_betas(test_point, test_value)
         validate_betas(betas, alphas)
 
-    def test_small_dataset_behavior(self):
+    @staticmethod
+    def test_small_dataset_behavior():
         alphas = [0.2]
         estimator = QuantileConformalEstimator(
             quantile_estimator_architecture=SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES[
@@ -161,7 +162,8 @@ class TestQuantileConformalEstimator:
 
         assert not estimator.conformalize_predictions
 
-    def test_upper_quantile_cap_effect(self, dummy_expanding_quantile_gaussian_dataset):
+    @staticmethod
+    def test_upper_quantile_cap_effect(dummy_expanding_quantile_gaussian_dataset):
         alphas = [0.2]
         estimator = QuantileConformalEstimator(
             quantile_estimator_architecture=SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES[
