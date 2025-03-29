@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 
-from confopt.selection.ensembling import (
+from confopt.selection.estimators.ensembling import (
     PointEnsembleEstimator,
     QuantileEnsembleEstimator,
     calculate_quantile_error,

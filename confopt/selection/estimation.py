@@ -11,11 +11,11 @@ from confopt.selection.estimator_configuration import (
     ESTIMATOR_REGISTRY,
     EstimatorConfig,
 )
-from confopt.selection.quantile_estimation import (
+from confopt.selection.estimators.quantile_estimation import (
     BaseSingleFitQuantileEstimator,
     BaseMultiFitQuantileEstimator,
 )
-from confopt.selection.ensembling import QuantileEnsembleEstimator
+from confopt.selection.estimators.ensembling import QuantileEnsembleEstimator
 from confopt.utils.encoding import get_tuning_configurations
 
 logger = logging.getLogger(__name__)

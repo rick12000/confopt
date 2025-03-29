@@ -59,7 +59,7 @@ class ConformalTuner:
         self,
         objective_function: callable,
         search_space: Dict[str, ParameterRange],
-        metric_optimization: Literal["direct", "inverse"],
+        metric_optimization: Literal["maximize", "minimize"],
         n_candidate_configurations: int = 10000,
         warm_start_configurations: Optional[List[Tuple[Dict, float]]] = None,
     ):
@@ -67,38 +67,17 @@ class ConformalTuner:
         self._check_objective_function()
 
         self.search_space = search_space
-        self.metric_optimization = metric_optimization
+        self.metric_sign = -1 if metric_optimization == "maximize" else 1
         self.n_candidate_configurations = n_candidate_configurations
+        self.warm_start_configurations = warm_start_configurations
 
-        self.warm_start_configs = []
-        self.warm_start_performances = []
-        if warm_start_configurations:
-            for config, perf in warm_start_configurations:
-                self.warm_start_configs.append(config)
-                self.warm_start_performances.append(perf)
-
-        self.tuning_configurations = get_tuning_configurations(
-            parameter_grid=self.search_space,
-            n_configurations=self.n_candidate_configurations,
-            random_state=1234,
-            warm_start_configs=self.warm_start_configs,
-        )
-
-        self.encoder = ConfigurationEncoder()
-        self.encoder.fit(self.tuning_configurations)
-        self.tabularized_configurations = self.encoder.transform(
-            self.tuning_configurations
-        ).to_numpy()
-
-        self.searchable_indices = np.arange(len(self.tuning_configurations))
-        self.searched_indices = np.array([], dtype=int)
-        self.searched_performances = np.array([])
-        self.forbidden_indices = np.array([], dtype=int)
-
-        self.study = Study()
-
-        if warm_start_configurations:
-            self._process_warm_start_configurations()
+    @staticmethod
+    def _set_conformal_validation_split(X: np.array) -> float:
+        if len(X) <= 30:
+            validation_split = 4 / len(X)
+        else:
+            validation_split = 0.20
+        return validation_split
 
     def _check_objective_function(self):
         signature = inspect.signature(self.objective_function)
@@ -127,106 +106,45 @@ class ConformalTuner:
                 "The return type of the objective function must be numeric (int, float, or np.number)."
             )
 
-    def _random_search(
-        self,
-        n_searches: int,
-        verbose: bool = True,
-        max_runtime: Optional[int] = None,
-    ) -> list[Trial]:
-        rs_trials = []
+    def _initialize_tuning_resources(self):
+        self.warm_start_configs = []
+        self.warm_start_performances = []
+        if self.warm_start_configurations:
+            for config, perf in self.warm_start_configurations:
+                self.warm_start_configs.append(config)
+                self.warm_start_performances.append(perf)
 
-        n_sample = min(n_searches, len(self.searchable_indices))
-        random_indices = np.random.choice(
-            self.searchable_indices, size=n_sample, replace=False
+        self.tuning_configurations = get_tuning_configurations(
+            parameter_grid=self.search_space,
+            n_configurations=self.n_candidate_configurations,
+            random_state=None,
+            warm_start_configs=self.warm_start_configs,
         )
 
-        self.searchable_indices = np.setdiff1d(
-            self.searchable_indices, random_indices, assume_unique=True
-        )
+        self.encoder = ConfigurationEncoder()
+        self.encoder.fit(self.tuning_configurations)
+        self.tabularized_configurations = self.encoder.transform(
+            self.tuning_configurations
+        ).to_numpy()
 
-        randomly_sampled_indices = random_indices.tolist()
+        self.searchable_indices = np.arange(len(self.tuning_configurations))
+        self.searched_indices = np.array([], dtype=int)
+        self.searched_performances = np.array([])
 
-        if verbose:
-            iterator = tqdm(randomly_sampled_indices, desc="Random search: ")
-        else:
-            iterator = randomly_sampled_indices
+        self.study = Study()
 
-        for config_idx, idx in enumerate(iterator):
-            hyperparameter_configuration = self.tuning_configurations[idx]
-
-            training_time_tracker = RuntimeTracker()
-            validation_performance = self.objective_function(
-                configuration=hyperparameter_configuration
-            )
-            training_time = training_time_tracker.return_runtime()
-
-            if np.isnan(validation_performance):
-                logger.debug(
-                    "Obtained non-numerical performance, forbidding configuration."
-                )
-                self.forbidden_indices = np.append(self.forbidden_indices, idx)
-                self.searchable_indices = np.setdiff1d(
-                    self.searchable_indices, [idx], assume_unique=True
-                )
-                continue
-
-            self.searched_indices = np.append(self.searched_indices, idx)
-            self.searched_performances = np.append(
-                self.searched_performances, validation_performance
-            )
-
-            rs_trials.append(
-                Trial(
-                    iteration=config_idx,
-                    timestamp=datetime.now(),
-                    configuration=hyperparameter_configuration.copy(),
-                    performance=validation_performance,
-                    target_model_runtime=training_time,
-                    acquisition_source="rs",
-                )
-            )
-
-            logger.debug(
-                f"Random search iter {config_idx} performance: {validation_performance}"
-            )
-
-            if max_runtime is not None:
-                if self.search_timer.return_runtime() > max_runtime:
-                    raise RuntimeError(
-                        "confopt preliminary random search exceeded total runtime budget. "
-                        "Retry with larger runtime budget or set iteration-capped budget instead."
-                    )
-
-        return rs_trials
-
-    @staticmethod
-    def _set_conformal_validation_split(X: np.array) -> float:
-        if len(X) <= 30:
-            validation_split = 4 / len(X)
-        else:
-            validation_split = 0.20
-        return validation_split
+        if self.warm_start_configurations:
+            self._process_warm_start_configurations()
 
     def _process_warm_start_configurations(self):
-        if not self.warm_start_configs:
-            return
-
         warm_start_trials = []
         warm_start_indices = []
-
-        def configs_equal(config1, config2):
-            if set(config1.keys()) != set(config2.keys()):
-                return False
-            for key in config1:
-                if config1[key] != config2[key]:
-                    return False
-            return True
 
         for i, (config, performance) in enumerate(
             zip(self.warm_start_configs, self.warm_start_performances)
         ):
             for idx, tuning_config in enumerate(self.tuning_configurations):
-                if configs_equal(config, tuning_config):
+                if config == tuning_config:
                     warm_start_indices.append(idx)
 
                     warm_start_trials.append(
@@ -240,18 +158,18 @@ class ConformalTuner:
                     )
                     break
             else:
-                logger.warning(
+                raise ValueError(
                     f"Could not locate warm start configuration in tuning configurations: {config}"
                 )
 
         warm_start_indices = np.array(warm_start_indices)
-        warm_start_perfs = np.array(
+        warm_start_performances = np.array(
             self.warm_start_performances[: len(warm_start_indices)]
         )
 
         self.searched_indices = np.append(self.searched_indices, warm_start_indices)
         self.searched_performances = np.append(
-            self.searched_performances, warm_start_perfs
+            self.searched_performances, warm_start_performances
         )
 
         self.searchable_indices = np.setdiff1d(
@@ -264,6 +182,70 @@ class ConformalTuner:
             f"Added {len(warm_start_trials)} warm start configurations to search history"
         )
 
+    def _random_search(
+        self,
+        n_searches: int,
+        verbose: bool = True,
+        max_runtime: Optional[int] = None,
+    ) -> list[Trial]:
+        rs_trials = []
+        adj_n_searches = min(n_searches, len(self.searchable_indices))
+        randomly_sampled_indices = np.random.choice(
+            self.searchable_indices, size=adj_n_searches, replace=False
+        ).to_list()
+
+        if verbose:
+            search_progress_bar = tqdm(randomly_sampled_indices, desc="Random search: ")
+        else:
+            search_progress_bar = randomly_sampled_indices
+
+        for i, configuration_idx in enumerate(search_progress_bar):
+            hyperparameter_configuration = self.tuning_configurations[configuration_idx]
+
+            training_time_tracker = RuntimeTracker()
+            validation_performance = self.metric_sign * self.objective_function(
+                configuration=hyperparameter_configuration
+            )
+            training_time = training_time_tracker.return_runtime()
+
+            if np.isnan(validation_performance):
+                logger.debug(
+                    "Obtained non-numerical performance, forbidding configuration."
+                )
+                self.searchable_indices = np.setdiff1d(
+                    self.searchable_indices, [configuration_idx], assume_unique=True
+                )
+                continue
+
+            self.searched_indices = np.append(self.searched_indices, configuration_idx)
+            self.searched_performances = np.append(
+                self.searched_performances, validation_performance
+            )
+
+            rs_trials.append(
+                Trial(
+                    iteration=i,
+                    timestamp=datetime.now(),
+                    configuration=hyperparameter_configuration.copy(),
+                    performance=validation_performance,
+                    target_model_runtime=training_time,
+                    acquisition_source="rs",
+                )
+            )
+
+            logger.debug(
+                f"Random search iter {i} performance: {validation_performance}"
+            )
+
+            if max_runtime is not None:
+                if self.search_timer.return_runtime() > max_runtime:
+                    raise RuntimeError(
+                        "confopt preliminary random search exceeded total runtime budget. "
+                        "Retry with larger runtime budget or set iteration-capped budget instead."
+                    )
+
+        return rs_trials
+
     def tune(
         self,
         searcher: Union[LocallyWeightedConformalSearcher, QuantileConformalSearcher],
@@ -275,6 +257,7 @@ class ConformalTuner:
         max_iter: Optional[int] = None,
         runtime_budget: Optional[int] = None,
     ):
+        self._initialize_tuning_resources()
         self.search_timer = RuntimeTracker()
 
         if random_state is not None:
@@ -349,8 +332,7 @@ class ConformalTuner:
                 tabularized_searchable_configurations
             )
 
-            hit_retraining_interval = config_idx % conformal_retraining_frequency == 0
-            if config_idx == 0 or hit_retraining_interval:
+            if config_idx == 0 or config_idx % conformal_retraining_frequency == 0:
                 runtime_tracker = RuntimeTracker()
                 searcher.fit(
                     X_train=X_train_conformal,
@@ -385,14 +367,15 @@ class ConformalTuner:
                 X=tabularized_searchable_configurations
             )
 
-            minimal_searchable_idx = np.argmin(parameter_performance_bounds)
-            minimal_starting_idx = self.searchable_indices[minimal_searchable_idx]
-            minimal_parameter = self.tuning_configurations[minimal_starting_idx].copy()
+            sampled_config_idx = self.searchable_indices[
+                np.argmin(parameter_performance_bounds)
+            ]
+            minimal_parameter = self.tuning_configurations[sampled_config_idx].copy()
             minimal_tabularized_configuration = tabularized_searchable_configurations[
-                minimal_starting_idx
+                sampled_config_idx
             ]
 
-            validation_performance = self.objective_function(
+            validation_performance = self.metric_sign * self.objective_function(
                 configuration=minimal_parameter
             )
 
@@ -401,11 +384,8 @@ class ConformalTuner:
             )
 
             if np.isnan(validation_performance):
-                self.forbidden_indices = np.append(
-                    self.forbidden_indices, minimal_starting_idx
-                )
                 self.searchable_indices = np.setdiff1d(
-                    self.searchable_indices, minimal_starting_idx, assume_unique=True
+                    self.searchable_indices, sampled_config_idx, assume_unique=True
                 )
                 continue
 
@@ -417,14 +397,15 @@ class ConformalTuner:
                     sampled_X=minimal_tabularized_configuration,
                 )
 
+            # TODO: TEMPORARY FOR PAPER:
             if isinstance(searcher.sampler, LowerBoundSampler):
                 if (
                     searcher.predictions_per_interval[0].lower_bounds[
-                        minimal_searchable_idx
+                        np.argmin(parameter_performance_bounds)
                     ]
                     <= validation_performance
                     <= searcher.predictions_per_interval[0].upper_bounds[
-                        minimal_searchable_idx
+                        np.argmin(parameter_performance_bounds)
                     ]
                 ):
                     breach = 0
@@ -434,22 +415,19 @@ class ConformalTuner:
                 breach = None
 
             estimator_error = searcher.primary_estimator_error
+            # TODO: END OF TEMPORARY FOR PAPER
 
             self.searchable_indices = self.searchable_indices[
-                self.searchable_indices != minimal_starting_idx
+                self.searchable_indices != sampled_config_idx
             ]
-            self.searched_indices = np.append(
-                self.searched_indices, minimal_starting_idx
-            )
+            self.searched_indices = np.append(self.searched_indices, sampled_config_idx)
             self.searched_performances = np.append(
                 self.searched_performances, validation_performance
             )
             tabularized_searched_configurations = np.vstack(
                 [
                     tabularized_searched_configurations,
-                    self.tabularized_configurations[
-                        minimal_starting_idx : minimal_starting_idx + 1
-                    ],
+                    self.tabularized_configurations[sampled_config_idx].reshape(1, -1),
                 ]
             )
 
@@ -458,7 +436,7 @@ class ConformalTuner:
                     iteration=config_idx,
                     timestamp=datetime.now(),
                     configuration=minimal_parameter.copy(),
-                    performance=validation_performance,
+                    performance=validation_performance,  # Reconvert back to original units
                     acquisition_source=str(searcher),
                     searcher_runtime=searcher_runtime,
                     breached_interval=breach,

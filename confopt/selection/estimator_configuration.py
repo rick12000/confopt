@@ -8,7 +8,7 @@ from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.kernel_ridge import KernelRidge
 from sklearn.neighbors import KNeighborsRegressor
 from lightgbm import LGBMRegressor
-from confopt.selection.quantile_estimation import (
+from confopt.selection.estimators.quantile_estimation import (
     BaseSingleFitQuantileEstimator,
     BaseMultiFitQuantileEstimator,
     QuantileGBM,
@@ -18,7 +18,7 @@ from confopt.selection.quantile_estimation import (
     QuantileLasso,
 )
 from confopt.wrapping import ParameterRange
-from confopt.selection.ensembling import (
+from confopt.selection.estimators.ensembling import (
     BaseEnsembleEstimator,
     QuantileEnsembleEstimator,
     PointEnsembleEstimator,

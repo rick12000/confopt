@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from confopt.selection.quantile_estimation import (
+from confopt.selection.estimators.quantile_estimation import (
     QuantileLasso,
     QuantileGBM,
     QuantileLightGBM,

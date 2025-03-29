@@ -11,11 +11,11 @@ from confopt.utils.encoding import get_tuning_configurations
 from confopt.wrapping import FloatRange, ConformalBounds
 from sklearn.base import BaseEstimator
 from confopt.selection.estimator_configuration import ESTIMATOR_REGISTRY
-from confopt.selection.quantile_estimation import (
+from confopt.selection.estimators.quantile_estimation import (
     BaseSingleFitQuantileEstimator,
     BaseMultiFitQuantileEstimator,
 )
-from confopt.selection.ensembling import (
+from confopt.selection.estimators.ensembling import (
     QuantileEnsembleEstimator,
     PointEnsembleEstimator,
 )

@@ -6,7 +6,7 @@ from sklearn.base import BaseEstimator
 from sklearn.model_selection import KFold
 from sklearn.metrics import mean_pinball_loss
 from sklearn.linear_model import LinearRegression
-from confopt.selection.quantile_estimation import (
+from confopt.selection.estimators.quantile_estimation import (
     BaseMultiFitQuantileEstimator,
     BaseSingleFitQuantileEstimator,
 )
