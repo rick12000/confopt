@@ -29,7 +29,10 @@ def test_get_tuning_configurations(dummy_parameter_grid):
         # Check each parameter value is within its defined range
         for param_name, param_value in config.items():
             param_range = dummy_parameter_grid[param_name]
-            assert param_range.min_value <= param_value <= param_range.max_value
+            if isinstance(param_range, (IntRange, FloatRange)):
+                assert param_range.min_value <= param_value <= param_range.max_value
+            elif isinstance(param_range, CategoricalRange):
+                assert param_value in param_range.choices
 
             # For log scale params, check distribution is appropriate
             if hasattr(param_range, "log_scale") and param_range.log_scale:

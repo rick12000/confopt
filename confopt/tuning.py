@@ -54,17 +54,6 @@ def process_and_split_estimation_data(
     return X_train, y_train, X_val, y_val
 
 
-def setup_progress_bar(n_random_searches, max_iter, runtime_budget, verbose):
-    if not verbose:
-        return None
-
-    if runtime_budget is not None:
-        return tqdm(total=runtime_budget, desc="Conformal search: ")
-    elif max_iter is not None:
-        return tqdm(total=max_iter - n_random_searches, desc="Conformal search: ")
-    return None
-
-
 def calculate_tuning_count(
     searcher_tuning_framework,
     target_model_runtime,
@@ -85,17 +74,6 @@ def calculate_tuning_count(
         return 10
     else:
         raise ValueError("Invalid searcher tuning framework specified.")
-
-
-def select_next_configuration(searcher, tabularized_configurations, searchable_indices):
-    parameter_performance_bounds = searcher.predict(X=tabularized_configurations)
-    bound_arg_min = np.argmin(parameter_performance_bounds)
-    search_idx = (
-        bound_arg_min if isinstance(bound_arg_min, int) else bound_arg_min.item()
-    )
-
-    config_idx = searchable_indices[search_idx]
-    return config_idx, search_idx
 
 
 def check_early_stopping(
@@ -121,7 +99,7 @@ def check_early_stopping(
         if n_random_searches + current_iter >= max_iter:
             return True, f"Maximum iterations ({max_iter}) reached"
 
-    return False, None
+    return False
 
 
 class ConformalTuner:
@@ -232,18 +210,20 @@ class ConformalTuner:
                     f"Could not locate warm start configuration in tuning configurations: {config}"
                 )
 
-        warm_start_indices = np.array(warm_start_indices)
+        warm_start_indices = np.array(object=warm_start_indices)
         warm_start_performances = np.array(
-            self.warm_start_performances[: len(warm_start_indices)]
+            object=self.warm_start_performances[: len(warm_start_indices)]
         )
 
-        self.searched_indices = np.append(self.searched_indices, warm_start_indices)
+        self.searched_indices = np.append(
+            arr=self.searched_indices, values=warm_start_indices
+        )
         self.searched_performances = np.append(
-            self.searched_performances, warm_start_performances
+            arr=self.searched_performances, values=warm_start_performances
         )
 
         self.searchable_indices = np.setdiff1d(
-            self.searchable_indices, warm_start_indices, assume_unique=True
+            ar1=self.searchable_indices, ar2=warm_start_indices, assume_unique=True
         )
 
         self.study.batch_append_trials(trials=warm_start_trials)
@@ -254,15 +234,11 @@ class ConformalTuner:
 
     def _evaluate_configuration(self, configuration):
         runtime_tracker = RuntimeTracker()
-        performance = self.metric_sign * self.objective_function(
-            configuration=configuration
-        )
+        performance = self.objective_function(configuration=configuration)
         runtime = runtime_tracker.return_runtime()
         return performance, runtime
 
-    def _update_search_state(
-        self, config_idx, configuration, performance, acquisition_source, **kwargs
-    ):
+    def _update_search_state(self, config_idx, performance):
         self.searched_indices = np.append(self.searched_indices, config_idx)
         self.searched_performances = np.append(self.searched_performances, performance)
 
@@ -276,32 +252,16 @@ class ConformalTuner:
         rs_trials = []
         adj_n_searches = min(n_searches, len(self.searchable_indices))
         randomly_sampled_indices = np.random.choice(
-            self.searchable_indices, size=adj_n_searches, replace=False
+            a=self.searchable_indices, size=adj_n_searches, replace=False
         ).tolist()
 
         progress_iter = (
-            tqdm(randomly_sampled_indices, desc="Random search: ")
+            tqdm(iterable=randomly_sampled_indices, desc="Random search: ")
             if verbose
             else randomly_sampled_indices
         )
 
         for configuration_idx in progress_iter:
-            should_stop, reason = check_early_stopping(
-                searchable_indices=self.searchable_indices,
-                current_runtime=self.search_timer.return_runtime()
-                if max_runtime
-                else None,
-                runtime_budget=max_runtime,
-            )
-
-            if should_stop:
-                if reason and max_runtime:
-                    raise RuntimeError(
-                        "confopt preliminary random search exceeded total runtime budget. "
-                        "Retry with larger runtime budget or set iteration-capped budget instead."
-                    )
-                break
-
             hyperparameter_configuration = self.tuning_configurations[configuration_idx]
             validation_performance, training_time = self._evaluate_configuration(
                 hyperparameter_configuration
@@ -312,15 +272,15 @@ class ConformalTuner:
                     "Obtained non-numerical performance, forbidding configuration."
                 )
                 self.searchable_indices = np.setdiff1d(
-                    self.searchable_indices, [configuration_idx], assume_unique=True
+                    ar1=self.searchable_indices,
+                    ar2=[configuration_idx],
+                    assume_unique=True,
                 )
                 continue
 
             self._update_search_state(
                 config_idx=configuration_idx,
-                configuration=hyperparameter_configuration,
                 performance=validation_performance,
-                acquisition_source="rs",
             )
 
             # Create trial object separately
@@ -338,20 +298,53 @@ class ConformalTuner:
                 f"Random search iter {len(rs_trials)} performance: {validation_performance}"
             )
 
+            # Moved early stopping check to end of loop
+            stop = check_early_stopping(
+                searchable_indices=self.searchable_indices,
+                current_runtime=self.search_timer.return_runtime()
+                if max_runtime
+                else None,
+                runtime_budget=max_runtime,
+            )
+            if stop:
+                raise RuntimeError(
+                    "confopt preliminary random search exceeded total runtime budget. "
+                    "Retry with larger runtime budget or set iteration-capped budget instead."
+                )
+
         return rs_trials
 
-    def _perform_conformal_search(
+    def _select_next_configuration_idx(
+        self, searcher, tabularized_searchable_configurations
+    ):
+        parameter_performance_bounds = searcher.predict(
+            X=tabularized_searchable_configurations
+        )
+        config_idx = self.searchable_indices[np.argmin(parameter_performance_bounds)]
+        return config_idx
+
+    def _conformal_search(
         self,
         searcher,
         n_random_searches,
         conformal_retraining_frequency,
         search_model_tuning_count,
         tabularized_searched_configurations,
-        progress_bar,
+        verbose,
         max_iter,
         runtime_budget,
         searcher_tuning_framework=None,
     ):
+        # Setup progress bar directly in this method
+        progress_bar = None
+        if verbose:
+            if runtime_budget is not None:
+                progress_bar = tqdm(total=runtime_budget, desc="Conformal search: ")
+            elif max_iter is not None:
+                progress_bar = tqdm(
+                    total=max_iter - n_random_searches, desc="Conformal search: "
+                )
+
         scaler = StandardScaler()
         first_searcher_runtime = None
         max_iterations = min(
@@ -359,6 +352,7 @@ class ConformalTuner:
             len(self.tuning_configurations) - n_random_searches,
         )
 
+        # Fix the range function - remove the named parameter 'stop='
         for config_idx in range(max_iterations):
             # Update progress bar
             if progress_bar:
@@ -369,20 +363,6 @@ class ConformalTuner:
                 elif max_iter is not None:
                     progress_bar.update(1)
 
-            # Check early stopping conditions
-            should_stop, reason = check_early_stopping(
-                searchable_indices=self.searchable_indices,
-                current_runtime=self.search_timer.return_runtime(),
-                runtime_budget=runtime_budget,
-                current_iter=config_idx,
-                max_iter=max_iter,
-                n_random_searches=n_random_searches,
-            )
-
-            if should_stop:
-                logger.info(f"Stopping early: {reason}")
-                break
-
             # Prepare data for conformal search
             tabularized_searchable_configurations = self.tabularized_configurations[
                 self.searchable_indices
@@ -390,7 +370,7 @@ class ConformalTuner:
 
             # Directly implement _prepare_conformal_data logic here
             validation_split = self._set_conformal_validation_split(
-                tabularized_searched_configurations
+                X=tabularized_searched_configurations
             )
             X_train, y_train, X_val, y_val = process_and_split_estimation_data(
                 searched_configurations=tabularized_searched_configurations,
@@ -398,13 +378,15 @@ class ConformalTuner:
                 train_split=(1 - validation_split),
                 filter_outliers=False,
             )
+            y_train = y_train * self.metric_sign
+            y_val = y_val * self.metric_sign
 
             # Scale the data
-            scaler.fit(X_train)
-            X_train = scaler.transform(X_train)
-            X_val = scaler.transform(X_val)
+            scaler.fit(X=X_train)
+            X_train = scaler.transform(X=X_train)
+            X_val = scaler.transform(X=X_val)
             tabularized_searchable_configurations = scaler.transform(
-                tabularized_searchable_configurations
+                X=tabularized_searchable_configurations
             )
 
             # Retrain the searcher if needed
@@ -426,21 +408,18 @@ class ConformalTuner:
             # Update tuning count if needed for future runs
             if searcher_tuning_framework:
                 search_model_tuning_count = calculate_tuning_count(
-                    searcher_tuning_framework,
-                    self.study.get_average_target_model_runtime(),
-                    first_searcher_runtime,
-                    conformal_retraining_frequency,
+                    searcher_tuning_framework=searcher_tuning_framework,
+                    target_model_runtime=self.study.get_average_target_model_runtime(),
+                    search_model_runtime=first_searcher_runtime,
+                    conformal_retraining_frequency=conformal_retraining_frequency,
                 )
 
             # Get performance bounds and select next configuration to evaluate
-            sampled_config_idx, search_idx = select_next_configuration(
-                searcher, tabularized_searchable_configurations, self.searchable_indices
+            config_idx = self._select_next_configuration_idx(
+                searcher=searcher,
+                tabularized_searchable_configurations=tabularized_searchable_configurations,
             )
-
-            minimal_parameter = self.tuning_configurations[sampled_config_idx].copy()
-            minimal_tabularized_configuration = tabularized_searchable_configurations[
-                search_idx
-            ]
+            minimal_parameter = self.tuning_configurations[config_idx].copy()
 
             # Evaluate the selected configuration
             validation_performance, _ = self._evaluate_configuration(minimal_parameter)
@@ -450,7 +429,7 @@ class ConformalTuner:
 
             if np.isnan(validation_performance):
                 self.searchable_indices = np.setdiff1d(
-                    self.searchable_indices, [sampled_config_idx], assume_unique=True
+                    ar1=self.searchable_indices, ar2=[config_idx], assume_unique=True
                 )
                 continue
 
@@ -460,34 +439,25 @@ class ConformalTuner:
             ):
                 searcher.update_interval_width(
                     sampled_y=validation_performance,
-                    sampled_X=minimal_tabularized_configuration,
+                    sampled_X=self.encoder.transform([minimal_parameter]).to_numpy(),
                 )
 
             # Record breach (for paper)
             breach = None
             if isinstance(searcher.sampler, LowerBoundSampler):
-                lower_bound = searcher.predictions_per_interval[0].lower_bounds[
-                    search_idx
-                ]
-                upper_bound = searcher.predictions_per_interval[0].upper_bounds[
-                    search_idx
-                ]
-                breach = (
-                    0 if lower_bound <= validation_performance <= upper_bound else 1
-                )
+                # TODO: Grab breach status from sampler's adapter
+                breach = 0
 
             estimator_error = searcher.primary_estimator_error
 
             # Update search state and record trial
             self.searchable_indices = self.searchable_indices[
-                self.searchable_indices != sampled_config_idx
+                self.searchable_indices != config_idx
             ]
 
             self._update_search_state(
-                config_idx=sampled_config_idx,
-                configuration=minimal_parameter,
+                config_idx=config_idx,
                 performance=validation_performance,
-                acquisition_source=str(searcher),
             )
 
             # Create trial object separately
@@ -505,29 +475,71 @@ class ConformalTuner:
 
             # Update tabularized searched configurations
             tabularized_searched_configurations = np.vstack(
-                [
+                tup=[
                     tabularized_searched_configurations,
-                    self.tabularized_configurations[sampled_config_idx].reshape(1, -1),
+                    self.tabularized_configurations[config_idx].reshape((1, -1)),
                 ]
             )
 
+            # Moved early stopping check to end of loop
+            stop = check_early_stopping(
+                searchable_indices=self.searchable_indices,
+                current_runtime=self.search_timer.return_runtime(),
+                runtime_budget=runtime_budget,
+                current_iter=config_idx,
+                max_iter=max_iter,
+                n_random_searches=n_random_searches,
+            )
+            if stop:
+                break
+
+        # Close progress bar if it exists
+        if progress_bar:
+            if runtime_budget is not None:
+                progress_bar.update(n=runtime_budget - progress_bar.n)
+            elif max_iter is not None:
+                progress_bar.update(
+                    n=max(
+                        0,
+                        max_iter
+                        - n_random_searches
+                        - len(self.study.trials)
+                        + n_random_searches,
+                    )
+                )
+            progress_bar.close()
+
     def tune(
         self,
-        searcher: Union[LocallyWeightedConformalSearcher, QuantileConformalSearcher],
         n_random_searches: int = 20,
         conformal_retraining_frequency: int = 1,
+        searcher: Optional[
+            Union[LocallyWeightedConformalSearcher, QuantileConformalSearcher]
+        ] = None,
         searcher_tuning_framework: Optional[Literal["runtime", "ucb", "fixed"]] = None,
-        verbose: bool = True,
         random_state: Optional[int] = None,
         max_iter: Optional[int] = None,
         runtime_budget: Optional[int] = None,
+        verbose: bool = True,
     ):
+        if searcher is None:
+            searcher = QuantileConformalSearcher(
+                quantile_estimator_architecture="qrf",
+                sampler=LowerBoundSampler(
+                    interval_width=0.05,
+                    adapter="DtACI",
+                    beta_decay="logarithmic_decay",
+                    c=1,
+                ),
+                n_pre_conformal_trials=20,
+            )
+
         self._initialize_tuning_resources()
         self.search_timer = RuntimeTracker()
 
         if random_state is not None:
-            random.seed(random_state)
-            np.random.seed(random_state)
+            random.seed(a=random_state)
+            np.random.seed(seed=random_state)
 
         # Perform random search
         rs_trials = self._random_search(
@@ -541,38 +553,18 @@ class ConformalTuner:
         tabularized_searched_configurations = self.tabularized_configurations[
             self.searched_indices
         ]
-        progress_bar = setup_progress_bar(
-            n_random_searches, max_iter, runtime_budget, verbose
-        )
 
-        # Perform conformal search
-        self._perform_conformal_search(
+        self._conformal_search(
             searcher=searcher,
             n_random_searches=n_random_searches,
             conformal_retraining_frequency=conformal_retraining_frequency,
             search_model_tuning_count=0,  # Initial value, will be updated inside method
             tabularized_searched_configurations=tabularized_searched_configurations,
-            progress_bar=progress_bar,
+            verbose=verbose,  # Pass verbose parameter instead of progress_bar
             max_iter=max_iter,
             runtime_budget=runtime_budget,
-            searcher_tuning_framework=searcher_tuning_framework,  # Pass this parameter
+            searcher_tuning_framework=searcher_tuning_framework,
         )
-
-        # Close progress bar if it exists
-        if progress_bar:
-            if runtime_budget is not None:
-                progress_bar.update(runtime_budget - progress_bar.n)
-            elif max_iter is not None:
-                progress_bar.update(
-                    max(
-                        0,
-                        max_iter
-                        - n_random_searches
-                        - len(self.study.trials)
-                        + n_random_searches,
-                    )
-                )
-            progress_bar.close()
 
     def get_best_params(self) -> Dict:
         return self.study.get_best_configuration()

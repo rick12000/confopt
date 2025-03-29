@@ -2,13 +2,13 @@ import random
 
 import numpy as np
 import pytest
-
+from typing import Dict
 from confopt.tuning import (
     ConformalTuner,
 )
 from confopt.utils.encoding import get_tuning_configurations
 
-from confopt.wrapping import FloatRange, ConformalBounds
+from confopt.wrapping import FloatRange, IntRange, CategoricalRange, ConformalBounds
 from sklearn.base import BaseEstimator
 from confopt.selection.estimator_configuration import ESTIMATOR_REGISTRY
 from confopt.selection.estimators.quantile_estimation import (
@@ -73,6 +73,22 @@ class ObjectiveSurfaceGenerator:
 
 
 @pytest.fixture
+def mock_random_objective_function():
+    def objective(configuration: Dict):
+        return random.uniform(0, 1)
+
+    return objective
+
+
+@pytest.fixture
+def mock_constant_objective_function():
+    def objective(configuration: Dict):
+        return 2
+
+    return objective
+
+
+@pytest.fixture
 def toy_dataset():
     # Create a small toy dataset with deterministic values
     X = np.array([[1, 2], [3, 4], [5, 6], [7, 8]])
@@ -109,8 +125,8 @@ def dummy_configuration_performance_bounds():
 def dummy_parameter_grid():
     return {
         "param_1": FloatRange(min_value=0.01, max_value=100, log_scale=True),
-        "param_2": FloatRange(min_value=0.01, max_value=100, log_scale=True),
-        "param_3": FloatRange(min_value=0.01, max_value=100, log_scale=True),
+        "param_2": IntRange(min_value=1, max_value=100),
+        "param_3": CategoricalRange(choices=["option1", "option2", "option3"]),
     }
 
 
@@ -253,3 +269,14 @@ def competing_estimator():
     mock.predict = Mock(side_effect=scaled_predict)
     mock.fit = Mock(return_value=mock)
     return mock
+
+
+@pytest.fixture
+def tuner(mock_constant_objective_function, dummy_parameter_grid):
+    # Create a standard tuner instance that can be reused across tests
+    return ConformalTuner(
+        objective_function=mock_constant_objective_function,
+        search_space=dummy_parameter_grid,
+        metric_optimization="minimize",
+        n_candidate_configurations=100,
+    )

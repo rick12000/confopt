@@ -61,8 +61,8 @@ def get_tuning_configurations(
 
     # Calculate how many additional configurations we need
     n_additional = max(0, n_configurations - len(configurations))
-    max_attempts = n_additional * 1.5  # Prevent infinite loops
-    for attempt in range(max_attempts):
+    max_attempts = int(n_additional * 2)  # Prevent infinite loops
+    for _ in range(max_attempts):
         configuration = {}
         for parameter_name, parameter_range in parameter_grid.items():
             if isinstance(parameter_range, IntRange):
