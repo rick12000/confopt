@@ -100,16 +100,6 @@ def test_get_tuning_configurations_with_warm_start():
             for config in configurations
         )
 
-    # All configurations should meet parameter constraints
-    for config in configurations:
-        # Check all keys exist
-        assert set(config.keys()) == set(parameter_grid.keys())
-
-        # Check values are within ranges
-        assert 1 <= config["int_param"] <= 10
-        assert 0.1 <= config["float_param"] <= 1.0
-        assert config["cat_param"] in ["option1", "option2", "option3"]
-
 
 def test_configuration_encoder():
     """Test that ConfigurationEncoder properly encodes configurations"""

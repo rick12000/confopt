@@ -54,6 +54,76 @@ def process_and_split_estimation_data(
     return X_train, y_train, X_val, y_val
 
 
+def setup_progress_bar(n_random_searches, max_iter, runtime_budget, verbose):
+    if not verbose:
+        return None
+
+    if runtime_budget is not None:
+        return tqdm(total=runtime_budget, desc="Conformal search: ")
+    elif max_iter is not None:
+        return tqdm(total=max_iter - n_random_searches, desc="Conformal search: ")
+    return None
+
+
+def calculate_tuning_count(
+    searcher_tuning_framework,
+    target_model_runtime,
+    search_model_runtime,
+    conformal_retraining_frequency,
+):
+    if not searcher_tuning_framework:
+        return 0
+
+    if searcher_tuning_framework == "runtime":
+        return derive_optimal_tuning_count(
+            target_model_runtime=target_model_runtime,
+            search_model_runtime=search_model_runtime,
+            search_model_retraining_freq=conformal_retraining_frequency,
+            search_to_baseline_runtime_ratio=0.3,
+        )
+    elif searcher_tuning_framework == "fixed":
+        return 10
+    else:
+        raise ValueError("Invalid searcher tuning framework specified.")
+
+
+def select_next_configuration(searcher, tabularized_configurations, searchable_indices):
+    parameter_performance_bounds = searcher.predict(X=tabularized_configurations)
+    bound_arg_min = np.argmin(parameter_performance_bounds)
+    search_idx = (
+        bound_arg_min if isinstance(bound_arg_min, int) else bound_arg_min.item()
+    )
+
+    config_idx = searchable_indices[search_idx]
+    return config_idx, search_idx
+
+
+def check_early_stopping(
+    searchable_indices,
+    current_runtime=None,
+    runtime_budget=None,
+    current_iter=None,
+    max_iter=None,
+    n_random_searches=None,
+):
+    if len(searchable_indices) == 0:
+        return True, "All configurations have been searched"
+
+    if runtime_budget is not None and current_runtime is not None:
+        if current_runtime > runtime_budget:
+            return True, f"Runtime budget ({runtime_budget}) exceeded"
+
+    if (
+        max_iter is not None
+        and current_iter is not None
+        and n_random_searches is not None
+    ):
+        if n_random_searches + current_iter >= max_iter:
+            return True, f"Maximum iterations ({max_iter}) reached"
+
+    return False, None
+
+
 class ConformalTuner:
     def __init__(
         self,
@@ -182,31 +252,60 @@ class ConformalTuner:
             f"Added {len(warm_start_trials)} warm start configurations to search history"
         )
 
+    def _evaluate_configuration(self, configuration):
+        runtime_tracker = RuntimeTracker()
+        performance = self.metric_sign * self.objective_function(
+            configuration=configuration
+        )
+        runtime = runtime_tracker.return_runtime()
+        return performance, runtime
+
+    def _update_search_state(
+        self, config_idx, configuration, performance, acquisition_source, **kwargs
+    ):
+        self.searched_indices = np.append(self.searched_indices, config_idx)
+        self.searched_performances = np.append(self.searched_performances, performance)
+
+        self.searchable_indices = np.setdiff1d(
+            self.searchable_indices, [config_idx], assume_unique=True
+        )
+
     def _random_search(
-        self,
-        n_searches: int,
-        verbose: bool = True,
-        max_runtime: Optional[int] = None,
+        self, n_searches: int, verbose: bool = True, max_runtime: Optional[int] = None
     ) -> list[Trial]:
         rs_trials = []
         adj_n_searches = min(n_searches, len(self.searchable_indices))
         randomly_sampled_indices = np.random.choice(
             self.searchable_indices, size=adj_n_searches, replace=False
-        ).to_list()
+        ).tolist()
 
-        if verbose:
-            search_progress_bar = tqdm(randomly_sampled_indices, desc="Random search: ")
-        else:
-            search_progress_bar = randomly_sampled_indices
+        progress_iter = (
+            tqdm(randomly_sampled_indices, desc="Random search: ")
+            if verbose
+            else randomly_sampled_indices
+        )
 
-        for i, configuration_idx in enumerate(search_progress_bar):
-            hyperparameter_configuration = self.tuning_configurations[configuration_idx]
-
-            training_time_tracker = RuntimeTracker()
-            validation_performance = self.metric_sign * self.objective_function(
-                configuration=hyperparameter_configuration
+        for configuration_idx in progress_iter:
+            should_stop, reason = check_early_stopping(
+                searchable_indices=self.searchable_indices,
+                current_runtime=self.search_timer.return_runtime()
+                if max_runtime
+                else None,
+                runtime_budget=max_runtime,
             )
-            training_time = training_time_tracker.return_runtime()
+
+            if should_stop:
+                if reason and max_runtime:
+                    raise RuntimeError(
+                        "confopt preliminary random search exceeded total runtime budget. "
+                        "Retry with larger runtime budget or set iteration-capped budget instead."
+                    )
+                break
+
+            hyperparameter_configuration = self.tuning_configurations[configuration_idx]
+            validation_performance, training_time = self._evaluate_configuration(
+                hyperparameter_configuration
+            )
 
             if np.isnan(validation_performance):
                 logger.debug(
@@ -217,34 +316,200 @@ class ConformalTuner:
                 )
                 continue
 
-            self.searched_indices = np.append(self.searched_indices, configuration_idx)
-            self.searched_performances = np.append(
-                self.searched_performances, validation_performance
+            self._update_search_state(
+                config_idx=configuration_idx,
+                configuration=hyperparameter_configuration,
+                performance=validation_performance,
+                acquisition_source="rs",
             )
 
-            rs_trials.append(
-                Trial(
-                    iteration=i,
-                    timestamp=datetime.now(),
-                    configuration=hyperparameter_configuration.copy(),
-                    performance=validation_performance,
-                    target_model_runtime=training_time,
-                    acquisition_source="rs",
-                )
+            # Create trial object separately
+            trial = Trial(
+                iteration=len(self.study.trials),
+                timestamp=datetime.now(),
+                configuration=hyperparameter_configuration.copy(),
+                performance=validation_performance,
+                acquisition_source="rs",
+                target_model_runtime=training_time,
             )
+            rs_trials.append(trial)
 
             logger.debug(
-                f"Random search iter {i} performance: {validation_performance}"
+                f"Random search iter {len(rs_trials)} performance: {validation_performance}"
             )
 
-            if max_runtime is not None:
-                if self.search_timer.return_runtime() > max_runtime:
-                    raise RuntimeError(
-                        "confopt preliminary random search exceeded total runtime budget. "
-                        "Retry with larger runtime budget or set iteration-capped budget instead."
-                    )
-
         return rs_trials
+
+    def _perform_conformal_search(
+        self,
+        searcher,
+        n_random_searches,
+        conformal_retraining_frequency,
+        search_model_tuning_count,
+        tabularized_searched_configurations,
+        progress_bar,
+        max_iter,
+        runtime_budget,
+        searcher_tuning_framework=None,
+    ):
+        scaler = StandardScaler()
+        first_searcher_runtime = None
+        max_iterations = min(
+            len(self.searchable_indices),
+            len(self.tuning_configurations) - n_random_searches,
+        )
+
+        for config_idx in range(max_iterations):
+            # Update progress bar
+            if progress_bar:
+                if runtime_budget is not None:
+                    progress_bar.update(
+                        int(self.search_timer.return_runtime()) - progress_bar.n
+                    )
+                elif max_iter is not None:
+                    progress_bar.update(1)
+
+            # Check early stopping conditions
+            should_stop, reason = check_early_stopping(
+                searchable_indices=self.searchable_indices,
+                current_runtime=self.search_timer.return_runtime(),
+                runtime_budget=runtime_budget,
+                current_iter=config_idx,
+                max_iter=max_iter,
+                n_random_searches=n_random_searches,
+            )
+
+            if should_stop:
+                logger.info(f"Stopping early: {reason}")
+                break
+
+            # Prepare data for conformal search
+            tabularized_searchable_configurations = self.tabularized_configurations[
+                self.searchable_indices
+            ]
+
+            # Directly implement _prepare_conformal_data logic here
+            validation_split = self._set_conformal_validation_split(
+                tabularized_searched_configurations
+            )
+            X_train, y_train, X_val, y_val = process_and_split_estimation_data(
+                searched_configurations=tabularized_searched_configurations,
+                searched_performances=self.searched_performances,
+                train_split=(1 - validation_split),
+                filter_outliers=False,
+            )
+
+            # Scale the data
+            scaler.fit(X_train)
+            X_train = scaler.transform(X_train)
+            X_val = scaler.transform(X_val)
+            tabularized_searchable_configurations = scaler.transform(
+                tabularized_searchable_configurations
+            )
+
+            # Retrain the searcher if needed
+            searcher_runtime = None
+            if config_idx == 0 or config_idx % conformal_retraining_frequency == 0:
+                runtime_tracker = RuntimeTracker()
+                searcher.fit(
+                    X_train=X_train,
+                    y_train=y_train,
+                    X_val=X_val,
+                    y_val=y_val,
+                    tuning_iterations=search_model_tuning_count,
+                )
+                searcher_runtime = runtime_tracker.return_runtime()
+
+                if config_idx == 0:
+                    first_searcher_runtime = searcher_runtime
+
+            # Update tuning count if needed for future runs
+            if searcher_tuning_framework:
+                search_model_tuning_count = calculate_tuning_count(
+                    searcher_tuning_framework,
+                    self.study.get_average_target_model_runtime(),
+                    first_searcher_runtime,
+                    conformal_retraining_frequency,
+                )
+
+            # Get performance bounds and select next configuration to evaluate
+            sampled_config_idx, search_idx = select_next_configuration(
+                searcher, tabularized_searchable_configurations, self.searchable_indices
+            )
+
+            minimal_parameter = self.tuning_configurations[sampled_config_idx].copy()
+            minimal_tabularized_configuration = tabularized_searchable_configurations[
+                search_idx
+            ]
+
+            # Evaluate the selected configuration
+            validation_performance, _ = self._evaluate_configuration(minimal_parameter)
+            logger.debug(
+                f"Conformal search iter {config_idx} performance: {validation_performance}"
+            )
+
+            if np.isnan(validation_performance):
+                self.searchable_indices = np.setdiff1d(
+                    self.searchable_indices, [sampled_config_idx], assume_unique=True
+                )
+                continue
+
+            # Update searcher if needed
+            if hasattr(searcher.sampler, "adapter") or hasattr(
+                searcher.sampler, "adapters"
+            ):
+                searcher.update_interval_width(
+                    sampled_y=validation_performance,
+                    sampled_X=minimal_tabularized_configuration,
+                )
+
+            # Record breach (for paper)
+            breach = None
+            if isinstance(searcher.sampler, LowerBoundSampler):
+                lower_bound = searcher.predictions_per_interval[0].lower_bounds[
+                    search_idx
+                ]
+                upper_bound = searcher.predictions_per_interval[0].upper_bounds[
+                    search_idx
+                ]
+                breach = (
+                    0 if lower_bound <= validation_performance <= upper_bound else 1
+                )
+
+            estimator_error = searcher.primary_estimator_error
+
+            # Update search state and record trial
+            self.searchable_indices = self.searchable_indices[
+                self.searchable_indices != sampled_config_idx
+            ]
+
+            self._update_search_state(
+                config_idx=sampled_config_idx,
+                configuration=minimal_parameter,
+                performance=validation_performance,
+                acquisition_source=str(searcher),
+            )
+
+            # Create trial object separately
+            trial = Trial(
+                iteration=len(self.study.trials),
+                timestamp=datetime.now(),
+                configuration=minimal_parameter.copy(),
+                performance=validation_performance,
+                acquisition_source=str(searcher),
+                searcher_runtime=searcher_runtime,
+                breached_interval=breach,
+                primary_estimator_error=estimator_error,
+            )
+            self.study.append_trial(trial)
+
+            # Update tabularized searched configurations
+            tabularized_searched_configurations = np.vstack(
+                [
+                    tabularized_searched_configurations,
+                    self.tabularized_configurations[sampled_config_idx].reshape(1, -1),
+                ]
+            )
 
     def tune(
         self,
@@ -264,6 +529,7 @@ class ConformalTuner:
             random.seed(random_state)
             np.random.seed(random_state)
 
+        # Perform random search
         rs_trials = self._random_search(
             n_searches=n_random_searches,
             max_runtime=runtime_budget,
@@ -271,201 +537,42 @@ class ConformalTuner:
         )
         self.study.batch_append_trials(trials=rs_trials)
 
-        search_model_tuning_count = 0
-        scaler = StandardScaler()
-
-        if verbose:
-            if runtime_budget is not None:
-                search_progress_bar = tqdm(
-                    total=runtime_budget, desc="Conformal search: "
-                )
-            elif max_iter is not None:
-                search_progress_bar = tqdm(
-                    total=max_iter - n_random_searches, desc="Conformal search: "
-                )
-
+        # Setup for conformal search
         tabularized_searched_configurations = self.tabularized_configurations[
             self.searched_indices
         ]
-
-        max_iterations = min(
-            len(self.searchable_indices),
-            len(self.tuning_configurations) - n_random_searches,
+        progress_bar = setup_progress_bar(
+            n_random_searches, max_iter, runtime_budget, verbose
         )
-        for config_idx in range(max_iterations):
-            if verbose:
-                if runtime_budget is not None:
-                    search_progress_bar.update(
-                        int(self.search_timer.return_runtime()) - search_progress_bar.n
-                    )
-                elif max_iter is not None:
-                    search_progress_bar.update(1)
 
-            if len(self.searchable_indices) == 0:
-                logger.info("All configurations have been searched. Stopping early.")
-                break
+        # Perform conformal search
+        self._perform_conformal_search(
+            searcher=searcher,
+            n_random_searches=n_random_searches,
+            conformal_retraining_frequency=conformal_retraining_frequency,
+            search_model_tuning_count=0,  # Initial value, will be updated inside method
+            tabularized_searched_configurations=tabularized_searched_configurations,
+            progress_bar=progress_bar,
+            max_iter=max_iter,
+            runtime_budget=runtime_budget,
+            searcher_tuning_framework=searcher_tuning_framework,  # Pass this parameter
+        )
 
-            tabularized_searchable_configurations = self.tabularized_configurations[
-                self.searchable_indices
-            ]
-
-            validation_split = ConformalTuner._set_conformal_validation_split(
-                tabularized_searched_configurations
-            )
-
-            (
-                X_train_conformal,
-                y_train_conformal,
-                X_val_conformal,
-                y_val_conformal,
-            ) = process_and_split_estimation_data(
-                searched_configurations=tabularized_searched_configurations,
-                searched_performances=self.searched_performances,
-                train_split=(1 - validation_split),
-                filter_outliers=False,
-            )
-
-            scaler.fit(X_train_conformal)
-            X_train_conformal = scaler.transform(X_train_conformal)
-            X_val_conformal = scaler.transform(X_val_conformal)
-            tabularized_searchable_configurations = scaler.transform(
-                tabularized_searchable_configurations
-            )
-
-            if config_idx == 0 or config_idx % conformal_retraining_frequency == 0:
-                runtime_tracker = RuntimeTracker()
-                searcher.fit(
-                    X_train=X_train_conformal,
-                    y_train=y_train_conformal,
-                    X_val=X_val_conformal,
-                    y_val=y_val_conformal,
-                    tuning_iterations=search_model_tuning_count,
-                )
-                searcher_runtime = runtime_tracker.return_runtime()
-
-                if config_idx == 0:
-                    first_searcher_runtime = searcher_runtime
-            else:
-                searcher_runtime = None
-
-            if searcher_tuning_framework is not None:
-                if searcher_tuning_framework == "runtime":
-                    search_model_tuning_count = derive_optimal_tuning_count(
-                        target_model_runtime=self.study.get_average_target_model_runtime(),
-                        search_model_runtime=first_searcher_runtime,
-                        search_model_retraining_freq=conformal_retraining_frequency,
-                        search_to_baseline_runtime_ratio=0.3,
-                    )
-                elif searcher_tuning_framework == "fixed":
-                    search_model_tuning_count = 10
-                else:
-                    raise ValueError("Invalid searcher tuning framework specified.")
-            else:
-                search_model_tuning_count = 0
-
-            parameter_performance_bounds = searcher.predict(
-                X=tabularized_searchable_configurations
-            )
-
-            sampled_config_idx = self.searchable_indices[
-                np.argmin(parameter_performance_bounds)
-            ]
-            minimal_parameter = self.tuning_configurations[sampled_config_idx].copy()
-            minimal_tabularized_configuration = tabularized_searchable_configurations[
-                sampled_config_idx
-            ]
-
-            validation_performance = self.metric_sign * self.objective_function(
-                configuration=minimal_parameter
-            )
-
-            logger.debug(
-                f"Conformal search iter {config_idx} performance: {validation_performance}"
-            )
-
-            if np.isnan(validation_performance):
-                self.searchable_indices = np.setdiff1d(
-                    self.searchable_indices, sampled_config_idx, assume_unique=True
-                )
-                continue
-
-            if hasattr(searcher.sampler, "adapter") or hasattr(
-                searcher.sampler, "adapters"
-            ):
-                searcher.update_interval_width(
-                    sampled_y=validation_performance,
-                    sampled_X=minimal_tabularized_configuration,
-                )
-
-            # TODO: TEMPORARY FOR PAPER:
-            if isinstance(searcher.sampler, LowerBoundSampler):
-                if (
-                    searcher.predictions_per_interval[0].lower_bounds[
-                        np.argmin(parameter_performance_bounds)
-                    ]
-                    <= validation_performance
-                    <= searcher.predictions_per_interval[0].upper_bounds[
-                        np.argmin(parameter_performance_bounds)
-                    ]
-                ):
-                    breach = 0
-                else:
-                    breach = 1
-            else:
-                breach = None
-
-            estimator_error = searcher.primary_estimator_error
-            # TODO: END OF TEMPORARY FOR PAPER
-
-            self.searchable_indices = self.searchable_indices[
-                self.searchable_indices != sampled_config_idx
-            ]
-            self.searched_indices = np.append(self.searched_indices, sampled_config_idx)
-            self.searched_performances = np.append(
-                self.searched_performances, validation_performance
-            )
-            tabularized_searched_configurations = np.vstack(
-                [
-                    tabularized_searched_configurations,
-                    self.tabularized_configurations[sampled_config_idx].reshape(1, -1),
-                ]
-            )
-
-            self.study.append_trial(
-                Trial(
-                    iteration=config_idx,
-                    timestamp=datetime.now(),
-                    configuration=minimal_parameter.copy(),
-                    performance=validation_performance,  # Reconvert back to original units
-                    acquisition_source=str(searcher),
-                    searcher_runtime=searcher_runtime,
-                    breached_interval=breach,
-                    primary_estimator_error=estimator_error,
-                )
-            )
-
+        # Close progress bar if it exists
+        if progress_bar:
             if runtime_budget is not None:
-                if self.search_timer.return_runtime() > runtime_budget:
-                    if verbose:
-                        if runtime_budget is not None:
-                            search_progress_bar.update(
-                                runtime_budget - search_progress_bar.n
-                            )
-                        elif max_iter is not None:
-                            search_progress_bar.update(1)
-                        search_progress_bar.close()
-                    break
+                progress_bar.update(runtime_budget - progress_bar.n)
             elif max_iter is not None:
-                if n_random_searches + config_idx + 1 >= max_iter:
-                    if verbose:
-                        if runtime_budget is not None:
-                            search_progress_bar.update(
-                                runtime_budget - search_progress_bar.n
-                            )
-                        elif max_iter is not None:
-                            search_progress_bar.update(1)
-                        search_progress_bar.close()
-                    break
+                progress_bar.update(
+                    max(
+                        0,
+                        max_iter
+                        - n_random_searches
+                        - len(self.study.trials)
+                        + n_random_searches,
+                    )
+                )
+            progress_bar.close()
 
     def get_best_params(self) -> Dict:
         return self.study.get_best_configuration()
