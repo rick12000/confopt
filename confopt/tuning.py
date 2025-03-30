@@ -439,7 +439,7 @@ class ConformalTuner:
                 searcher.sampler, "adapters"
             ):
                 searcher.update_interval_width(
-                    y_true=validation_performance,
+                    y_true=self.metric_sign * validation_performance,
                     X=scaler.transform(
                         self.encoder.transform([minimal_parameter]).to_numpy(),
                     ),
