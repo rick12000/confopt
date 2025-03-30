@@ -280,6 +280,7 @@ class QuantileConformalEstimator:
                 score = np.quantile(
                     self.nonconformity_scores[i],
                     1 - alpha,
+                    interpolation="linear",  # Add interpolation for small sample sizes
                 )
                 lower_interval_bound = np.array(prediction[:, lower_idx]) - score
                 upper_interval_bound = np.array(prediction[:, upper_idx]) + score
