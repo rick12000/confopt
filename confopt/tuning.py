@@ -20,6 +20,7 @@ from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
     LowerBoundSampler,
+    BaseConformalSearcher,
 )
 from confopt.wrapping import ParameterRange
 
@@ -325,7 +326,7 @@ class ConformalTuner:
 
     def _conformal_search(
         self,
-        searcher,
+        searcher: BaseConformalSearcher,
         n_random_searches,
         conformal_retraining_frequency,
         search_model_tuning_count,
@@ -353,7 +354,7 @@ class ConformalTuner:
         )
 
         # Fix the range function - remove the named parameter 'stop='
-        for config_idx in range(max_iterations):
+        for search_iter in range(max_iterations):
             # Update progress bar
             if progress_bar:
                 if runtime_budget is not None:
@@ -391,7 +392,7 @@ class ConformalTuner:
 
             # Retrain the searcher if needed
             searcher_runtime = None
-            if config_idx == 0 or config_idx % conformal_retraining_frequency == 0:
+            if search_iter == 0 or search_iter % conformal_retraining_frequency == 0:
                 runtime_tracker = RuntimeTracker()
                 searcher.fit(
                     X_train=X_train,
@@ -402,7 +403,7 @@ class ConformalTuner:
                 )
                 searcher_runtime = runtime_tracker.return_runtime()
 
-                if config_idx == 0:
+                if search_iter == 0:
                     first_searcher_runtime = searcher_runtime
 
             # Update tuning count if needed for future runs
@@ -424,7 +425,7 @@ class ConformalTuner:
             # Evaluate the selected configuration
             validation_performance, _ = self._evaluate_configuration(minimal_parameter)
             logger.debug(
-                f"Conformal search iter {config_idx} performance: {validation_performance}"
+                f"Conformal search iter {search_iter} performance: {validation_performance}"
             )
 
             if np.isnan(validation_performance):
@@ -438,8 +439,10 @@ class ConformalTuner:
                 searcher.sampler, "adapters"
             ):
                 searcher.update_interval_width(
-                    sampled_y=validation_performance,
-                    sampled_X=self.encoder.transform([minimal_parameter]).to_numpy(),
+                    y_true=validation_performance,
+                    X=scaler.transform(
+                        self.encoder.transform([minimal_parameter]).to_numpy(),
+                    ),
                 )
 
             # Record breach (for paper)
@@ -486,7 +489,7 @@ class ConformalTuner:
                 searchable_indices=self.searchable_indices,
                 current_runtime=self.search_timer.return_runtime(),
                 runtime_budget=runtime_budget,
-                current_iter=config_idx,
+                current_iter=search_iter + 1,
                 max_iter=max_iter,
                 n_random_searches=n_random_searches,
             )

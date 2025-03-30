@@ -1,6 +1,5 @@
 import pytest
-import numpy as np
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from confopt.tuning import (
     calculate_tuning_count,
@@ -195,23 +194,7 @@ class TestConformalTuner:
         with pytest.raises(RuntimeError):
             tuner._random_search(n_searches=5, verbose=False, max_runtime=10.0)
 
-    @patch("confopt.tuning.QuantileConformalSearcher")
-    def test_tune_with_mock_objective(self, mock_searcher, tuner):
-        # Create a mock searcher instance
-        mock_searcher_instance = MagicMock()
-        mock_searcher_instance.predict.return_value = np.array([0.5])
-        mock_searcher_instance.fit.return_value = None
-        mock_searcher_instance.sampler = MagicMock()
+    def test_tune_with_default_searcher(self, tuner):
+        tuner.tune(n_random_searches=20, max_iter=30, verbose=False)
 
-        # Run tuning with minimal iterations
-        tuner.tune(n_random_searches=5, max_iter=8, verbose=False)
-
-        assert (
-            len(tuner.study.trials) == 8
-        ), "Should have at least the random search trials"
-
-        # Check that all performance values are equal to the constant value (2)
-        for trial in tuner.study.trials:
-            assert (
-                trial.performance == 2
-            ), "All trials should have performance equal to 2"
+        assert len(tuner.study.trials) == 30

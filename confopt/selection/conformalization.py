@@ -212,8 +212,8 @@ class QuantileConformalEstimator:
             random_state=random_state,
         )
 
-        self.nonconformity_scores = [np.array([]) for _ in self.alphas]
         if len(X_train) + len(X_val) > self.n_pre_conformal_trials:
+            self.nonconformity_scores = [np.array([]) for _ in self.alphas]
             self.quantile_estimator.fit(X_train, y_train, quantiles=all_quantiles)
 
             for i, alpha in enumerate(self.alphas):

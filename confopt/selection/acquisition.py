@@ -2,7 +2,6 @@ import logging
 from typing import Optional, Union, List
 import numpy as np
 from abc import ABC, abstractmethod
-from confopt.selection.adaptation import DtACI
 from confopt.selection.conformalization import (
     LocallyWeightedConformalEstimator,
     QuantileConformalEstimator,
@@ -56,6 +55,8 @@ class BaseConformalSearcher(ABC):
     ):
         self.sampler = sampler
 
+        self.conformal_estimator = None
+
     def predict(self, X: np.array):
         if isinstance(self.sampler, LowerBoundSampler):
             return self._predict_with_ucb(X)
@@ -79,27 +80,23 @@ class BaseConformalSearcher(ABC):
         pass
 
     @abstractmethod
-    def _get_interval_predictions(self, X: np.array) -> List[ConformalBounds]:
-        pass
-
-    @abstractmethod
     def _calculate_betas(self, X: np.array, y_true: float) -> list[float]:
         pass
 
     def update_interval_width(self, X: np.array, y_true: float) -> list[float]:
-        if isinstance(self.sampler.adapter, DtACI):
+        if self.conformal_estimator.nonconformity_scores is not None:
             betas = self._calculate_betas(X, y_true)
-        if isinstance(self.sampler, ThompsonSampler):
-            self.sampler.update_interval_width(betas=betas)
-        elif isinstance(
-            self.sampler, (PessimisticLowerBoundSampler, LowerBoundSampler)
-        ):
-            if len(betas) == 1:
-                self.sampler.update_interval_width(beta=betas[0])
+            if isinstance(self.sampler, ThompsonSampler):
+                self.sampler.update_interval_width(betas=betas)
+            elif isinstance(
+                self.sampler, (PessimisticLowerBoundSampler, LowerBoundSampler)
+            ):
+                if len(betas) == 1:
+                    self.sampler.update_interval_width(beta=betas[0])
+                else:
+                    raise ValueError("Multiple betas returned for single beta sampler.")
             else:
-                raise ValueError("Multiple betas returned for single beta sampler.")
-        else:
-            raise ValueError(f"Unsupported sampler type: {type(self.sampler)}")
+                raise ValueError(f"Unsupported sampler type: {type(self.sampler)}")
 
 
 class LocallyWeightedConformalSearcher(BaseConformalSearcher):
