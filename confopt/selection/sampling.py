@@ -42,8 +42,8 @@ class LowerBoundSampler(PessimisticLowerBoundSampler):
         self,
         interval_width: float = 0.8,
         adapter: Optional[Literal["DtACI"]] = None,
-        beta_decay: Literal[
-            "inverse_square_root_decay", "logarithmic_decay"
+        beta_decay: Optional[
+            Literal["inverse_square_root_decay", "logarithmic_decay"]
         ] = "logarithmic_decay",
         c: float = 1,
     ):
@@ -59,6 +59,12 @@ class LowerBoundSampler(PessimisticLowerBoundSampler):
             self.beta = np.sqrt(self.c / self.t)
         elif self.beta_decay == "logarithmic_decay":
             self.beta = np.sqrt((self.c * np.log(self.t)) / self.t)
+        elif self.beta_decay is None:
+            self.beta = 1
+        else:
+            raise ValueError(
+                "beta_decay must be 'inverse_square_root_decay', 'logarithmic_decay', or None."
+            )
 
 
 class ThompsonSampler:

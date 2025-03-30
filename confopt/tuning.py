@@ -445,12 +445,14 @@ class ConformalTuner:
                     ),
                 )
 
-            # Record breach (for paper)
+            # TODO: TEMP FOR PAPER
             breach = None
-            if isinstance(searcher.sampler, LowerBoundSampler):
-                # TODO: Grab breach status from sampler's adapter
-                breach = 0
-
+            if (
+                isinstance(searcher.sampler, LowerBoundSampler)
+                and searcher.sampler.adapter is not None
+                and len(searcher.sampler.adapter.error_history) > 0
+            ):
+                breach = searcher.sampler.adapter.error_history[-1]
             estimator_error = searcher.primary_estimator_error
 
             # Update search state and record trial
