@@ -98,6 +98,26 @@ class BaseConformalSearcher(ABC):
             else:
                 raise ValueError(f"Unsupported sampler type: {type(self.sampler)}")
 
+    def update(self, X: np.array, y_true: float) -> None:
+        if isinstance(self.sampler, LowerBoundSampler):
+            self.sampler.update_stagnation(y_true)
+            self.sampler.update_exploration_step()
+
+        if self.conformal_estimator.nonconformity_scores is not None:
+            if hasattr(self.sampler, "adapter") or hasattr(self.sampler, "adapters"):
+                betas = self._calculate_betas(X, y_true)
+                if isinstance(self.sampler, ThompsonSampler):
+                    self.sampler.update_interval_width(betas=betas)
+                elif isinstance(
+                    self.sampler, (PessimisticLowerBoundSampler, LowerBoundSampler)
+                ):
+                    if len(betas) == 1:
+                        self.sampler.update_interval_width(beta=betas[0])
+                    else:
+                        raise ValueError(
+                            "Multiple betas returned for single beta sampler."
+                        )
+
 
 class LocallyWeightedConformalSearcher(BaseConformalSearcher):
     def __init__(

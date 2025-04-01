@@ -434,16 +434,13 @@ class ConformalTuner:
                 )
                 continue
 
-            # Update searcher if needed
-            if hasattr(searcher.sampler, "adapter") or hasattr(
-                searcher.sampler, "adapters"
-            ):
-                searcher.update_interval_width(
-                    y_true=self.metric_sign * validation_performance,
-                    X=scaler.transform(
-                        self.encoder.transform([minimal_parameter]).to_numpy(),
-                    ),
-                )
+            # Use the new update method to update both stagnation and interval width
+            transformed_X = scaler.transform(
+                self.encoder.transform([minimal_parameter]).to_numpy(),
+            )
+            searcher.update(
+                X=transformed_X, y_true=self.metric_sign * validation_performance
+            )
 
             # TODO: TEMP FOR PAPER
             breach = None
