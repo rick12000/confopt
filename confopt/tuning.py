@@ -14,8 +14,8 @@ from confopt.utils.tracking import (
     Trial,
     Study,
     RuntimeTracker,
-    derive_optimal_tuning_count,
 )
+from confopt.utils.optimization import ParzenSurrogateTuner, FixedSurrogateTuner
 from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
@@ -53,28 +53,6 @@ def process_and_split_estimation_data(
     )
 
     return X_train, y_train, X_val, y_val
-
-
-def calculate_tuning_count(
-    searcher_tuning_framework,
-    target_model_runtime,
-    search_model_runtime,
-    conformal_retraining_frequency,
-):
-    if not searcher_tuning_framework:
-        return 0
-
-    if searcher_tuning_framework == "runtime":
-        return derive_optimal_tuning_count(
-            target_model_runtime=target_model_runtime,
-            search_model_runtime=search_model_runtime,
-            search_model_retraining_freq=conformal_retraining_frequency,
-            search_to_baseline_runtime_ratio=0.3,
-        )
-    elif searcher_tuning_framework == "fixed":
-        return 10
-    else:
-        raise ValueError("Invalid searcher tuning framework specified.")
 
 
 def check_early_stopping(
@@ -302,9 +280,9 @@ class ConformalTuner:
             # Moved early stopping check to end of loop
             stop = check_early_stopping(
                 searchable_indices=self.searchable_indices,
-                current_runtime=self.search_timer.return_runtime()
-                if max_runtime
-                else None,
+                current_runtime=(
+                    self.search_timer.return_runtime() if max_runtime else None
+                ),
                 runtime_budget=max_runtime,
             )
             if stop:
@@ -329,7 +307,6 @@ class ConformalTuner:
         searcher: BaseConformalSearcher,
         n_random_searches,
         conformal_retraining_frequency,
-        search_model_tuning_count,
         tabularized_searched_configurations,
         verbose,
         max_iter,
@@ -347,13 +324,42 @@ class ConformalTuner:
                 )
 
         scaler = StandardScaler()
-        first_searcher_runtime = None
         max_iterations = min(
             len(self.searchable_indices),
             len(self.tuning_configurations) - n_random_searches,
         )
 
-        # Fix the range function - remove the named parameter 'stop='
+        if searcher_tuning_framework == "reward_cost":
+            tuning_optimizer = ParzenSurrogateTuner(
+                max_tuning_count=20,
+                max_tuning_interval=15,  # Increased to allow more multiples
+                conformal_retraining_frequency=conformal_retraining_frequency,
+                acquisition_function="ei",
+                exploration_weight=0.1,
+                bandwidth=0.5,
+                random_state=42,
+            )
+        elif searcher_tuning_framework == "fixed":
+            tuning_optimizer = FixedSurrogateTuner(
+                n_tuning_episodes=10,
+                tuning_interval=3 * conformal_retraining_frequency,
+                conformal_retraining_frequency=conformal_retraining_frequency,
+            )
+        elif searcher_tuning_framework is None:
+            tuning_optimizer = FixedSurrogateTuner(
+                n_tuning_episodes=0,
+                tuning_interval=conformal_retraining_frequency,
+                conformal_retraining_frequency=conformal_retraining_frequency,
+            )
+        else:
+            raise ValueError(
+                "searcher_tuning_framework must be either 'reward_cost', 'fixed', or None."
+            )
+
+        search_model_retuning_frequency = 1
+        search_model_tuning_count = 0
+        searcher_error_history = []
+        last_tuning_iter = 0
         for search_iter in range(max_iterations):
             # Update progress bar
             if progress_bar:
@@ -393,27 +399,51 @@ class ConformalTuner:
             # Retrain the searcher if needed
             searcher_runtime = None
             if search_iter == 0 or search_iter % conformal_retraining_frequency == 0:
+                if (
+                    search_model_retuning_frequency % conformal_retraining_frequency
+                    != 0
+                ):
+                    raise ValueError(
+                        "search_model_retuning_frequency must be a multiple of conformal_retraining_frequency."
+                    )
+                if search_iter == 0 or (
+                    (search_iter - last_tuning_iter) >= search_model_retuning_frequency
+                ):
+                    pass
+
                 runtime_tracker = RuntimeTracker()
                 searcher.fit(
-                    X_train=X_train,
                     y_train=y_train,
                     X_val=X_val,
                     y_val=y_val,
                     tuning_iterations=search_model_tuning_count,
                 )
                 searcher_runtime = runtime_tracker.return_runtime()
+                searcher_error_history.append(searcher.primary_estimator_error)
 
-                if search_iter == 0:
-                    first_searcher_runtime = searcher_runtime
+                if searcher_error_history:
+                    error_improvement = max(
+                        0, searcher_error_history[-2] - searcher_error_history[-1]
+                    )
+                    normalized_searcher_runtime = (
+                        searcher_runtime / self.study.get_average_target_model_runtime()
+                    )
 
-            # Update tuning count if needed for future runs
-            if searcher_tuning_framework:
-                search_model_tuning_count = calculate_tuning_count(
-                    searcher_tuning_framework=searcher_tuning_framework,
-                    target_model_runtime=self.study.get_average_target_model_runtime(),
-                    search_model_runtime=first_searcher_runtime,
-                    conformal_retraining_frequency=conformal_retraining_frequency,
-                )
+                    # Pass the search iteration to update
+                    tuning_optimizer.update(
+                        arm=(
+                            search_model_tuning_count,
+                            search_model_retuning_frequency,
+                        ),
+                        reward=error_improvement,
+                        cost=normalized_searcher_runtime,
+                        search_iter=search_iter,  # Include search iteration
+                    )
+
+                (
+                    search_model_tuning_count,
+                    search_model_retuning_frequency,
+                ) = tuning_optimizer.select_arm()
 
             # Get performance bounds and select next configuration to evaluate
             config_idx = self._select_next_configuration_idx(
@@ -447,7 +477,6 @@ class ConformalTuner:
             if (
                 isinstance(searcher.sampler, LowerBoundSampler)
                 and searcher.sampler.adapter is not None
-                and len(searcher.sampler.adapter.error_history) > 0
             ):
                 breach = searcher.sampler.adapter.error_history[-1]
             estimator_error = searcher.primary_estimator_error
@@ -518,7 +547,7 @@ class ConformalTuner:
         searcher: Optional[
             Union[LocallyWeightedConformalSearcher, QuantileConformalSearcher]
         ] = None,
-        searcher_tuning_framework: Optional[Literal["runtime", "ucb", "fixed"]] = None,
+        searcher_tuning_framework: Optional[Literal["reward_cost", "fixed"]] = None,
         random_state: Optional[int] = None,
         max_iter: Optional[int] = None,
         runtime_budget: Optional[int] = None,
@@ -560,9 +589,8 @@ class ConformalTuner:
             searcher=searcher,
             n_random_searches=n_random_searches,
             conformal_retraining_frequency=conformal_retraining_frequency,
-            search_model_tuning_count=0,  # Initial value, will be updated inside method
             tabularized_searched_configurations=tabularized_searched_configurations,
-            verbose=verbose,  # Pass verbose parameter instead of progress_bar
+            verbose=verbose,
             max_iter=max_iter,
             runtime_budget=runtime_budget,
             searcher_tuning_framework=searcher_tuning_framework,
