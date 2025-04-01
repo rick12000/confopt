@@ -9,6 +9,7 @@ from confopt.selection.estimation import (
     PointTuner,
     QuantileTuner,
 )
+from confopt.selection.estimator_configuration import ESTIMATOR_REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,8 @@ class LocallyWeightedConformalEstimator:
         self.ve_estimator = None
         self.nonconformity_scores = None
         self.primary_estimator_error = None
+        self.best_pe_config = None
+        self.best_ve_config = None
 
     def _tune_fit_component_estimator(
         self,
@@ -36,7 +39,23 @@ class LocallyWeightedConformalEstimator:
         tuning_iterations: int,
         min_obs_for_tuning: int = 15,
         random_state: Optional[int] = None,
+        last_best_params: Optional[dict] = None,
     ):
+        # Create a list of warm start configurations
+        forced_param_configurations = []
+
+        # Add the previous best configuration if available
+        if last_best_params is not None:
+            forced_param_configurations.append(last_best_params)
+
+        # Add the default configuration from registry if it exists
+        estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
+        if (
+            hasattr(estimator_config, "default_params")
+            and estimator_config.default_params
+        ):
+            forced_param_configurations.append(estimator_config.default_params)
+
         if tuning_iterations > 1 and len(X) > min_obs_for_tuning:
             tuner = PointTuner(random_state=random_state)
             initialization_params = tuner.tune(
@@ -44,9 +63,13 @@ class LocallyWeightedConformalEstimator:
                 y=y,
                 estimator_architecture=estimator_architecture,
                 n_searches=tuning_iterations,
+                forced_param_configurations=forced_param_configurations,
             )
         else:
-            initialization_params = None
+            # If not tuning, use the first warm start config or None
+            initialization_params = (
+                forced_param_configurations[0] if forced_param_configurations else None
+            )
 
         estimator = initialize_estimator(
             estimator_architecture=estimator_architecture,
@@ -55,7 +78,7 @@ class LocallyWeightedConformalEstimator:
         )
         estimator.fit(X, y)
 
-        return estimator
+        return estimator, initialization_params
 
     def fit(
         self,
@@ -66,6 +89,8 @@ class LocallyWeightedConformalEstimator:
         tuning_iterations: Optional[int] = 0,
         min_obs_for_tuning: int = 15,
         random_state: Optional[int] = None,
+        best_pe_config: Optional[dict] = None,
+        best_ve_config: Optional[dict] = None,
     ):
         (X_pe, y_pe, X_ve, y_ve,) = train_val_split(
             X_train,
@@ -75,23 +100,25 @@ class LocallyWeightedConformalEstimator:
             random_state=random_state,
         )
 
-        self.pe_estimator = self._tune_fit_component_estimator(
+        self.pe_estimator, self.best_pe_config = self._tune_fit_component_estimator(
             X=X_pe,
             y=y_pe,
             estimator_architecture=self.point_estimator_architecture,
             tuning_iterations=tuning_iterations,
             min_obs_for_tuning=min_obs_for_tuning,
             random_state=random_state,
+            last_best_params=best_pe_config,
         )
         abs_pe_residuals = abs(y_ve - self.pe_estimator.predict(X_ve))
 
-        self.ve_estimator = self._tune_fit_component_estimator(
+        self.ve_estimator, self.best_ve_config = self._tune_fit_component_estimator(
             X=X_ve,
             y=abs_pe_residuals,
             estimator_architecture=self.variance_estimator_architecture,
             tuning_iterations=tuning_iterations,
             min_obs_for_tuning=min_obs_for_tuning,
             random_state=random_state,
+            last_best_params=best_ve_config,
         )
         var_pred = self.ve_estimator.predict(X_val)
         var_pred = np.array([0.001 if x <= 0 else x for x in var_pred])
@@ -170,6 +197,7 @@ class QuantileConformalEstimator:
         self.all_quantiles = None
         self.conformalize_predictions = False
         self.primary_estimator_error = None
+        self.last_best_params = None
 
     def fit(
         self,
@@ -181,6 +209,7 @@ class QuantileConformalEstimator:
         min_obs_for_tuning: int = 15,
         upper_quantile_cap: Optional[float] = None,
         random_state: Optional[int] = None,
+        last_best_params: Optional[dict] = None,
     ):
         self.upper_quantile_cap = upper_quantile_cap
 
@@ -195,6 +224,21 @@ class QuantileConformalEstimator:
 
         self.quantile_indices = {q: i for i, q in enumerate(all_quantiles)}
 
+        # Create a list of warm start configurations
+        forced_param_configurations = []
+
+        # Add the previous best configuration if available
+        if last_best_params is not None:
+            forced_param_configurations.append(last_best_params)
+
+        # Add the default configuration from registry if it exists
+        estimator_config = ESTIMATOR_REGISTRY[self.quantile_estimator_architecture]
+        if (
+            hasattr(estimator_config, "default_params")
+            and estimator_config.default_params
+        ):
+            forced_param_configurations.append(estimator_config.default_params)
+
         if tuning_iterations > 1 and len(X_train) > min_obs_for_tuning:
             tuner = QuantileTuner(random_state=random_state, quantiles=all_quantiles)
             initialization_params = tuner.tune(
@@ -202,9 +246,17 @@ class QuantileConformalEstimator:
                 y=y_train,
                 estimator_architecture=self.quantile_estimator_architecture,
                 n_searches=tuning_iterations,
+                forced_param_configurations=forced_param_configurations,
             )
+            self.last_best_params = initialization_params
         else:
-            initialization_params = None
+            # If not tuning, use the first warm start config or None
+            initialization_params = (
+                forced_param_configurations[0] if forced_param_configurations else None
+            )
+            self.last_best_params = (
+                last_best_params  # Still store the passed config even if not used
+            )
 
         self.quantile_estimator = initialize_estimator(
             estimator_architecture=self.quantile_estimator_architecture,

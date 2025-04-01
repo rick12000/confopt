@@ -54,7 +54,6 @@ class BaseConformalSearcher(ABC):
         ],
     ):
         self.sampler = sampler
-
         self.conformal_estimator = None
 
     def predict(self, X: np.array):
@@ -132,6 +131,13 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
         self.point_estimator_architecture = point_estimator_architecture
         self.variance_estimator_architecture = variance_estimator_architecture
 
+        # Initialize the conformal estimator here instead of in fit()
+        self.conformal_estimator = LocallyWeightedConformalEstimator(
+            point_estimator_architecture=self.point_estimator_architecture,
+            variance_estimator_architecture=self.variance_estimator_architecture,
+            alphas=self.sampler.fetch_alphas(),
+        )
+
     def fit(
         self,
         X_train: np.array,
@@ -141,11 +147,7 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
         tuning_iterations: Optional[int] = 0,
         random_state: Optional[int] = None,
     ):
-        self.conformal_estimator = LocallyWeightedConformalEstimator(
-            point_estimator_architecture=self.point_estimator_architecture,
-            variance_estimator_architecture=self.variance_estimator_architecture,
-            alphas=self.sampler.fetch_alphas(),
-        )
+        # Just fit the already initialized estimator
         self.conformal_estimator.fit(
             X_train=X_train,
             y_train=y_train,
@@ -212,6 +214,13 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         self.quantile_estimator_architecture = quantile_estimator_architecture
         self.n_pre_conformal_trials = n_pre_conformal_trials
 
+        # Initialize the conformal estimator here instead of in fit()
+        self.conformal_estimator = QuantileConformalEstimator(
+            quantile_estimator_architecture=self.quantile_estimator_architecture,
+            alphas=self.sampler.fetch_alphas(),
+            n_pre_conformal_trials=self.n_pre_conformal_trials,
+        )
+
     def fit(
         self,
         X_train: np.array,
@@ -221,12 +230,6 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         tuning_iterations: Optional[int] = 0,
         random_state: Optional[int] = None,
     ):
-        self.conformal_estimator = QuantileConformalEstimator(
-            quantile_estimator_architecture=self.quantile_estimator_architecture,
-            alphas=self.sampler.fetch_alphas(),
-            n_pre_conformal_trials=self.n_pre_conformal_trials,
-        )
-
         if isinstance(self.sampler, (PessimisticLowerBoundSampler, LowerBoundSampler)):
             upper_quantile_cap = 0.5
         elif isinstance(self.sampler, ThompsonSampler):
@@ -243,6 +246,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         else:
             raise ValueError(f"Unsupported sampler type: {type(self.sampler)}")
 
+        # Just fit the already initialized estimator
         self.conformal_estimator.fit(
             X_train=X_train,
             y_train=y_train,

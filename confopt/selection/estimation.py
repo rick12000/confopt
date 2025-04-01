@@ -75,13 +75,30 @@ class RandomTuner:
         estimator_architecture: str,
         n_searches: int,
         k_fold_splits: int = 3,
+        forced_param_configurations: Optional[List[Dict]] = None,
     ) -> Dict:
         estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
-        tuning_configurations = get_tuning_configurations(
-            parameter_grid=estimator_config.estimator_parameter_space,
-            n_configurations=n_searches,
-            random_state=self.random_state,
-        )
+
+        # Handle warm start configurations
+        if forced_param_configurations is None:
+            forced_param_configurations = []
+
+        # Determine how many random configurations to generate
+        n_random_configs = max(0, n_searches - len(forced_param_configurations))
+
+        # If we have more warm start configs than needed, truncate the list
+        if len(forced_param_configurations) > n_searches:
+            tuning_configurations = forced_param_configurations
+        else:
+            # Generate random configurations for the remaining slots
+            random_configs = get_tuning_configurations(
+                parameter_grid=estimator_config.estimator_parameter_space,
+                n_configurations=n_random_configs,
+                random_state=self.random_state,
+            )
+            # Combine warm start and random configurations
+            tuning_configurations = forced_param_configurations + random_configs
+
         scored_configurations, scores = self._cross_validate_configurations(
             configurations=tuning_configurations,
             estimator_config=estimator_config,
