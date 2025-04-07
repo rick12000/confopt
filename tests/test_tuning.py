@@ -2,28 +2,10 @@ import pytest
 from unittest.mock import MagicMock
 
 from confopt.tuning import (
-    calculate_tuning_count,
     check_early_stopping,
     ConformalTuner,
 )
 from confopt.utils.tracking import Trial
-
-
-@pytest.mark.parametrize("searcher_tuning_framework", ["runtime", "fixed", None])
-def test_calculate_tuning_count(searcher_tuning_framework):
-    # Runtime framework
-    count = calculate_tuning_count(
-        searcher_tuning_framework=searcher_tuning_framework,
-        target_model_runtime=10.0,
-        search_model_runtime=2.0,
-        conformal_retraining_frequency=5,
-    )
-    if searcher_tuning_framework == "runtime":
-        assert isinstance(count, int) and count >= 0
-    elif searcher_tuning_framework == "fixed":
-        assert count == 10
-    elif searcher_tuning_framework is None:
-        assert count == 0
 
 
 @pytest.mark.parametrize(
@@ -194,7 +176,15 @@ class TestConformalTuner:
         with pytest.raises(RuntimeError):
             tuner._random_search(n_searches=5, verbose=False, max_runtime=10.0)
 
-    def test_tune_with_default_searcher(self, tuner):
-        tuner.tune(n_random_searches=20, max_iter=30, verbose=False)
+    @pytest.mark.parametrize(
+        "searcher_tuning_framework", ["reward_cost", "fixed", None]
+    )
+    def test_tune_with_default_searcher(self, tuner, searcher_tuning_framework):
+        tuner.tune(
+            n_random_searches=20,
+            max_iter=50,
+            verbose=False,
+            searcher_tuning_framework=searcher_tuning_framework,
+        )
 
-        assert len(tuner.study.trials) == 30
+        assert len(tuner.study.trials) == 50

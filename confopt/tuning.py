@@ -15,7 +15,7 @@ from confopt.utils.tracking import (
     Study,
     RuntimeTracker,
 )
-from confopt.utils.optimization import ParzenSurrogateTuner, FixedSurrogateTuner
+from confopt.utils.optimization import PowerLawTuner, FixedSurrogateTuner
 from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
@@ -330,13 +330,12 @@ class ConformalTuner:
         )
 
         if searcher_tuning_framework == "reward_cost":
-            tuning_optimizer = ParzenSurrogateTuner(
+            tuning_optimizer = PowerLawTuner(
                 max_tuning_count=20,
-                max_tuning_interval=15,  # Increased to allow more multiples
+                max_tuning_interval=15,
                 conformal_retraining_frequency=conformal_retraining_frequency,
-                acquisition_function="ei",
-                exploration_weight=0.1,
-                bandwidth=0.5,
+                min_observations=3,
+                cost_weight=0.5,
                 random_state=42,
             )
         elif searcher_tuning_framework == "fixed":
@@ -413,6 +412,7 @@ class ConformalTuner:
 
                 runtime_tracker = RuntimeTracker()
                 searcher.fit(
+                    X_train=X_train,
                     y_train=y_train,
                     X_val=X_val,
                     y_val=y_val,
@@ -421,13 +421,17 @@ class ConformalTuner:
                 searcher_runtime = runtime_tracker.return_runtime()
                 searcher_error_history.append(searcher.primary_estimator_error)
 
-                if searcher_error_history:
+                if len(searcher_error_history) > 1:
                     error_improvement = max(
                         0, searcher_error_history[-2] - searcher_error_history[-1]
                     )
-                    normalized_searcher_runtime = (
-                        searcher_runtime / self.study.get_average_target_model_runtime()
-                    )
+                    try:
+                        normalized_searcher_runtime = (
+                            searcher_runtime
+                            / self.study.get_average_target_model_runtime()
+                        )
+                    except ZeroDivisionError:
+                        normalized_searcher_runtime = 0
 
                     # Pass the search iteration to update
                     tuning_optimizer.update(
@@ -477,6 +481,7 @@ class ConformalTuner:
             if (
                 isinstance(searcher.sampler, LowerBoundSampler)
                 and searcher.sampler.adapter is not None
+                and len(searcher.sampler.adapter.error_history) > 0
             ):
                 breach = searcher.sampler.adapter.error_history[-1]
             estimator_error = searcher.primary_estimator_error
