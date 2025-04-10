@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, Type, Optional, List
 from pydantic import BaseModel
 
 from confopt.wrapping import IntRange, FloatRange, CategoricalRange
@@ -23,23 +23,26 @@ from confopt.selection.estimators.ensembling import (
     QuantileEnsembleEstimator,
     PointEnsembleEstimator,
 )
-from copy import deepcopy
 
 
 class EstimatorConfig(BaseModel):
     estimator_name: str
-    estimator_instance: Any
+    estimator_class: Type
+    default_params: Dict[str, Any]
     estimator_parameter_space: Dict[str, ParameterRange]
+    ensemble_components: Optional[
+        List[Dict[str, Any]]
+    ] = None  # New field for ensemble components
 
     class Config:
         arbitrary_types_allowed = True
 
     def is_ensemble_estimator(self) -> bool:
-        return isinstance(self.estimator_instance, BaseEnsembleEstimator)
+        return issubclass(self.estimator_class, BaseEnsembleEstimator)
 
     def is_quantile_estimator(self) -> bool:
-        return isinstance(
-            self.estimator_instance,
+        return issubclass(
+            self.estimator_class,
             (
                 BaseSingleFitQuantileEstimator,
                 BaseMultiFitQuantileEstimator,
@@ -68,13 +71,15 @@ ESTIMATOR_REGISTRY = {
     # Point estimators
     RF_NAME: EstimatorConfig(
         estimator_name=RF_NAME,
-        estimator_instance=RandomForestRegressor(
-            n_estimators=25,
-            max_features="sqrt",
-            min_samples_split=3,
-            min_samples_leaf=2,
-            bootstrap=True,
-        ),
+        estimator_class=RandomForestRegressor,
+        default_params={
+            "n_estimators": 25,
+            "max_features": "sqrt",
+            "min_samples_split": 3,
+            "min_samples_leaf": 2,
+            "bootstrap": True,
+            "random_state": None,  # added to allow seeding
+        },
         estimator_parameter_space={
             "n_estimators": IntRange(min_value=10, max_value=75),
             "max_features": CategoricalRange(choices=[0.3, 0.5, 0.7, "sqrt"]),
@@ -85,10 +90,11 @@ ESTIMATOR_REGISTRY = {
     ),
     KNN_NAME: EstimatorConfig(
         estimator_name=KNN_NAME,
-        estimator_instance=KNeighborsRegressor(
-            n_neighbors=5,
-            weights="distance",
-        ),
+        estimator_class=KNeighborsRegressor,
+        default_params={
+            "n_neighbors": 5,
+            "weights": "distance",
+        },
         estimator_parameter_space={
             "n_neighbors": IntRange(min_value=3, max_value=9),
             "weights": CategoricalRange(choices=["uniform", "distance"]),
@@ -97,14 +103,16 @@ ESTIMATOR_REGISTRY = {
     ),
     GBM_NAME: EstimatorConfig(
         estimator_name=GBM_NAME,
-        estimator_instance=GradientBoostingRegressor(
-            learning_rate=0.1,
-            n_estimators=25,
-            min_samples_split=3,
-            min_samples_leaf=3,
-            max_depth=2,
-            subsample=0.9,
-        ),
+        estimator_class=GradientBoostingRegressor,
+        default_params={
+            "learning_rate": 0.1,
+            "n_estimators": 25,
+            "min_samples_split": 3,
+            "min_samples_leaf": 3,
+            "max_depth": 2,
+            "subsample": 0.9,
+            "random_state": None,  # added
+        },
         estimator_parameter_space={
             "learning_rate": FloatRange(min_value=0.05, max_value=0.3),
             "n_estimators": IntRange(min_value=10, max_value=50),
@@ -116,17 +124,19 @@ ESTIMATOR_REGISTRY = {
     ),
     LGBM_NAME: EstimatorConfig(
         estimator_name=LGBM_NAME,
-        estimator_instance=LGBMRegressor(
-            learning_rate=0.1,
-            n_estimators=20,
-            max_depth=2,
-            min_child_samples=5,
-            subsample=0.8,
-            colsample_bytree=0.7,
-            reg_alpha=0.1,
-            reg_lambda=0.1,
-            min_child_weight=3,
-        ),
+        estimator_class=LGBMRegressor,
+        default_params={
+            "learning_rate": 0.1,
+            "n_estimators": 20,
+            "max_depth": 2,
+            "min_child_samples": 5,
+            "subsample": 0.8,
+            "colsample_bytree": 0.7,
+            "reg_alpha": 0.1,
+            "reg_lambda": 0.1,
+            "min_child_weight": 3,
+            "random_state": None,  # added
+        },
         estimator_parameter_space={
             "learning_rate": FloatRange(min_value=0.05, max_value=0.2),
             "n_estimators": IntRange(min_value=10, max_value=30),
@@ -140,10 +150,11 @@ ESTIMATOR_REGISTRY = {
     ),
     KR_NAME: EstimatorConfig(
         estimator_name=KR_NAME,
-        estimator_instance=KernelRidge(
-            alpha=1.0,
-            kernel="rbf",
-        ),
+        estimator_class=KernelRidge,
+        default_params={
+            "alpha": 1.0,
+            "kernel": "rbf",
+        },
         estimator_parameter_space={
             "alpha": FloatRange(min_value=0.1, max_value=10.0, log_scale=True),
             "kernel": CategoricalRange(choices=["linear", "rbf", "poly"]),
@@ -152,13 +163,15 @@ ESTIMATOR_REGISTRY = {
     # Single-fit quantile estimators
     QRF_NAME: EstimatorConfig(
         estimator_name=QRF_NAME,
-        estimator_instance=QuantileForest(
-            n_estimators=25,
-            max_depth=5,
-            max_features=0.8,
-            min_samples_split=2,
-            bootstrap=True,
-        ),
+        estimator_class=QuantileForest,
+        default_params={
+            "n_estimators": 25,
+            "max_depth": 5,
+            "max_features": 0.8,
+            "min_samples_split": 2,
+            "bootstrap": True,
+            "random_state": None,  # added
+        },
         estimator_parameter_space={
             "n_estimators": IntRange(min_value=10, max_value=50),
             "max_depth": IntRange(min_value=3, max_value=5),
@@ -169,9 +182,10 @@ ESTIMATOR_REGISTRY = {
     ),
     QKNN_NAME: EstimatorConfig(
         estimator_name=QKNN_NAME,
-        estimator_instance=QuantileKNN(
-            n_neighbors=5,
-        ),
+        estimator_class=QuantileKNN,
+        default_params={
+            "n_neighbors": 5,
+        },
         estimator_parameter_space={
             "n_neighbors": IntRange(min_value=3, max_value=10),
         },
@@ -179,15 +193,17 @@ ESTIMATOR_REGISTRY = {
     # Multi-fit quantile estimators
     QGBM_NAME: EstimatorConfig(
         estimator_name=QGBM_NAME,
-        estimator_instance=QuantileGBM(
-            learning_rate=0.2,
-            n_estimators=25,
-            min_samples_split=5,
-            min_samples_leaf=3,
-            max_depth=5,
-            subsample=0.8,
-            max_features=0.8,
-        ),
+        estimator_class=QuantileGBM,
+        default_params={
+            "learning_rate": 0.2,
+            "n_estimators": 25,
+            "min_samples_split": 5,
+            "min_samples_leaf": 3,
+            "max_depth": 5,
+            "subsample": 0.8,
+            "max_features": 0.8,
+            "random_state": None,  # added
+        },
         estimator_parameter_space={
             "learning_rate": FloatRange(min_value=0.1, max_value=0.3),
             "n_estimators": IntRange(min_value=20, max_value=50),
@@ -200,17 +216,19 @@ ESTIMATOR_REGISTRY = {
     ),
     QLGBM_NAME: EstimatorConfig(
         estimator_name=QLGBM_NAME,
-        estimator_instance=QuantileLightGBM(
-            learning_rate=0.1,
-            n_estimators=20,
-            max_depth=2,
-            min_child_samples=5,
-            subsample=0.8,
-            colsample_bytree=0.7,
-            reg_alpha=0.1,
-            reg_lambda=0.1,
-            min_child_weight=3,
-        ),
+        estimator_class=QuantileLightGBM,
+        default_params={
+            "learning_rate": 0.1,
+            "n_estimators": 20,
+            "max_depth": 2,
+            "min_child_samples": 5,
+            "subsample": 0.8,
+            "colsample_bytree": 0.7,
+            "reg_alpha": 0.1,
+            "reg_lambda": 0.1,
+            "min_child_weight": 3,
+            "random_state": None,  # added
+        },
         estimator_parameter_space={
             "learning_rate": FloatRange(min_value=0.05, max_value=0.2),
             "n_estimators": IntRange(min_value=10, max_value=30),
@@ -224,100 +242,110 @@ ESTIMATOR_REGISTRY = {
     ),
     QL_NAME: EstimatorConfig(
         estimator_name=QL_NAME,
-        estimator_instance=QuantileLasso(
-            max_iter=200,
-            p_tol=1e-4,
-        ),
+        estimator_class=QuantileLasso,
+        default_params={
+            "max_iter": 200,
+            "p_tol": 1e-4,
+            "random_state": None,  # added
+        },
         estimator_parameter_space={
-            "alpha": FloatRange(min_value=0.01, max_value=0.3, log_scale=True),
             "max_iter": IntRange(min_value=100, max_value=500),
             "p_tol": FloatRange(min_value=1e-5, max_value=1e-3, log_scale=True),
         },
     ),
-    # Ensemble estimators - added directly to the registry
+    # Ensemble estimators - modified to use ensemble_components
     PENS_NAME: EstimatorConfig(
         estimator_name=PENS_NAME,
-        estimator_instance=PointEnsembleEstimator(
-            estimators=[
-                deepcopy(
-                    GradientBoostingRegressor(
-                        learning_rate=0.1,
-                        n_estimators=25,
-                        min_samples_split=3,
-                        min_samples_leaf=3,
-                        max_depth=2,
-                        subsample=0.9,
-                    )
-                ),
-                deepcopy(
-                    KNeighborsRegressor(
-                        n_neighbors=5,
-                        weights="distance",
-                    )
-                ),
-            ],
-            weighting_strategy="linear_stack",
-            cv=3,
-        ),
+        estimator_class=PointEnsembleEstimator,
+        default_params={
+            "weighting_strategy": "linear_stack",
+            "cv": 3,
+        },
         estimator_parameter_space={
             "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
         },
+        ensemble_components=[
+            {
+                "class": GradientBoostingRegressor,
+                "params": {
+                    "learning_rate": 0.1,
+                    "n_estimators": 25,
+                    "min_samples_split": 3,
+                    "min_samples_leaf": 3,
+                    "max_depth": 2,
+                    "subsample": 0.9,
+                },
+            },
+            {
+                "class": KNeighborsRegressor,
+                "params": {
+                    "n_neighbors": 5,
+                    "weights": "distance",
+                },
+            },
+        ],
     ),
     SFQENS_NAME: EstimatorConfig(
         estimator_name=SFQENS_NAME,
-        estimator_instance=QuantileEnsembleEstimator(
-            estimators=[
-                deepcopy(
-                    QuantileForest(
-                        n_estimators=25,
-                        max_depth=5,
-                        max_features=0.8,
-                        min_samples_split=2,
-                        bootstrap=True,
-                    )
-                ),
-                deepcopy(
-                    QuantileKNN(
-                        n_neighbors=5,
-                    )
-                ),
-            ],
-            weighting_strategy="linear_stack",
-            cv=3,
-        ),
+        estimator_class=QuantileEnsembleEstimator,
+        default_params={
+            "weighting_strategy": "linear_stack",
+            "cv": 3,
+        },
         estimator_parameter_space={
             "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
         },
+        ensemble_components=[
+            {
+                "class": QuantileForest,
+                "params": {
+                    "n_estimators": 25,
+                    "max_depth": 5,
+                    "max_features": 0.8,
+                    "min_samples_split": 2,
+                    "bootstrap": True,
+                },
+            },
+            {
+                "class": QuantileKNN,
+                "params": {
+                    "n_neighbors": 5,
+                },
+            },
+        ],
     ),
     MFENS_NAME: EstimatorConfig(
         estimator_name=MFENS_NAME,
-        estimator_instance=QuantileEnsembleEstimator(
-            estimators=[
-                deepcopy(
-                    QuantileLightGBM(
-                        learning_rate=0.1,
-                        n_estimators=20,
-                        max_depth=2,
-                        min_child_samples=5,
-                        subsample=0.8,
-                        colsample_bytree=0.7,
-                        reg_alpha=0.1,
-                        reg_lambda=0.1,
-                        min_child_weight=3,
-                    )
-                ),
-                deepcopy(
-                    QuantileLasso(
-                        max_iter=200,
-                        p_tol=1e-4,
-                    )
-                ),
-            ],
-            weighting_strategy="linear_stack",
-            cv=3,
-        ),
+        estimator_class=QuantileEnsembleEstimator,
+        default_params={
+            "weighting_strategy": "linear_stack",
+            "cv": 3,
+        },
         estimator_parameter_space={
             "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
         },
+        ensemble_components=[
+            {
+                "class": QuantileLightGBM,
+                "params": {
+                    "learning_rate": 0.1,
+                    "n_estimators": 20,
+                    "max_depth": 2,
+                    "min_child_samples": 5,
+                    "subsample": 0.8,
+                    "colsample_bytree": 0.7,
+                    "reg_alpha": 0.1,
+                    "reg_lambda": 0.1,
+                    "min_child_weight": 3,
+                },
+            },
+            {
+                "class": QuantileLasso,
+                "params": {
+                    "max_iter": 200,
+                    "p_tol": 1e-4,
+                },
+            },
+        ],
     ),
 }

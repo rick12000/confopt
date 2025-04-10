@@ -15,7 +15,7 @@ from confopt.utils.tracking import (
     Study,
     RuntimeTracker,
 )
-from confopt.utils.optimization import PowerLawTuner, FixedSurrogateTuner
+from confopt.utils.optimization import BayesianTuner, FixedSurrogateTuner
 from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
@@ -330,12 +330,12 @@ class ConformalTuner:
         )
 
         if searcher_tuning_framework == "reward_cost":
-            tuning_optimizer = PowerLawTuner(
+            tuning_optimizer = BayesianTuner(
                 max_tuning_count=20,
                 max_tuning_interval=15,
                 conformal_retraining_frequency=conformal_retraining_frequency,
-                min_observations=3,
-                cost_weight=0.5,
+                min_observations=5,  # Updated to match the new default
+                exploration_weight=0.1,
                 random_state=42,
             )
         elif searcher_tuning_framework == "fixed":
@@ -358,7 +358,6 @@ class ConformalTuner:
         search_model_retuning_frequency = 1
         search_model_tuning_count = 0
         searcher_error_history = []
-        last_tuning_iter = 0
         for search_iter in range(max_iterations):
             # Update progress bar
             if progress_bar:
@@ -405,10 +404,6 @@ class ConformalTuner:
                     raise ValueError(
                         "search_model_retuning_frequency must be a multiple of conformal_retraining_frequency."
                     )
-                if search_iter == 0 or (
-                    (search_iter - last_tuning_iter) >= search_model_retuning_frequency
-                ):
-                    pass
 
                 runtime_tracker = RuntimeTracker()
                 searcher.fit(

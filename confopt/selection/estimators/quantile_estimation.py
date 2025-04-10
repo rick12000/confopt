@@ -69,10 +69,12 @@ class QuantileLasso(BaseMultiFitQuantileEstimator):
         self,
         max_iter: int = 1000,
         p_tol: float = 1e-6,
+        random_state: Optional[int] = None,
     ):
         super().__init__()
         self.max_iter = max_iter
         self.p_tol = p_tol
+        self.random_state = random_state
 
     def _fit_quantile_estimator(self, X: np.array, y: np.array, quantile: float):
         has_added_intercept = not np.any(np.all(X == 1, axis=0))
@@ -81,9 +83,11 @@ class QuantileLasso(BaseMultiFitQuantileEstimator):
         else:
             X_with_intercept = X
 
+        if self.random_state is not None:
+            np.random.seed(self.random_state)
+
         model = QuantReg(y, X_with_intercept)
         result = model.fit(q=quantile, max_iter=self.max_iter, p_tol=self.p_tol)
-
         return QuantRegWrapper(result, has_added_intercept)
 
 

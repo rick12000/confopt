@@ -1,6 +1,7 @@
 import logging
-from typing import Dict, Optional, List, Union, Tuple, Any
+from typing import Dict, Optional, List, Union, Tuple, Any, Literal
 from copy import deepcopy
+import inspect
 
 from sklearn.base import BaseEstimator
 import numpy as np
@@ -26,21 +27,49 @@ def initialize_estimator(
     initialization_params: Dict = None,
     random_state: Optional[int] = None,
 ):
-    initialization_params_copy = deepcopy(initialization_params)
-    if initialization_params_copy is not None:
-        initialization_params_copy["random_state"] = random_state
-
+    """Initialize an estimator with given parameters or default parameters."""
     estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
-    estimator = deepcopy(estimator_config.estimator_instance)
-    if initialization_params_copy:
-        for param_name, param_value in initialization_params_copy.items():
-            if hasattr(estimator, param_name):
-                setattr(estimator, param_name, param_value)
-            else:
-                logger.warning(
-                    f"Estimator {estimator_architecture} does not have attribute {param_name}"
-                )
-    return estimator
+
+    # Start with default parameters
+    params = deepcopy(estimator_config.default_params)
+
+    # If additional parameters are provided, update the defaults
+    if initialization_params:
+        params.update(initialization_params)
+
+    # Check if random_state is a valid parameter for the estimator class
+    if random_state is not None:
+        estimator_class = estimator_config.estimator_class
+        init_signature = inspect.signature(estimator_class.__init__)
+        if "random_state" in init_signature.parameters:
+            params["random_state"] = random_state
+
+    # Special handling for ensemble estimators
+    if (
+        estimator_config.is_ensemble_estimator()
+        and estimator_config.ensemble_components
+    ):
+        # For ensemble models, initialize fresh sub-estimators from component configurations
+        fresh_estimators = []
+        for component in estimator_config.ensemble_components:
+            component_class = component["class"]
+            component_params = deepcopy(component["params"])
+
+            # Set random state if supported by this component
+            if random_state is not None:
+                component_init_signature = inspect.signature(component_class.__init__)
+                if "random_state" in component_init_signature.parameters:
+                    component_params["random_state"] = random_state
+
+            # Create a fresh instance
+            fresh_estimator = component_class(**component_params)
+            fresh_estimators.append(fresh_estimator)
+
+        # Add the fresh estimators to the parameters
+        params["estimators"] = fresh_estimators
+
+    # Create and return the estimator instance
+    return estimator_config.estimator_class(**params)
 
 
 def average_scores_across_folds(
@@ -74,21 +103,19 @@ class RandomTuner:
         y: np.array,
         estimator_architecture: str,
         n_searches: int,
-        k_fold_splits: int = 3,
+        train_split: float = 0.8,
+        split_type: Literal["k_fold", "ordinal_split"] = "k_fold",
         forced_param_configurations: Optional[List[Dict]] = None,
     ) -> Dict:
         estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
 
         # Handle warm start configurations
-        if forced_param_configurations is None:
-            forced_param_configurations = []
+        forced_param_configurations = forced_param_configurations or []
 
-        # Determine how many random configurations to generate
+        # Determine configurations to evaluate
         n_random_configs = max(0, n_searches - len(forced_param_configurations))
-
-        # If we have more warm start configs than needed, truncate the list
-        if len(forced_param_configurations) > n_searches:
-            tuning_configurations = forced_param_configurations
+        if len(forced_param_configurations) >= n_searches:
+            tuning_configurations = forced_param_configurations[:n_searches]
         else:
             # Generate random configurations for the remaining slots
             random_configs = get_tuning_configurations(
@@ -99,53 +126,92 @@ class RandomTuner:
             # Combine warm start and random configurations
             tuning_configurations = forced_param_configurations + random_configs
 
-        scored_configurations, scores = self._cross_validate_configurations(
+        logger.info(f"Tuning configurations: {tuning_configurations}")
+
+        scored_configurations, scores = self._score_configurations(
             configurations=tuning_configurations,
             estimator_config=estimator_config,
             X=X,
             y=y,
-            k_fold_splits=k_fold_splits,
+            train_split=train_split,
+            split_type=split_type,
         )
-        best_configuration = scored_configurations[scores.index(min(scores))]
+
+        # Find the configuration with the minimum score
+        best_idx = scores.index(min(scores))
+        best_configuration = scored_configurations[best_idx]
+
+        logger.info(f"Best configuration: {best_configuration}")
         return best_configuration
 
-    def _cross_validate_configurations(
+    def _create_fold_indices(
+        self,
+        X: np.array,
+        train_split: float,
+        split_type: Literal["k_fold", "ordinal_split"],
+    ) -> List[Tuple[np.array, np.array]]:
+        """Create fold indices based on split type."""
+        if split_type == "ordinal_split":
+            # Single train-test split
+            split_index = int(len(X) * train_split)
+            train_indices = np.arange(split_index)
+            test_indices = np.arange(split_index, len(X))
+            return [(train_indices, test_indices)]
+        else:  # "k_fold"
+            # Reverse-engineer the number of folds based on train_split
+            k_fold_splits = round(1 / (1 - train_split))
+            kf = KFold(
+                n_splits=k_fold_splits, random_state=self.random_state, shuffle=True
+            )
+            return list(kf.split(X))
+
+    def _score_configurations(
         self,
         configurations: List[Dict],
         estimator_config: EstimatorConfig,
         X: np.array,
         y: np.array,
-        k_fold_splits: int = 3,
+        train_split: float = 0.8,
+        split_type: Literal["k_fold", "ordinal_split"] = "k_fold",
     ) -> Tuple[List[Dict], List[float]]:
-        scored_configurations, scores = [], []
-        kf = KFold(n_splits=k_fold_splits, random_state=self.random_state, shuffle=True)
-        for train_index, test_index in kf.split(X):
-            X_train, X_val = X[train_index, :], X[test_index, :]
-            Y_train, Y_val = y[train_index], y[test_index]
-            for configuration in configurations:
+        # Initialize data structures to store results
+        config_scores = {i: [] for i in range(len(configurations))}
+        fold_indices = self._create_fold_indices(X, train_split, split_type)
+
+        # For each configuration, evaluate across all folds
+        for config_idx, configuration in enumerate(configurations):
+            for train_index, test_index in fold_indices:
+                X_train, X_val = X[train_index, :], X[test_index, :]
+                Y_train, Y_val = y[train_index], y[test_index]
+
                 model = initialize_estimator(
                     estimator_architecture=estimator_config.estimator_name,
                     initialization_params=configuration,
                     random_state=self.random_state,
                 )
+
                 try:
                     self._fit_model(model, X_train, Y_train)
                     score = self._evaluate_model(model, X_val, Y_val)
-                    scored_configurations.append(configuration)
-                    scores.append(score)
+                    config_scores[config_idx].append(score)
                 except Exception as e:
                     logger.warning(
-                        "Scoring failed and result was not appended. "
-                        f"Caught exception: {e}"
+                        f"Configuration {config_idx} failed on a fold. Error: {e}"
                     )
-                    continue
-        (
-            cross_fold_scored_configurations,
-            cross_fold_scores,
-        ) = average_scores_across_folds(
-            scored_configurations=scored_configurations, scores=scores
-        )
-        return cross_fold_scored_configurations, cross_fold_scores
+                    config_scores[config_idx].append(np.nan)
+
+        # Compute average scores for each configuration
+        scored_configurations = []
+        scores = []
+        for config_idx, configuration in enumerate(configurations):
+            fold_scores = config_scores[config_idx]
+            valid_scores = [s for s in fold_scores if not np.isnan(s)]
+            if valid_scores:
+                avg_score = sum(valid_scores) / len(valid_scores)
+                scored_configurations.append(configuration)
+                scores.append(avg_score)
+
+        return scored_configurations, scores
 
     def _fit_model(self, model, X_train: np.array, Y_train: np.array) -> None:
         raise NotImplementedError("Subclasses must implement _fit_model")

@@ -10,7 +10,9 @@ from confopt.utils.encoding import get_tuning_configurations
 
 from confopt.wrapping import FloatRange, IntRange, CategoricalRange, ConformalBounds
 from sklearn.base import BaseEstimator
-from confopt.selection.estimator_configuration import ESTIMATOR_REGISTRY
+from confopt.selection.estimator_configuration import (
+    ESTIMATOR_REGISTRY,
+)
 from confopt.selection.estimators.quantile_estimation import (
     BaseSingleFitQuantileEstimator,
     BaseMultiFitQuantileEstimator,
@@ -28,8 +30,8 @@ SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES = []
 MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES = []
 QUANTILE_ESTIMATOR_ARCHITECTURES = []
 for estimator_name, estimator_config in ESTIMATOR_REGISTRY.items():
-    if isinstance(
-        estimator_config.estimator_instance,
+    if issubclass(
+        estimator_config.estimator_class,
         (
             BaseMultiFitQuantileEstimator,
             BaseSingleFitQuantileEstimator,
@@ -37,18 +39,18 @@ for estimator_name, estimator_config in ESTIMATOR_REGISTRY.items():
         ),
     ):
         QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
-    if isinstance(
-        estimator_config.estimator_instance,
+    if issubclass(
+        estimator_config.estimator_class,
         (BaseMultiFitQuantileEstimator),
     ):
         MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
-    elif isinstance(
-        estimator_config.estimator_instance,
+    elif issubclass(
+        estimator_config.estimator_class,
         (BaseSingleFitQuantileEstimator),
     ):
         SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
-    elif isinstance(
-        estimator_config.estimator_instance, (BaseEstimator, PointEnsembleEstimator)
+    elif issubclass(
+        estimator_config.estimator_class, (BaseEstimator, PointEnsembleEstimator)
     ):
         POINT_ESTIMATOR_ARCHITECTURES.append(estimator_name)
 

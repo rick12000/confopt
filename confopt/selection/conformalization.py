@@ -10,6 +10,7 @@ from confopt.selection.estimation import (
     QuantileTuner,
 )
 from confopt.selection.estimator_configuration import ESTIMATOR_REGISTRY
+from copy import deepcopy
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class LocallyWeightedConformalEstimator:
         y: np.ndarray,
         estimator_architecture: str,
         tuning_iterations: int,
-        min_obs_for_tuning: int = 15,
+        min_obs_for_tuning: int = 30,
         random_state: Optional[int] = None,
         last_best_params: Optional[dict] = None,
     ):
@@ -48,13 +49,11 @@ class LocallyWeightedConformalEstimator:
         if last_best_params is not None:
             forced_param_configurations.append(last_best_params)
 
-        # Add the default configuration from registry if it exists
+        # Get default params from the configuration
         estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
-        if (
-            hasattr(estimator_config, "default_params")
-            and estimator_config.default_params
-        ):
-            forced_param_configurations.append(estimator_config.default_params)
+        default_params = deepcopy(estimator_config.default_params)
+        if default_params:
+            forced_param_configurations.append(default_params)
 
         if tuning_iterations > 1 and len(X) > min_obs_for_tuning:
             tuner = PointTuner(random_state=random_state)
@@ -87,7 +86,7 @@ class LocallyWeightedConformalEstimator:
         X_val: np.array,
         y_val: np.array,
         tuning_iterations: Optional[int] = 0,
-        min_obs_for_tuning: int = 15,
+        min_obs_for_tuning: int = 30,
         random_state: Optional[int] = None,
         best_pe_config: Optional[dict] = None,
         best_ve_config: Optional[dict] = None,
@@ -206,7 +205,7 @@ class QuantileConformalEstimator:
         X_val: np.array,
         y_val: np.array,
         tuning_iterations: Optional[int] = 0,
-        min_obs_for_tuning: int = 15,
+        min_obs_for_tuning: int = 30,
         upper_quantile_cap: Optional[float] = None,
         random_state: Optional[int] = None,
         last_best_params: Optional[dict] = None,
@@ -231,13 +230,11 @@ class QuantileConformalEstimator:
         if last_best_params is not None:
             forced_param_configurations.append(last_best_params)
 
-        # Add the default configuration from registry if it exists
+        # Get default params from configuration
         estimator_config = ESTIMATOR_REGISTRY[self.quantile_estimator_architecture]
-        if (
-            hasattr(estimator_config, "default_params")
-            and estimator_config.default_params
-        ):
-            forced_param_configurations.append(estimator_config.default_params)
+        default_params = deepcopy(estimator_config.default_params)
+        if default_params:
+            forced_param_configurations.append(default_params)
 
         if tuning_iterations > 1 and len(X_train) > min_obs_for_tuning:
             tuner = QuantileTuner(random_state=random_state, quantiles=all_quantiles)
