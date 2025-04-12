@@ -213,3 +213,98 @@ class QuantileKNN(BaseSingleFitQuantileEstimator):
         _, indices = self.nn_model.kneighbors(X)
         neighbor_preds = self.y_train[indices]
         return neighbor_preds
+
+
+class GaussianProcessQuantileEstimator(BaseSingleFitQuantileEstimator):
+    def __init__(
+        self,
+        kernel=None,
+        alpha: float = 1e-10,
+        n_samples: int = 1000,
+        random_state: Optional[int] = None,
+    ):
+        super().__init__()
+        self.kernel = kernel
+        self.alpha = alpha
+        self.n_samples = n_samples
+        self.random_state = random_state
+
+    def _get_kernel_object(self, kernel_name=None):
+        """Convert a kernel name string to a scikit-learn kernel object."""
+        from sklearn.gaussian_process.kernels import (
+            RBF,
+            Matern,
+            RationalQuadratic,
+            ExpSineSquared,
+            ConstantKernel as C,
+        )
+
+        if kernel_name is None:
+            # Default kernel: RBF with constant
+            return C(1.0) * RBF(length_scale=1.0)
+
+        if isinstance(kernel_name, str):
+            if kernel_name == "rbf":
+                return C(1.0) * RBF(length_scale=1.0)
+            elif kernel_name == "matern":
+                return C(1.0) * Matern(length_scale=1.0, nu=1.5)
+            elif kernel_name == "rational_quadratic":
+                return C(1.0) * RationalQuadratic(length_scale=1.0, alpha=1.0)
+            elif kernel_name == "exp_sine_squared":
+                return C(1.0) * ExpSineSquared(length_scale=1.0, periodicity=1.0)
+            else:
+                raise ValueError(f"Unknown kernel name: {kernel_name}")
+
+        # If the kernel is already a kernel object, return it as is
+        return kernel_name
+
+    def _fit_implementation(self, X: np.ndarray, y: np.ndarray):
+        from sklearn.gaussian_process import GaussianProcessRegressor
+
+        # Convert kernel name to kernel object if needed
+        kernel_obj = self._get_kernel_object(self.kernel)
+
+        self.gp = GaussianProcessRegressor(
+            kernel=kernel_obj,
+            alpha=self.alpha,
+            normalize_y=True,
+            n_restarts_optimizer=5,
+            random_state=self.random_state,
+        )
+        self.gp.fit(X, y)
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """
+        Override the base class predict method to use analytical Gaussian quantiles
+        rather than sampling, ensuring monotonicity of quantiles.
+        """
+        from scipy.stats import norm
+
+        # Get mean and std from the GP model
+        y_mean, y_std = self.gp.predict(X, return_std=True)
+
+        # For each point, compute the quantiles directly using the Gaussian CDF
+        # This ensures monotonically increasing quantiles by definition
+        quantile_preds = np.array(
+            [y_mean[i] + y_std[i] * norm.ppf(self.quantiles) for i in range(len(X))]
+        )
+
+        return quantile_preds
+
+    def _get_candidate_local_distribution(self, X: np.ndarray) -> np.ndarray:
+        # For each test point, get mean and std from GP
+        y_mean, y_std = self.gp.predict(X, return_std=True)
+
+        # Set random seed for reproducibility
+        rng = np.random.RandomState(self.random_state)
+
+        # Generate samples from the GP posterior for each test point
+        samples = np.array(
+            [
+                rng.normal(y_mean[i], y_std[i], size=self.n_samples)
+                for i in range(len(X))
+            ]
+        )
+
+        return samples

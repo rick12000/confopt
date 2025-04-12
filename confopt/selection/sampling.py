@@ -69,7 +69,9 @@ class LowerBoundSampler(PessimisticLowerBoundSampler):
             self.beta = np.sqrt((self.c * np.log(self.t)) / self.t)
         elif self.beta_decay == "adaptive_sequential_decay":
             self.beta = min(
-                np.sqrt(1 / self.t) * (1 + self.alpha) ** self.stagnation, self.beta_max
+                np.sqrt((self.c * np.log(self.t)) / self.t)
+                * (1 + self.alpha) ** self.stagnation,
+                self.beta_max,
             )
         elif self.beta_decay is None:
             self.beta = 1
