@@ -49,83 +49,13 @@ class TestLowerBoundSampler:
         [
             ("inverse_square_root_decay", 2.0, lambda t: np.sqrt(2.0 / t)),
             ("logarithmic_decay", 2.0, lambda t: np.sqrt((2.0 * np.log(t)) / t)),
-            (
-                "adaptive_sequential_decay",
-                2.0,
-                lambda t, alpha, stag, max_beta: min(
-                    np.sqrt(1 / t) * (1 + alpha) ** stag, max_beta
-                ),
-            ),
         ],
     )
     def test_update_exploration_step(self, beta_decay, c, expected_beta):
         sampler = LowerBoundSampler(beta_decay=beta_decay, c=c, beta_max=10.0)
         sampler.update_exploration_step()
         assert sampler.t == 2
-
-        if beta_decay in ["inverse_square_root_decay", "logarithmic_decay"]:
-            assert sampler.beta == pytest.approx(expected_beta(2))
-        elif beta_decay == "adaptive_sequential_decay":
-            assert sampler.beta == pytest.approx(
-                expected_beta(2, sampler.alpha, sampler.stagnation, sampler.beta_max)
-            )
-
-    def test_update_stagnation(self):
-        sampler = LowerBoundSampler()
-
-        # Initial state
-        assert sampler.stagnation == 0
-        assert sampler.mu_max == float("-inf")
-
-        # First value sets mu_max and keeps stagnation at 0
-        sampler.update_stagnation(10.0)
-        assert sampler.mu_max == 10.0
-        assert sampler.stagnation == 0
-
-        # Lower value increases stagnation
-        sampler.update_stagnation(9.0)
-        assert sampler.mu_max == 10.0
-        assert sampler.stagnation == 1
-
-        # Equal value increases stagnation
-        sampler.update_stagnation(10.0)
-        assert sampler.mu_max == 10.0
-        assert sampler.stagnation == 2
-
-        # Higher value resets stagnation and updates mu_max
-        sampler.update_stagnation(12.0)
-        assert sampler.mu_max == 12.0
-        assert sampler.stagnation == 0
-
-    def test_adaptive_sequential_decay(self):
-        sampler = LowerBoundSampler(
-            beta_decay="adaptive_sequential_decay", beta_max=10.0
-        )
-
-        # Check initial state
-        assert sampler.beta == 1
-        assert sampler.stagnation == 0
-
-        # Simulate stagnation and check beta increases
-        sampler.update_stagnation(5.0)  # First reward
-        sampler.update_exploration_step()
-        initial_beta = sampler.beta
-
-        # No improvement - stagnation increases
-        sampler.update_stagnation(4.0)
-        sampler.update_exploration_step()
-        stagnation_beta = sampler.beta
-
-        # Beta should increase with stagnation
-        assert stagnation_beta > initial_beta
-
-        # Improvement - stagnation resets
-        sampler.update_stagnation(10.0)
-        sampler.update_exploration_step()
-        reset_beta = sampler.beta
-
-        # Beta should decrease after improvement
-        assert reset_beta < stagnation_beta
+        assert sampler.beta == pytest.approx(expected_beta(2))
 
 
 class TestThompsonSampler:

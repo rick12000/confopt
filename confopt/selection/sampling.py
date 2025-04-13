@@ -46,7 +46,6 @@ class LowerBoundSampler(PessimisticLowerBoundSampler):
             Literal[
                 "inverse_square_root_decay",
                 "logarithmic_decay",
-                "adaptive_sequential_decay",
             ]
         ] = "logarithmic_decay",
         c: float = 1,
@@ -58,7 +57,6 @@ class LowerBoundSampler(PessimisticLowerBoundSampler):
         self.t = 1
         self.beta = 1
         self.beta_max = beta_max
-        self.stagnation = 0
         self.mu_max = float("-inf")
 
     def update_exploration_step(self):
@@ -67,25 +65,12 @@ class LowerBoundSampler(PessimisticLowerBoundSampler):
             self.beta = np.sqrt(self.c / self.t)
         elif self.beta_decay == "logarithmic_decay":
             self.beta = np.sqrt((self.c * np.log(self.t)) / self.t)
-        elif self.beta_decay == "adaptive_sequential_decay":
-            self.beta = min(
-                np.sqrt((self.c * np.log(self.t)) / self.t)
-                * (1 + self.alpha) ** self.stagnation,
-                self.beta_max,
-            )
         elif self.beta_decay is None:
             self.beta = 1
         else:
             raise ValueError(
-                "beta_decay must be 'inverse_square_root_decay', 'logarithmic_decay', 'adaptive_sequential_decay', or None."
+                "beta_decay must be 'inverse_square_root_decay', 'logarithmic_decay', or None."
             )
-
-    def update_stagnation(self, reward: float) -> None:
-        if reward > self.mu_max:
-            self.mu_max = reward
-            self.stagnation = 0
-        else:
-            self.stagnation += 1
 
 
 class ThompsonSampler:

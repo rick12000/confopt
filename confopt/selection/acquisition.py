@@ -99,7 +99,6 @@ class BaseConformalSearcher(ABC):
 
     def update(self, X: np.array, y_true: float) -> None:
         if isinstance(self.sampler, LowerBoundSampler):
-            self.sampler.update_stagnation(y_true)
             self.sampler.update_exploration_step()
 
         if self.conformal_estimator.nonconformity_scores is not None:
