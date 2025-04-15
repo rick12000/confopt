@@ -4,6 +4,8 @@ from confopt.selection.sampling import (
     PessimisticLowerBoundSampler,
     LowerBoundSampler,
     ThompsonSampler,
+    ExpectedImprovementSampler,
+    InformationGainSampler,
 )
 
 
@@ -81,6 +83,94 @@ class TestThompsonSampler:
     @pytest.mark.parametrize("adapter", [None, "DtACI"])
     def test_update_interval_width(self, adapter):
         sampler = ThompsonSampler(n_quantiles=4, adapter=adapter)
+        betas = [0.3, 0.5]
+        previous_alphas = sampler.alphas.copy()
+
+        sampler.update_interval_width(betas)
+
+        if adapter == "DtACI":
+            assert sampler.alphas != previous_alphas
+        else:
+            assert sampler.alphas == previous_alphas
+
+
+class TestExpectedImprovementSampler:
+    def test_init_odd_quantiles(self):
+        with pytest.raises(ValueError):
+            ExpectedImprovementSampler(n_quantiles=5)
+
+    def test_initialize_alphas(self):
+        sampler = ExpectedImprovementSampler(n_quantiles=4)
+        alphas = sampler._initialize_alphas()
+
+        assert len(alphas) == 2
+        assert alphas[0] == pytest.approx(0.4)  # 1 - (0.8 - 0.2)
+        assert alphas[1] == pytest.approx(0.8)  # 1 - (0.6 - 0.4)
+
+    def test_fetch_alphas(self):
+        sampler = ExpectedImprovementSampler(n_quantiles=4)
+        alphas = sampler.fetch_alphas()
+        assert len(alphas) == 2
+        assert alphas[0] == pytest.approx(0.4)
+        assert alphas[1] == pytest.approx(0.8)
+
+    def test_update_best_value(self):
+        sampler = ExpectedImprovementSampler(current_best_value=0.5)
+        assert sampler.current_best_value == 0.5
+
+        # Test that it only updates if new value is better
+        sampler.update_best_value(0.3)
+        assert sampler.current_best_value == 0.5
+
+        sampler.update_best_value(0.7)
+        assert sampler.current_best_value == 0.7
+
+    @pytest.mark.parametrize("adapter", [None, "DtACI"])
+    def test_update_interval_width(self, adapter):
+        sampler = ExpectedImprovementSampler(n_quantiles=4, adapter=adapter)
+        betas = [0.3, 0.5]
+        previous_alphas = sampler.alphas.copy()
+
+        sampler.update_interval_width(betas)
+
+        if adapter == "DtACI":
+            assert sampler.alphas != previous_alphas
+        else:
+            assert sampler.alphas == previous_alphas
+
+
+class TestInformationGainSampler:
+    def test_init_odd_quantiles(self):
+        with pytest.raises(ValueError):
+            InformationGainSampler(n_quantiles=5)
+
+    def test_initialize_alphas(self):
+        sampler = InformationGainSampler(n_quantiles=4)
+        alphas = sampler._initialize_alphas()
+
+        assert len(alphas) == 2
+        assert alphas[0] == pytest.approx(0.4)  # 1 - (0.8 - 0.2)
+        assert alphas[1] == pytest.approx(0.8)  # 1 - (0.6 - 0.4)
+
+    def test_fetch_alphas(self):
+        sampler = InformationGainSampler(n_quantiles=4)
+        alphas = sampler.fetch_alphas()
+        assert len(alphas) == 2
+        assert alphas[0] == pytest.approx(0.4)
+        assert alphas[1] == pytest.approx(0.8)
+
+    def test_parameter_initialization(self):
+        sampler = InformationGainSampler(
+            n_quantiles=6, n_samples=50, n_candidates=100, n_y_samples_per_x=10
+        )
+        assert sampler.n_samples == 50
+        assert sampler.n_candidates == 100
+        assert sampler.n_y_samples_per_x == 10
+        assert len(sampler.alphas) == 3  # 6 quantiles = 3 alphas
+
+    @pytest.mark.parametrize("adapter", [None, "DtACI"])
+    def test_update_interval_width(self, adapter):
+        sampler = InformationGainSampler(n_quantiles=4, adapter=adapter)
         betas = [0.3, 0.5]
         previous_alphas = sampler.alphas.copy()
 
