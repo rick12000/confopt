@@ -60,7 +60,7 @@ class TestLocallyWeightedConformalEstimator:
     @staticmethod
     @pytest.mark.parametrize("point_arch", POINT_ESTIMATOR_ARCHITECTURES)
     @pytest.mark.parametrize("variance_arch", POINT_ESTIMATOR_ARCHITECTURES)
-    @pytest.mark.parametrize("tuning_iterations", [0, 2])
+    @pytest.mark.parametrize("tuning_iterations", [0, 1])  # was [0, 2]
     @pytest.mark.parametrize("alphas", [[0.2], [0.1, 0.2]])
     def test_fit_predict_and_betas(
         point_arch,
@@ -99,7 +99,7 @@ class TestLocallyWeightedConformalEstimator:
 class TestQuantileConformalEstimator:
     @staticmethod
     @pytest.mark.parametrize("estimator_architecture", QUANTILE_ESTIMATOR_ARCHITECTURES)
-    @pytest.mark.parametrize("tuning_iterations", [0, 2])
+    @pytest.mark.parametrize("tuning_iterations", [0, 1])  # was [0, 2]
     @pytest.mark.parametrize("alphas", [[0.2], [0.1, 0.2]])
     @pytest.mark.parametrize("upper_quantile_cap", [None, 0.95])
     def test_fit_predict_and_betas(

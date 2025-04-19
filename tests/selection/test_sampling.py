@@ -118,12 +118,12 @@ class TestExpectedImprovementSampler:
         sampler = ExpectedImprovementSampler(current_best_value=0.5)
         assert sampler.current_best_value == 0.5
 
-        # Test that it only updates if new value is better
-        sampler.update_best_value(0.3)
+        # Test that it only updates if new value is better (lower for minimization)
+        sampler.update_best_value(0.7)
         assert sampler.current_best_value == 0.5
 
-        sampler.update_best_value(0.7)
-        assert sampler.current_best_value == 0.7
+        sampler.update_best_value(0.3)
+        assert sampler.current_best_value == 0.3
 
     @pytest.mark.parametrize("adapter", [None, "DtACI"])
     def test_update_interval_width(self, adapter):
@@ -159,13 +159,19 @@ class TestInformationGainSampler:
         assert alphas[0] == pytest.approx(0.4)
         assert alphas[1] == pytest.approx(0.8)
 
-    def test_parameter_initialization(self):
+    @pytest.mark.parametrize("sampling_strategy", ["uniform", "thompson"])
+    def test_parameter_initialization(self, sampling_strategy):
         sampler = InformationGainSampler(
-            n_quantiles=6, n_samples=50, n_candidates=100, n_y_samples_per_x=10
+            n_quantiles=6,
+            n_paths=50,
+            n_X_candidates=100,
+            n_y_candidates_per_x=10,
+            sampling_strategy=sampling_strategy,
         )
-        assert sampler.n_samples == 50
-        assert sampler.n_candidates == 100
-        assert sampler.n_y_samples_per_x == 10
+        assert sampler.n_paths == 50
+        assert sampler.n_X_candidates == 100
+        assert sampler.n_y_candidates_per_x == 10
+        assert sampler.sampling_strategy == sampling_strategy
         assert len(sampler.alphas) == 3  # 6 quantiles = 3 alphas
 
     @pytest.mark.parametrize("adapter", [None, "DtACI"])

@@ -144,7 +144,7 @@ class ExpectedImprovementSampler:
 
     def update_best_value(self, value: float):
         """Update the current best value found in optimization."""
-        self.current_best_value = max(self.current_best_value, value)
+        self.current_best_value = min(self.current_best_value, value)
 
     def _initialize_alphas(self) -> list[float]:
         starting_quantiles = [
@@ -186,17 +186,19 @@ class InformationGainSampler:
         self,
         n_quantiles: int = 4,
         adapter: Optional[Literal["DtACI"]] = None,
-        n_samples: int = 30,
-        n_candidates: int = 50,
-        n_y_samples_per_x: int = 5,
+        n_paths: int = 100,
+        n_X_candidates: int = 10,
+        n_y_candidates_per_x: int = 3,
+        sampling_strategy: str = "uniform",
     ):
         if n_quantiles % 2 != 0:
             raise ValueError("Number of quantiles must be even.")
 
         self.n_quantiles = n_quantiles
-        self.n_samples = n_samples
-        self.n_candidates = n_candidates
-        self.n_y_samples_per_x = n_y_samples_per_x
+        self.n_paths = n_paths
+        self.n_X_candidates = n_X_candidates
+        self.n_y_candidates_per_x = n_y_candidates_per_x
+        self.sampling_strategy = sampling_strategy
 
         self.alphas = self._initialize_alphas()
         self.adapters = self._initialize_adapters(adapter)

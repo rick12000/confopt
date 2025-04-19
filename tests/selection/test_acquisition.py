@@ -1,6 +1,7 @@
 import pytest
 import numpy as np
-from unittest.mock import patch, Mock
+import random
+from unittest.mock import patch
 from confopt.wrapping import ConformalBounds
 from confopt.selection.acquisition import (
     calculate_ucb_predictions,
@@ -18,6 +19,7 @@ from confopt.selection.sampling import (
     ExpectedImprovementSampler,
     InformationGainSampler,
 )
+from confopt.selection.conformalization import QuantileConformalEstimator
 from conftest import (
     POINT_ESTIMATOR_ARCHITECTURES,
     QUANTILE_ESTIMATOR_ARCHITECTURES,
@@ -45,29 +47,24 @@ def test_calculate_ucb_predictions():
 def test_calculate_thompson_predictions(
     conformal_bounds, enable_optimistic, point_predictions
 ):
-    fixed_indices = np.array([0, 1, 2, 0, 1])
+    fixed_indices = np.array([0, 3, 5, 1, 4])
 
-    with patch.object(np.random, "choice", return_value=fixed_indices):
+    with patch.object(np.random, "randint", return_value=fixed_indices):
         result = calculate_thompson_predictions(
             predictions_per_interval=conformal_bounds,
             enable_optimistic_sampling=enable_optimistic,
             point_predictions=point_predictions,
         )
 
-    lower_bounds = np.array(
-        [
-            conformal_bounds[0].lower_bounds[0],
-            conformal_bounds[1].lower_bounds[1],
-            conformal_bounds[2].lower_bounds[2],
-            conformal_bounds[0].lower_bounds[3],
-            conformal_bounds[1].lower_bounds[4],
-        ]
+    flattened_bounds = flatten_conformal_bounds(conformal_bounds)
+    expected_sampled_bounds = np.array(
+        [flattened_bounds[i, idx] for i, idx in enumerate(fixed_indices)]
     )
 
     if enable_optimistic:
-        expected = np.minimum(lower_bounds, point_predictions)
+        expected = np.minimum(expected_sampled_bounds, point_predictions)
     else:
-        expected = lower_bounds
+        expected = expected_sampled_bounds
 
     np.testing.assert_array_almost_equal(result, expected)
 
@@ -104,26 +101,32 @@ def simple_conformal_bounds():
 
 
 def test_calculate_expected_improvement_detailed(simple_conformal_bounds):
-    with patch.object(np.random, "randint", side_effect=[[0], [1], [0]]):
+    with patch.object(
+        np.random,
+        "randint",
+        side_effect=[np.array([[0], [1], [2]]), np.array([[0], [1], [2]])],
+    ):
         result = calculate_expected_improvement(
             predictions_per_interval=simple_conformal_bounds,
-            current_best_value=0.4,
+            best_historical_y=0.4,
             num_samples=1,
         )
 
-    # Expected values are now negative (multiplied by -1)
-    expected = np.array([0.0, -0.3, -0.1])
+    expected = np.array([0.0, -0.2, -0.2])
     np.testing.assert_array_almost_equal(result, expected)
 
-    with patch.object(np.random, "randint", side_effect=[[0], [1], [0]]):
+    with patch.object(
+        np.random,
+        "randint",
+        side_effect=[np.array([[0], [1], [2]]), np.array([[0], [1], [2]])],
+    ):
         result = calculate_expected_improvement(
             predictions_per_interval=simple_conformal_bounds,
-            current_best_value=0.6,
+            best_historical_y=0.6,
             num_samples=1,
         )
 
-    # Expected values are now negative (multiplied by -1)
-    expected = np.array([0.0, -0.1, 0.0])
+    expected = np.array([0.0, 0.0, 0.0])
     np.testing.assert_array_almost_equal(result, expected)
 
 
@@ -132,62 +135,64 @@ def test_expected_improvement_randomized(conformal_bounds):
 
     ei = calculate_expected_improvement(
         predictions_per_interval=conformal_bounds,
-        current_best_value=0.5,
+        best_historical_y=0.5,
         num_samples=10,
     )
 
     assert len(ei) == 5
-    # EI should now be non-positive (values are negative or zero)
     assert np.all(ei <= 0)
 
 
-def test_information_gain_with_minimal_mocking():
-    X_candidates = np.array(
-        [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6], [0.7, 0.8], [0.9, 1.0]]
+@pytest.mark.parametrize("sampling_strategy", ["uniform", "thompson"])
+def test_information_gain_with_toy_dataset(big_toy_dataset, sampling_strategy):
+    X, y = big_toy_dataset
+    n_X_candidates = 50
+
+    train_size = int(0.8 * len(X))
+    X_train, y_train = X[:train_size], y[:train_size]
+
+    np.random.seed(42)
+    random.seed(42)
+
+    quantile_estimator = QuantileConformalEstimator(
+        quantile_estimator_architecture="ql",
+        alphas=[0.1, 0.5, 0.9],
+        n_pre_conformal_trials=5,
     )
 
-    X_train = np.array([[0.0, 0.0]])
-    y_train = np.array([0.5])
+    X_val, y_val = X[train_size:], y[train_size:]
 
-    lower_bounds1 = np.array([0.1, 0.3, 0.5, 0.2, 0.4])
-    upper_bounds1 = np.array([0.4, 0.6, 0.8, 0.5, 0.7])
+    quantile_estimator.fit(
+        X_train=X_train,
+        y_train=y_train,
+        X_val=X_val,
+        y_val=y_val,
+        tuning_iterations=0,
+        random_state=42,
+    )
 
-    conformal_bounds = [
-        ConformalBounds(lower_bounds=lower_bounds1, upper_bounds=upper_bounds1)
-    ]
+    # Only predict on the same number of points as X_train (to avoid shape mismatch)
+    real_predictions = quantile_estimator.predict_intervals(X_train)
 
-    mock_estimator = Mock()
-    mock_estimator.predict_intervals.return_value = conformal_bounds
+    ig = calculate_information_gain(
+        X_train=X_train,
+        y_train=y_train,
+        X_val=X_val,  # Pass validation data
+        y_val=y_val,  # Pass validation data
+        X_space=X_train,  # Use X_train for both to match shapes
+        conformal_estimator=quantile_estimator,
+        predictions_per_interval=real_predictions,
+        n_paths=10,
+        n_y_candidates_per_x=5,
+        n_X_candidates=n_X_candidates,
+        sampling_strategy=sampling_strategy,
+    )
 
-    with patch("confopt.selection.acquisition.random.choice", return_value=0.5), patch(
-        "numpy.random.choice", return_value=np.array([0, 2])
-    ):
-
-        result = calculate_information_gain(
-            X_candidates=X_candidates,
-            conformal_estimator=mock_estimator,
-            predictions_per_interval=conformal_bounds,
-            X_train=X_train,
-            y_train=y_train,
-            n_samples=2,
-            n_y_samples_per_x=1,
-            n_eval_candidates=2,
-            kde_bandwidth=0.3,
-            random_state=42,
-        )
-
-    assert isinstance(result, np.ndarray)
-    assert len(result) == len(X_candidates)
-
-    # Non-zero positions remain the same but values are now negative
-    non_zero_positions = np.where(result < 0)[0]
-    assert set(non_zero_positions).issubset({0, 2})
-    assert result[1] == 0
-    assert result[3] == 0
-    assert result[4] == 0
-
-    # Information gain values should now be non-positive
-    assert np.all(result <= 0)
+    assert isinstance(ig, np.ndarray)
+    assert len(ig) == len(X_train)
+    assert np.all(ig <= 0)
+    assert np.sum(np.where(ig < 0)) <= n_X_candidates
+    assert np.sum(ig < 0) < 0
 
 
 def test_flatten_conformal_bounds_detailed(simple_conformal_bounds):
@@ -217,89 +222,6 @@ def test_flatten_conformal_bounds(conformal_bounds):
 
 
 @pytest.fixture
-def mock_kde():
-    mock = Mock()
-    mock.score_samples.return_value = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
-    mock.fit.return_value = None
-    return mock
-
-
-@pytest.mark.parametrize("n_eval_candidates", [10, 30])
-def test_calculate_information_gain_parameters(
-    conformal_bounds, mock_kde, n_eval_candidates
-):
-    X_candidates = np.array([[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]])
-    X_train = np.array([[1, 1]])
-    y_train = np.array([0.5])
-
-    mock_conformal_estimator = Mock()
-    mock_conformal_estimator.predict_intervals.return_value = conformal_bounds
-
-    with patch(
-        "confopt.selection.acquisition.KernelDensity", return_value=mock_kde
-    ), patch("confopt.selection.acquisition.entropy", return_value=1.0), patch(
-        "confopt.selection.acquisition.random.choice", return_value=0.5
-    ), patch(
-        "numpy.random.choice",
-        return_value=np.arange(min(n_eval_candidates, len(X_candidates))),
-    ):
-
-        result = calculate_information_gain(
-            X_candidates=X_candidates,
-            conformal_estimator=mock_conformal_estimator,
-            predictions_per_interval=conformal_bounds,
-            X_train=X_train,
-            y_train=y_train,
-            n_samples=5,
-            n_y_samples_per_x=2,
-            n_eval_candidates=n_eval_candidates,
-            kde_bandwidth=0.3,
-            random_state=42,
-        )
-
-    assert isinstance(result, np.ndarray)
-    assert len(result) == len(X_candidates)
-    # Count non-zero values (now they are negative)
-    assert np.sum(result < 0) <= n_eval_candidates
-
-
-def test_information_gain_with_toy_dataset(toy_dataset, conformal_bounds):
-    X, y = toy_dataset
-
-    class MockConformalEstimator:
-        def __init__(self):
-            self.nonconformity_scores = [np.array([0.1, 0.2, 0.3])]
-
-        def fit(self, **kwargs):
-            pass
-
-        def predict_intervals(self, X):
-            return conformal_bounds
-
-    mock_estimator = MockConformalEstimator()
-
-    np.random.seed(42)
-    import random
-
-    random.seed(42)
-
-    ig = calculate_information_gain(
-        X_candidates=X,
-        conformal_estimator=mock_estimator,
-        predictions_per_interval=conformal_bounds,
-        X_train=X[:2],
-        y_train=y[:2],
-        n_samples=3,
-        n_y_samples_per_x=2,
-        n_eval_candidates=2,
-        kde_bandwidth=0.5,
-        random_state=42,
-    )
-
-    assert len(ig) == len(X)
-
-
-@pytest.fixture
 def larger_toy_dataset():
     """Create a larger toy dataset for searcher tests"""
     X = np.random.rand(10, 2)
@@ -307,7 +229,6 @@ def larger_toy_dataset():
     return X, y
 
 
-# Parameterized tests for searcher classes
 @pytest.mark.parametrize(
     "sampler_class,sampler_kwargs",
     [
@@ -343,11 +264,9 @@ def test_locally_weighted_conformal_searcher(
         random_state=42,
     )
 
-    # Test prediction
     predictions = searcher.predict(X_val)
     assert len(predictions) == len(X_val)
 
-    # Test update method
     X_update = X_val[0].reshape(1, -1)
     y_update = y_val[0]
     initial_X_train_len = len(searcher.X_train)
@@ -355,7 +274,6 @@ def test_locally_weighted_conformal_searcher(
 
     searcher.update(X_update, y_update)
 
-    # Verify state after update
     assert len(searcher.X_train) == initial_X_train_len + 1
     assert len(searcher.y_train) == initial_y_train_len + 1
     assert np.array_equal(searcher.X_train[-1], X_update.flatten())
@@ -402,11 +320,9 @@ def test_quantile_conformal_searcher(
         random_state=42,
     )
 
-    # Test prediction
     predictions = searcher.predict(X_val)
     assert len(predictions) == len(X_val)
 
-    # Test update method
     X_update = X_val[0].reshape(1, -1)
     y_update = y_val[0]
     initial_X_train_len = len(searcher.X_train)
@@ -414,7 +330,6 @@ def test_quantile_conformal_searcher(
 
     searcher.update(X_update, y_update)
 
-    # Verify state after update
     assert len(searcher.X_train) == initial_X_train_len + 1
     assert len(searcher.y_train) == initial_y_train_len + 1
     assert np.array_equal(searcher.X_train[-1], X_update.flatten())

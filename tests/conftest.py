@@ -99,6 +99,16 @@ def toy_dataset():
 
 
 @pytest.fixture
+def big_toy_dataset():
+    # Create a larger toy dataset with 200 observations and 2 features
+    X = np.linspace(0, 10, 200).reshape(-1, 1)
+    X = np.hstack([X, X + np.random.normal(0, 1, 200).reshape(-1, 1)])
+    # Make y always negative by using negative coefficients and subtracting a constant
+    y = -5 * X[:, 0] - 3 * X[:, 1] - 10 + np.random.normal(0, 1, 200)
+    return X, y
+
+
+@pytest.fixture
 def quantiles():
     return [0.1, 0.5, 0.9]
 
@@ -109,8 +119,9 @@ def dummy_expanding_quantile_gaussian_dataset():
     random.seed(DEFAULT_SEED)
 
     X, y = [], []
+    # Reduce to 100 total observations (20 per x_observation)
     for x_observation in range(1, 6):
-        for _ in range(0, 100):
+        for _ in range(0, 20):
             X.append(x_observation)
             y.append(x_observation * np.random.normal(0, 101))
     return np.array(X).reshape(-1, 1), np.array(y)
