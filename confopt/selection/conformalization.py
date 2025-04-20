@@ -42,14 +42,11 @@ class LocallyWeightedConformalEstimator:
         random_state: Optional[int] = None,
         last_best_params: Optional[dict] = None,
     ):
-        # Create a list of warm start configurations
         forced_param_configurations = []
 
-        # Add the previous best configuration if available
         if last_best_params is not None:
             forced_param_configurations.append(last_best_params)
 
-        # Get default params from the configuration
         estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
         default_params = deepcopy(estimator_config.default_params)
         if default_params:
@@ -65,7 +62,6 @@ class LocallyWeightedConformalEstimator:
                 forced_param_configurations=forced_param_configurations,
             )
         else:
-            # If not tuning, use the first warm start config or None
             initialization_params = (
                 forced_param_configurations[0] if forced_param_configurations else None
             )
@@ -174,9 +170,16 @@ def alpha_to_quantiles(
     alpha: float, upper_quantile_cap: Optional[float] = None
 ) -> Tuple[float, float]:
     lower_quantile = alpha / 2
-    upper_quantile = (
-        upper_quantile_cap if upper_quantile_cap is not None else 1 - lower_quantile
-    )
+    upper_quantile = 1 - lower_quantile
+    if upper_quantile_cap is not None:
+        upper_quantile = min(upper_quantile, upper_quantile_cap)
+        if upper_quantile < lower_quantile:
+            raise ValueError(
+                f"Upper quantile cap {upper_quantile_cap} resulted in an upper quantile "
+                f"{upper_quantile} that is smaller than the lower quantile {lower_quantile} "
+                f"for alpha {alpha}."
+            )
+
     return lower_quantile, upper_quantile
 
 
@@ -223,14 +226,11 @@ class QuantileConformalEstimator:
 
         self.quantile_indices = {q: i for i, q in enumerate(all_quantiles)}
 
-        # Create a list of warm start configurations
         forced_param_configurations = []
 
-        # Add the previous best configuration if available
         if last_best_params is not None:
             forced_param_configurations.append(last_best_params)
 
-        # Get default params from configuration
         estimator_config = ESTIMATOR_REGISTRY[self.quantile_estimator_architecture]
         default_params = deepcopy(estimator_config.default_params)
         if default_params:
@@ -247,13 +247,10 @@ class QuantileConformalEstimator:
             )
             self.last_best_params = initialization_params
         else:
-            # If not tuning, use the first warm start config or None
             initialization_params = (
                 forced_param_configurations[0] if forced_param_configurations else None
             )
-            self.last_best_params = (
-                last_best_params  # Still store the passed config even if not used
-            )
+            self.last_best_params = last_best_params
 
         self.quantile_estimator = initialize_estimator(
             estimator_architecture=self.quantile_estimator_architecture,
@@ -329,7 +326,7 @@ class QuantileConformalEstimator:
                 score = np.quantile(
                     self.nonconformity_scores[i],
                     1 - alpha,
-                    interpolation="linear",  # Add interpolation for small sample sizes
+                    interpolation="linear",
                 )
                 lower_interval_bound = np.array(prediction[:, lower_idx]) - score
                 upper_interval_bound = np.array(prediction[:, upper_idx]) + score

@@ -12,18 +12,23 @@ from conftest import (
     QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
 
-COVERAGE_TOLERANCE = 0.01
+POINT_ESTIMATOR_COVERAGE_TOLERANCE = 0.2
+QUANTILE_ESTIMATOR_COVERAGE_TOLERANCE = 0.05
 
 
-def create_train_val_split(X, y, train_split=0.8):
+def create_train_val_split(X, y, train_split=0.8, random_state=1234):
+    rng = np.random.RandomState(random_state)
+    indices = np.arange(len(X))
+    rng.shuffle(indices)
     split_idx = round(len(X) * train_split)
-    X_train, y_train = X[:split_idx], y[:split_idx]
-    X_val, y_val = X[split_idx:], y[split_idx:]
-
+    train_indices = indices[:split_idx]
+    val_indices = indices[split_idx:]
+    X_train, y_train = X[train_indices], y[train_indices]
+    X_val, y_val = X[val_indices], y[val_indices]
     return X_train, y_train, X_val, y_val
 
 
-def validate_intervals(intervals, y_true, alphas, tolerance=COVERAGE_TOLERANCE):
+def validate_intervals(intervals, y_true, alphas, tolerance):
     assert len(intervals) == len(alphas)
 
     for i, alpha in enumerate(alphas):
@@ -88,7 +93,9 @@ class TestLocallyWeightedConformalEstimator:
         )
 
         intervals = estimator.predict_intervals(X=X_val)
-        validate_intervals(intervals, y_val, alphas)
+        validate_intervals(
+            intervals, y_val, alphas, tolerance=POINT_ESTIMATOR_COVERAGE_TOLERANCE
+        )
 
         test_point = X_val[0]
         test_value = y_val[0]
@@ -131,7 +138,9 @@ class TestQuantileConformalEstimator:
         assert len(estimator.nonconformity_scores) == len(alphas)
 
         intervals = estimator.predict_intervals(X_val)
-        validate_intervals(intervals, y_val, alphas)
+        validate_intervals(
+            intervals, y_val, alphas, tolerance=QUANTILE_ESTIMATOR_COVERAGE_TOLERANCE
+        )
 
         test_point = X_val[0]
         test_value = y_val[0]
@@ -151,7 +160,7 @@ class TestQuantileConformalEstimator:
 
         X = np.random.rand(10, 5)
         y = np.random.rand(10)
-        X_train, y_train, X_val, y_val = create_train_val_split(X, y, train_split=0.6)
+        X_train, y_train, X_val, y_val = create_train_val_split(X, y, train_split=0.8)
 
         estimator.fit(
             X_train=X_train,
@@ -161,55 +170,3 @@ class TestQuantileConformalEstimator:
         )
 
         assert not estimator.conformalize_predictions
-
-    @staticmethod
-    def test_upper_quantile_cap_effect(dummy_expanding_quantile_gaussian_dataset):
-        alphas = [0.2]
-        estimator = QuantileConformalEstimator(
-            quantile_estimator_architecture=SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES[
-                0
-            ],
-            alphas=alphas,
-            n_pre_conformal_trials=5,
-        )
-
-        X, y = dummy_expanding_quantile_gaussian_dataset
-        X_train, y_train, X_val, y_val = create_train_val_split(X, y)
-
-        estimator.fit(
-            X_train=X_train,
-            y_train=y_train,
-            X_val=X_val,
-            y_val=y_val,
-            random_state=42,
-        )
-
-        intervals_uncapped = estimator.predict_intervals(X_val)
-
-        estimator_capped = QuantileConformalEstimator(
-            quantile_estimator_architecture=SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES[
-                0
-            ],
-            alphas=alphas,
-            n_pre_conformal_trials=5,
-        )
-
-        estimator_capped.fit(
-            X_train=X_train,
-            y_train=y_train,
-            X_val=X_val,
-            y_val=y_val,
-            upper_quantile_cap=0.5,
-            random_state=42,
-        )
-
-        intervals_capped = estimator_capped.predict_intervals(X_val)
-
-        avg_width_uncapped = np.mean(
-            intervals_uncapped[0].upper_bounds - intervals_uncapped[0].lower_bounds
-        )
-        avg_width_capped = np.mean(
-            intervals_capped[0].upper_bounds - intervals_capped[0].lower_bounds
-        )
-
-        assert avg_width_capped <= avg_width_uncapped

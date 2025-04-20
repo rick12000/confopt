@@ -181,10 +181,10 @@ class TestConformalTuner:
     )
     def test_tune_with_default_searcher(self, tuner, searcher_tuning_framework):
         tuner.tune(
-            n_random_searches=20,
-            max_iter=50,
+            n_random_searches=30,
+            max_iter=35,
             verbose=False,
             searcher_tuning_framework=searcher_tuning_framework,
         )
 
-        assert len(tuner.study.trials) == 50
+        assert len(tuner.study.trials) == 35

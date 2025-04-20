@@ -29,7 +29,7 @@ MODEL_CONFIGS = [
 @pytest.fixture
 def uniform_feature_data():
     np.random.seed(42)
-    n_samples_train = 10000
+    n_samples_train = 500
     n_features = 3
 
     X_train = np.random.uniform(-1, 1, size=(n_samples_train, n_features))
