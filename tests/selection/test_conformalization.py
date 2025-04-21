@@ -102,6 +102,16 @@ class TestLocallyWeightedConformalEstimator:
         betas = estimator.calculate_betas(test_point, test_value)
         validate_betas(betas, alphas)
 
+    def test_update_alphas(self):
+        estimator = LocallyWeightedConformalEstimator(
+            point_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
+            variance_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
+            alphas=[0.2],  # Initial alpha
+        )
+        new_alphas = [0.1, 0.3]
+        estimator.update_alphas(new_alphas)
+        assert estimator.alphas == new_alphas
+
 
 class TestQuantileConformalEstimator:
     @staticmethod
@@ -170,3 +180,12 @@ class TestQuantileConformalEstimator:
         )
 
         assert not estimator.conformalize_predictions
+
+    def test_update_alphas(self):
+        estimator = QuantileConformalEstimator(
+            quantile_estimator_architecture=QUANTILE_ESTIMATOR_ARCHITECTURES[0],
+            alphas=[0.2],  # Initial alpha
+        )
+        new_alphas = [0.15, 0.25]
+        estimator.update_alphas(new_alphas)
+        assert estimator.alphas == new_alphas

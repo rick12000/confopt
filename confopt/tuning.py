@@ -20,6 +20,7 @@ from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
     LowerBoundSampler,
+    PessimisticLowerBoundSampler,  # Added import
     BaseConformalSearcher,
 )
 from confopt.wrapping import ParameterRange
@@ -471,14 +472,22 @@ class ConformalTuner:
                 X=transformed_X, y_true=self.metric_sign * validation_performance
             )
 
-            # TODO: TEMP FOR PAPER
+            # TODO: TEMP FOR PAPER -> Refined Breach Logic
             breach = None
-            if (
-                isinstance(searcher.sampler, LowerBoundSampler)
-                and searcher.sampler.adapter is not None
-                and len(searcher.sampler.adapter.error_history) > 0
+            # Calculate binary breach for single-alpha samplers
+            if isinstance(
+                searcher.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)
             ):
-                breach = searcher.sampler.adapter.error_history[-1]
+                # Check if last_beta exists (it should after an update)
+                if searcher.last_beta is not None:
+                    # Breach is 1 if beta < alpha, 0 otherwise (mimics adapter logic)
+                    breach = 1 if searcher.last_beta < searcher.sampler.alpha else 0
+                else:
+                    # Handle case where last_beta might not be set yet (e.g., first iteration)
+                    breach = (
+                        None  # Or potentially 0, depending on desired initial state
+                    )
+
             estimator_error = searcher.primary_estimator_error
 
             # Update search state and record trial
@@ -553,6 +562,10 @@ class ConformalTuner:
         runtime_budget: Optional[int] = None,
         verbose: bool = True,
     ):
+        if random_state is not None:
+            random.seed(a=random_state)
+            np.random.seed(seed=random_state)
+
         if searcher is None:
             searcher = QuantileConformalSearcher(
                 quantile_estimator_architecture="qrf",
@@ -567,10 +580,6 @@ class ConformalTuner:
 
         self._initialize_tuning_resources()
         self.search_timer = RuntimeTracker()
-
-        if random_state is not None:
-            random.seed(a=random_state)
-            np.random.seed(seed=random_state)
 
         # Perform random search
         rs_trials = self._random_search(

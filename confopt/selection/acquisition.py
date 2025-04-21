@@ -69,9 +69,11 @@ def calculate_expected_improvement(
     for i in range(n_observations):
         y_samples_per_observation[i] = all_bounds[i, idxs[i]]
 
-    improvements = np.maximum(0, y_samples_per_observation - best_historical_y)
+    # Calculate the improvement correctly for minimization: max(0, y_best - y_sample)
+    improvements = np.maximum(0, best_historical_y - y_samples_per_observation)
     expected_improvements = np.mean(improvements, axis=1)
 
+    # Return the negative expected improvement so that minimization selects the best point
     return -expected_improvements
 
 
@@ -186,6 +188,7 @@ class BaseConformalSearcher(ABC):
         self.conformal_estimator = None
         self.X_train = None
         self.y_train = None
+        self.last_beta = None  # Initialize last_beta
 
     def predict(self, X: np.array):
         if isinstance(self.sampler, LowerBoundSampler):
@@ -240,8 +243,16 @@ class BaseConformalSearcher(ABC):
             self.sampler.update_exploration_step()
 
         if self.conformal_estimator.nonconformity_scores is not None:
-            if hasattr(self.sampler, "adapter") or hasattr(self.sampler, "adapters"):
+            # Check if the sampler uses adaptation
+            uses_adaptation = hasattr(self.sampler, "adapter") or hasattr(
+                self.sampler, "adapters"
+            )
+
+            if uses_adaptation:
+                # Calculate betas using potentially stale alphas in estimator (will be updated shortly)
                 betas = self._calculate_betas(X, y_true)
+
+                # Update sampler (which updates its internal alphas if adapter is present)
                 if isinstance(
                     self.sampler,
                     (
@@ -251,15 +262,21 @@ class BaseConformalSearcher(ABC):
                     ),
                 ):
                     self.sampler.update_interval_width(betas=betas)
+                    # Store the list of betas or handle as needed if required later
+                    # self.last_beta = betas # Example if needed for these samplers
                 elif isinstance(
                     self.sampler, (PessimisticLowerBoundSampler, LowerBoundSampler)
                 ):
                     if len(betas) == 1:
+                        self.last_beta = betas[0]  # Store the single beta value
                         self.sampler.update_interval_width(beta=betas[0])
                     else:
                         raise ValueError(
                             "Multiple betas returned for single beta sampler."
                         )
+
+                # Update conformal estimator's alphas using the new method
+                self.conformal_estimator.update_alphas(self.sampler.fetch_alphas())
 
 
 class LocallyWeightedConformalSearcher(BaseConformalSearcher):

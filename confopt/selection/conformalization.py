@@ -165,6 +165,11 @@ class LocallyWeightedConformalEstimator:
 
         return betas
 
+    def update_alphas(self, new_alphas: List[float]):
+        """Updates the alphas used by the estimator."""
+        self.alphas = new_alphas
+        # No other internal state depends directly on alphas in this class
+
 
 def alpha_to_quantiles(
     alpha: float, upper_quantile_cap: Optional[float] = None
@@ -197,9 +202,11 @@ class QuantileConformalEstimator:
         self.quantile_estimator = None
         self.nonconformity_scores = None
         self.all_quantiles = None
+        self.quantile_indices = None  # Added initialization
         self.conformalize_predictions = False
         self.primary_estimator_error = None
         self.last_best_params = None
+        self.upper_quantile_cap = None  # Added initialization
 
     def fit(
         self,
@@ -369,3 +376,11 @@ class QuantileConformalEstimator:
             betas.append(beta)
 
         return betas
+
+    def update_alphas(self, new_alphas: List[float]):
+        """Updates the alphas used by the estimator."""
+        self.alphas = new_alphas
+        # Note: This only updates the alpha list.
+        # If fit() was already called, internal states like
+        # all_quantiles, quantile_indices, and nonconformity_scores
+        # might become inconsistent with the new alphas until fit() is called again.

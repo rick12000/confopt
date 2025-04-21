@@ -112,7 +112,7 @@ def test_calculate_expected_improvement_detailed(simple_conformal_bounds):
             num_samples=1,
         )
 
-    expected = np.array([0.0, -0.2, -0.2])
+    expected = np.array([-0.3, 0.0, 0.0])
     np.testing.assert_array_almost_equal(result, expected)
 
     with patch.object(
@@ -126,7 +126,7 @@ def test_calculate_expected_improvement_detailed(simple_conformal_bounds):
             num_samples=1,
         )
 
-    expected = np.array([0.0, 0.0, 0.0])
+    expected = np.array([-0.5, 0.0, 0.0])
     np.testing.assert_array_almost_equal(result, expected)
 
 

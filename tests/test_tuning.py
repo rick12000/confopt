@@ -188,3 +188,30 @@ class TestConformalTuner:
         )
 
         assert len(tuner.study.trials) == 35
+
+    def test_reproducibility_with_fixed_random_state(
+        self, mock_constant_objective_function, dummy_parameter_grid
+    ):
+        common_params = {
+            "objective_function": mock_constant_objective_function,
+            "search_space": dummy_parameter_grid,
+            "metric_optimization": "minimize",
+            "n_candidate_configurations": 100,
+        }
+        tune_params = {
+            "n_random_searches": 10,
+            "max_iter": 35,
+            "verbose": False,
+            "random_state": 42,
+        }
+
+        tuner1 = ConformalTuner(**common_params)
+        tuner1.tune(**tune_params)
+
+        tuner2 = ConformalTuner(**common_params)
+        tuner2.tune(**tune_params)
+
+        assert len(tuner1.study.trials) == len(tuner2.study.trials)
+        for trial1, trial2 in zip(tuner1.study.trials, tuner2.study.trials):
+            assert trial1.configuration == trial2.configuration
+            assert trial1.performance == trial2.performance
