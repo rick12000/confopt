@@ -241,13 +241,13 @@ class GaussianProcessQuantileEstimator(BaseSingleFitQuantileEstimator):
 
         if kernel_name is None:
             # Default kernel: RBF with constant
-            return C(1.0) * RBF(length_scale=1.0)
+            return C(1.0) * Matern(length_scale=3, nu=1.5)
 
         if isinstance(kernel_name, str):
             if kernel_name == "rbf":
                 return C(1.0) * RBF(length_scale=1.0)
             elif kernel_name == "matern":
-                return C(1.0) * Matern(length_scale=1.0, nu=1.5)
+                return C(1.0) * Matern(length_scale=3, nu=1.5)
             elif kernel_name == "rational_quadratic":
                 return C(1.0) * RationalQuadratic(length_scale=1.0, alpha=1.0)
             elif kernel_name == "exp_sine_squared":
