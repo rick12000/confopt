@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Union, List
+from typing import Optional, Union, List, Tuple
 import numpy as np
 from abc import ABC, abstractmethod
 from copy import deepcopy
@@ -69,12 +69,162 @@ def calculate_expected_improvement(
     for i in range(n_observations):
         y_samples_per_observation[i] = all_bounds[i, idxs[i]]
 
-    # Calculate the improvement correctly for minimization: max(0, y_best - y_sample)
     improvements = np.maximum(0, best_historical_y - y_samples_per_observation)
     expected_improvements = np.mean(improvements, axis=1)
 
-    # Return the negative expected improvement so that minimization selects the best point
     return -expected_improvements
+
+
+def _calculate_entropy(distribution: np.ndarray) -> float:
+    if np.any(distribution > 0):
+        non_zero_dist = distribution[distribution > 0]
+        return -np.sum(non_zero_dist * np.log(non_zero_dist))
+    return 0.0
+
+
+def _calculate_best_x_entropy(
+    all_bounds: np.ndarray, n_observations: int, n_paths: int
+) -> Tuple[float, np.ndarray]:
+    indices_for_paths = np.vstack([np.arange(n_observations)] * n_paths)
+    idxs = np.random.randint(0, all_bounds.shape[1], size=(n_paths, n_observations))
+    y_paths = all_bounds[indices_for_paths, idxs]
+
+    minimization_idxs = np.argmin(y_paths, axis=1)
+    minimization_idxs_unique, counts = np.unique(minimization_idxs, return_counts=True)
+
+    best_x_distribution = np.zeros(n_observations)
+    best_x_distribution[minimization_idxs_unique] = counts / n_paths
+
+    best_x_entropy = _calculate_entropy(best_x_distribution)
+
+    return best_x_entropy, indices_for_paths
+
+
+def _select_candidates(
+    all_bounds: np.ndarray,
+    n_observations: int,
+    n_candidates: int,
+    sampling_strategy: str,
+) -> np.ndarray:
+    capped_n_candidates = min(n_candidates, n_observations)
+
+    if sampling_strategy == "uniform":
+        return np.random.choice(n_observations, size=capped_n_candidates, replace=False)
+    elif sampling_strategy == "thompson":
+        thompson_idxs = np.random.randint(0, all_bounds.shape[1], size=n_observations)
+        thompson_samples = all_bounds[np.arange(n_observations), thompson_idxs]
+        return np.argsort(thompson_samples)[:capped_n_candidates]
+    else:
+        raise ValueError(f"Unknown sampling strategy: {sampling_strategy}")
+
+
+def _process_candidate_sequential(
+    i: int,
+    X_cand: np.ndarray,
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    X_space: np.ndarray,
+    all_bounds: np.ndarray,
+    n_y_candidates_per_x: int,
+    conformal_estimator,
+    n_paths: int,
+    n_observations: int,
+    indices_for_paths: np.ndarray,
+    best_x_entropy: float,
+) -> float:
+    y_cand_idxs = np.random.randint(0, all_bounds.shape[1], size=n_y_candidates_per_x)
+    y_range = all_bounds[i, y_cand_idxs]
+    entropy_per_y_candidate = []
+
+    X_expanded = np.vstack([X_train, X_cand])
+
+    for y_cand in y_range:
+        y_expanded = np.append(y_train, y_cand)
+
+        cand_estimator = deepcopy(conformal_estimator)
+        cand_estimator.fit(
+            X_train=X_expanded,
+            y_train=y_expanded,
+            X_val=X_val,
+            y_val=y_val,
+            tuning_iterations=0,
+        )
+
+        cand_predictions = cand_estimator.predict_intervals(X_space)
+        cand_bounds = flatten_conformal_bounds(cand_predictions)
+
+        cond_idxs = np.random.randint(
+            0, cand_bounds.shape[1], size=(n_paths, n_observations)
+        )
+        conditional_y_paths = cand_bounds[indices_for_paths, cond_idxs]
+
+        conditional_min_idxs = np.argmin(conditional_y_paths, axis=1)
+        conditional_min_idxs_unique, posterior_counts = np.unique(
+            conditional_min_idxs, return_counts=True
+        )
+
+        conditional_best_X_distribution = np.zeros(n_observations)
+        conditional_best_X_distribution[conditional_min_idxs_unique] = (
+            posterior_counts / n_paths
+        )
+
+        cond_entropy = _calculate_entropy(conditional_best_X_distribution)
+        if cond_entropy > 0:
+            entropy_per_y_candidate.append(cond_entropy)
+
+    if entropy_per_y_candidate:
+        return best_x_entropy - np.mean(entropy_per_y_candidate)
+    return 0.0
+
+
+def _process_candidates_parallel(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    X_space: np.ndarray,
+    conformal_estimator,
+    all_bounds: np.ndarray,
+    n_paths: int,
+    n_y_candidates_per_x: int,
+    candidate_idxs: np.ndarray,
+    n_observations: int,
+    indices_for_paths: np.ndarray,
+    best_x_entropy: float,
+    n_jobs: int,
+) -> np.ndarray:
+    import joblib
+
+    def process_single_candidate(i):
+        X_cand = X_space[i].reshape(1, -1)
+        return i, _process_candidate_sequential(
+            i=i,
+            X_cand=X_cand,
+            X_train=X_train,
+            y_train=y_train,
+            X_val=X_val,
+            y_val=y_val,
+            X_space=X_space,
+            all_bounds=all_bounds,
+            n_y_candidates_per_x=n_y_candidates_per_x,
+            conformal_estimator=conformal_estimator,
+            n_paths=n_paths,
+            n_observations=n_observations,
+            indices_for_paths=indices_for_paths,
+            best_x_entropy=best_x_entropy,
+        )
+
+    information_gain = np.zeros(n_observations)
+    results = joblib.Parallel(n_jobs=n_jobs)(
+        joblib.delayed(process_single_candidate)(i) for i in candidate_idxs
+    )
+
+    for i, ig_value in results:
+        information_gain[i] = ig_value
+
+    return information_gain
 
 
 def calculate_information_gain(
@@ -89,88 +239,59 @@ def calculate_information_gain(
     n_X_candidates: int = 10,
     n_y_candidates_per_x: int = 3,
     sampling_strategy: str = "uniform",
+    n_jobs: int = -1,
 ) -> np.ndarray:
     all_bounds = flatten_conformal_bounds(predictions_per_interval)
-    n_observations = len(X_space)
+    n_observations = len(predictions_per_interval[0].lower_bounds)
 
-    y_paths = np.zeros((n_paths, n_observations))
-    for i in range(n_paths):
-        idxs = np.random.randint(0, all_bounds.shape[1], size=n_observations)
-        y_paths[i] = np.array([all_bounds[j, idxs[j]] for j in range(n_observations)])
-    minimization_idxs_per_path, counts = np.unique(
-        np.argmin(y_paths, axis=1), return_counts=True
+    best_x_entropy, indices_for_paths = _calculate_best_x_entropy(
+        all_bounds, n_observations, n_paths
     )
 
-    best_x_distribution = np.zeros(n_observations)
-    best_x_distribution[minimization_idxs_per_path] = counts / n_paths
-    non_zero_idxs = best_x_distribution > 0
-    best_x_entropy = -np.sum(
-        best_x_distribution[non_zero_idxs] * np.log(best_x_distribution[non_zero_idxs])
+    candidate_idxs = _select_candidates(
+        all_bounds, n_observations, n_X_candidates, sampling_strategy
     )
 
-    capped_n_X_candidates = min(n_X_candidates, n_observations)
-    if sampling_strategy == "uniform":
-        X_candidate_idxs = np.random.choice(
-            n_observations, size=capped_n_X_candidates, replace=False
+    information_gain = np.zeros(n_observations)
+
+    if len(candidate_idxs) >= 4 and n_jobs != 1:
+        information_gain = _process_candidates_parallel(
+            X_train=X_train,
+            y_train=y_train,
+            X_val=X_val,
+            y_val=y_val,
+            X_space=X_space,
+            conformal_estimator=conformal_estimator,
+            all_bounds=all_bounds,
+            n_paths=n_paths,
+            n_y_candidates_per_x=n_y_candidates_per_x,
+            candidate_idxs=candidate_idxs,
+            n_observations=n_observations,
+            indices_for_paths=indices_for_paths,
+            best_x_entropy=best_x_entropy,
+            n_jobs=n_jobs,
         )
-    elif sampling_strategy == "thompson":
-        thompson_samples = np.array(
-            [
-                all_bounds[i, np.random.randint(0, all_bounds.shape[1])]
-                for i in range(n_observations)
-            ]
-        )
-        X_candidate_idxs = np.argsort(thompson_samples)[:capped_n_X_candidates]
     else:
-        raise ValueError(f"Unknown sampling strategy: {sampling_strategy}")
-
-    information_gain_per_X = np.zeros(n_observations)
-    for i in X_candidate_idxs:
-        X_cand = X_space[i].reshape(1, -1)
-        y_range = np.random.choice(all_bounds[i], size=n_y_candidates_per_x)
-
-        entropy_per_y_candidate = []
-        for y_cand in y_range:
-            X_expanded = np.vstack([X_train, X_cand])
-            y_expanded = np.append(y_train, y_cand)
-
-            cand_estimator = deepcopy(conformal_estimator)
-            cand_estimator.fit(
-                X_train=X_expanded,
-                y_train=y_expanded,
+        for i in candidate_idxs:
+            X_cand = X_space[i].reshape(1, -1)
+            information_gain[i] = _process_candidate_sequential(
+                i=i,
+                X_cand=X_cand,
+                X_train=X_train,
+                y_train=y_train,
                 X_val=X_val,
                 y_val=y_val,
-                tuning_iterations=0,
+                X_space=X_space,
+                all_bounds=all_bounds,
+                n_y_candidates_per_x=n_y_candidates_per_x,
+                conformal_estimator=conformal_estimator,
+                n_paths=n_paths,
+                n_observations=n_observations,
+                indices_for_paths=indices_for_paths,
+                best_x_entropy=best_x_entropy,
             )
 
-            cand_predictions = cand_estimator.predict_intervals(X_space)
-            cand_bounds = flatten_conformal_bounds(cand_predictions)
-
-            conditional_y_paths = np.zeros((n_paths, n_observations))
-            for j in range(n_paths):
-                idxs = np.random.randint(0, cand_bounds.shape[1], size=n_observations)
-                conditional_y_paths[j] = np.array(
-                    [cand_bounds[k, idxs[k]] for k in range(n_observations)]
-                )
-            conditional_minimization_idxs_per_path, posterior_counts = np.unique(
-                np.argmin(conditional_y_paths, axis=1), return_counts=True
-            )
-
-            conditional_best_X_distribution = np.zeros(n_observations)
-            conditional_best_X_distribution[conditional_minimization_idxs_per_path] = (
-                posterior_counts / n_paths
-            )
-            non_zero_idxs = conditional_best_X_distribution > 0
-            if np.any(non_zero_idxs):
-                candidate_conditional_entropy = -np.sum(
-                    conditional_best_X_distribution[non_zero_idxs]
-                    * np.log(conditional_best_X_distribution[non_zero_idxs])
-                )
-                entropy_per_y_candidate.append(candidate_conditional_entropy)
-
-        information_gain_per_X[i] = best_x_entropy - np.mean(entropy_per_y_candidate)
-
-    return -information_gain_per_X
+    return -information_gain
 
 
 class BaseConformalSearcher(ABC):
@@ -341,7 +462,6 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
             interval_width=width,
             beta=self.sampler.beta,
         )
-        self.sampler.update_exploration_step()
         return bounds
 
     def _predict_with_thompson(self, X: np.array):
@@ -464,7 +584,6 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             interval_width=width,
             beta=self.sampler.beta,
         )
-        self.sampler.update_exploration_step()
         return bounds
 
     def _predict_with_thompson(self, X: np.array):

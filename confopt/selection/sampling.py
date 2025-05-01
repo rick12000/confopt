@@ -129,7 +129,7 @@ class ExpectedImprovementSampler:
         self,
         n_quantiles: int = 4,
         adapter: Optional[Literal["DtACI"]] = None,
-        current_best_value: float = float("-inf"),
+        current_best_value: float = float("inf"),
         num_ei_samples: int = 20,
     ):
         if n_quantiles % 2 != 0:
