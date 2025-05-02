@@ -3,6 +3,10 @@ from typing import Optional, Union, List, Tuple
 import numpy as np
 from abc import ABC, abstractmethod
 from copy import deepcopy
+import joblib
+
+from scipy.stats import qmc
+
 from confopt.selection.conformalization import (
     LocallyWeightedConformalEstimator,
     QuantileConformalEstimator,
@@ -18,6 +22,8 @@ from confopt.selection.sampling import (
 from confopt.selection.estimation import initialize_estimator
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_IG_SAMPLER_RANDOM_STATE = 1234
 
 
 def flatten_conformal_bounds(
@@ -100,20 +106,171 @@ def _calculate_best_x_entropy(
     return best_x_entropy, indices_for_paths
 
 
+def calculate_variance(
+    predictions_per_interval: List[ConformalBounds],
+    num_samples: int = 100,
+) -> np.ndarray:
+    """Calculate conditional variance of samples at each X point."""
+    all_bounds = flatten_conformal_bounds(predictions_per_interval)
+    n_observations = len(predictions_per_interval[0].lower_bounds)
+
+    # Sample from bounds for each observation
+    idxs = np.random.randint(0, all_bounds.shape[1], size=(n_observations, num_samples))
+
+    # Get samples for each observation
+    y_samples_per_observation = np.zeros((n_observations, num_samples))
+    for i in range(n_observations):
+        y_samples_per_observation[i] = all_bounds[i, idxs[i]]
+
+    # Calculate variance of samples for each observation
+    conditional_variances = np.var(y_samples_per_observation, axis=1)
+
+    return conditional_variances
+
+
 def _select_candidates(
-    all_bounds: np.ndarray,
-    n_observations: int,
+    predictions_per_interval: List[ConformalBounds],
     n_candidates: int,
     sampling_strategy: str,
+    X_space: Optional[np.ndarray] = None,  # Required for space-filling strategies
+    best_historical_y: Optional[float] = None,  # For expected improvement
+    best_historical_x: Optional[np.ndarray] = None,  # For perturbation
+    perturbation_scale: float = 0.1,  # For perturbation strategy
 ) -> np.ndarray:
+    """Select candidate points for evaluation based on specified strategy."""
+    all_bounds = flatten_conformal_bounds(predictions_per_interval)
+    n_observations = len(predictions_per_interval[0].lower_bounds)
     capped_n_candidates = min(n_candidates, n_observations)
 
     if sampling_strategy == "uniform":
         return np.random.choice(n_observations, size=capped_n_candidates, replace=False)
+
     elif sampling_strategy == "thompson":
-        thompson_idxs = np.random.randint(0, all_bounds.shape[1], size=n_observations)
-        thompson_samples = all_bounds[np.arange(n_observations), thompson_idxs]
+        thompson_samples = calculate_thompson_predictions(
+            predictions_per_interval=predictions_per_interval,
+            enable_optimistic_sampling=False,
+        )
         return np.argsort(thompson_samples)[:capped_n_candidates]
+
+    elif sampling_strategy == "expected_improvement":
+        if best_historical_y is None:
+            # Fallback if no historical best provided
+            best_historical_y = np.min(np.mean(all_bounds, axis=1))
+            logger.warning(
+                "No best_historical_y provided for expected improvement selection, using calculated minimum."
+            )
+
+        ei_values = calculate_expected_improvement(
+            predictions_per_interval=predictions_per_interval,
+            best_historical_y=best_historical_y,
+            num_samples=100,
+        )
+        # Negative because calculate_expected_improvement returns negated values
+        return np.argsort(ei_values)[:capped_n_candidates]
+
+    elif sampling_strategy == "variance":
+        variances = calculate_variance(
+            predictions_per_interval=predictions_per_interval, num_samples=100
+        )
+        return np.argsort(-variances)[:capped_n_candidates]
+
+    elif sampling_strategy == "sobol":
+        if X_space is None:
+            raise ValueError("X_space must be provided for space-filling designs")
+
+        # Get dimensionality of the space
+        n_dim = X_space.shape[1]
+
+        # Create Sobol sequence generator
+        sampler = qmc.Sobol(d=n_dim, scramble=True)
+
+        # Generate points in unit hypercube
+        points = sampler.random(n=capped_n_candidates)
+
+        # Find nearest points in X_space to the generated Sobol points
+        # First, normalize X_space to [0,1]^d
+        X_min = np.min(X_space, axis=0)
+        X_range = np.max(X_space, axis=0) - X_min
+        X_normalized = (X_space - X_min) / (X_range + 1e-10)
+
+        # Find nearest X_space points to each Sobol point
+        selected_indices = []
+        for point in points:
+            distances = np.sqrt(np.sum((X_normalized - point) ** 2, axis=1))
+            selected_idx = np.argmin(distances)
+            selected_indices.append(selected_idx)
+
+        return np.array(selected_indices)
+
+    elif sampling_strategy == "latin_hypercube":
+        if X_space is None:
+            raise ValueError("X_space must be provided for space-filling designs")
+
+        # Get dimensionality of the space
+        n_dim = X_space.shape[1]
+
+        # Create Latin Hypercube sampler
+        sampler = qmc.LatinHypercube(d=n_dim)
+
+        # Generate points
+        points = sampler.random(n=capped_n_candidates)
+
+        # Find nearest points in X_space
+        X_min = np.min(X_space, axis=0)
+        X_range = np.max(X_space, axis=0) - X_min
+        X_normalized = (X_space - X_min) / (X_range + 1e-10)
+
+        selected_indices = []
+        for point in points:
+            distances = np.sqrt(np.sum((X_normalized - point) ** 2, axis=1))
+            selected_idx = np.argmin(distances)
+            selected_indices.append(selected_idx)
+
+        return np.array(selected_indices)
+
+    elif sampling_strategy == "perturbation":
+        if X_space is None:
+            raise ValueError("X_space must be provided for perturbation sampling")
+
+        if best_historical_x is None or best_historical_y is None:
+            # If no best point provided, fall back to uniform sampling
+            logger.warning(
+                "No best historical point provided for perturbation sampling, using uniform sampling."
+            )
+            return np.random.choice(
+                n_observations, size=capped_n_candidates, replace=False
+            )
+
+        # Get dimensionality of the space
+        n_dim = X_space.shape[1]
+
+        # Create a hypercube around the best point
+        X_min = np.min(X_space, axis=0)
+        X_max = np.max(X_space, axis=0)
+        X_range = X_max - X_min
+
+        # Define hypercube boundaries around best_historical_x
+        lower_bounds = np.maximum(
+            best_historical_x - perturbation_scale * X_range, X_min
+        )
+        upper_bounds = np.minimum(
+            best_historical_x + perturbation_scale * X_range, X_max
+        )
+
+        # Generate random points within the hypercube
+        random_points = np.random.uniform(
+            lower_bounds, upper_bounds, size=(capped_n_candidates, n_dim)
+        )
+
+        # Find nearest points in X_space to each generated point
+        selected_indices = []
+        for point in random_points:
+            distances = np.sqrt(np.sum((X_space - point) ** 2, axis=1))
+            selected_idx = np.argmin(distances)
+            selected_indices.append(selected_idx)
+
+        return np.array(selected_indices)
+
     else:
         raise ValueError(f"Unknown sampling strategy: {sampling_strategy}")
 
@@ -150,6 +307,7 @@ def _process_candidate_sequential(
             X_val=X_val,
             y_val=y_val,
             tuning_iterations=0,
+            random_state=DEFAULT_IG_SAMPLER_RANDOM_STATE,
         )
 
         cand_predictions = cand_estimator.predict_intervals(X_space)
@@ -195,8 +353,6 @@ def _process_candidates_parallel(
     best_x_entropy: float,
     n_jobs: int,
 ) -> np.ndarray:
-    import joblib
-
     def process_single_candidate(i):
         X_cand = X_space[i].reshape(1, -1)
         return i, _process_candidate_sequential(
@@ -248,8 +404,33 @@ def calculate_information_gain(
         all_bounds, n_observations, n_paths
     )
 
+    # Get best historical y value and corresponding x if needed
+    best_historical_y = None
+    best_historical_x = None
+
+    # Combine training and validation data
+    if y_train is not None and len(y_train) > 0:
+        if y_val is not None and len(y_val) > 0:
+            combined_y = np.concatenate((y_train, y_val))
+            combined_X = np.vstack((X_train, X_val))
+            if sampling_strategy in ["expected_improvement", "perturbation"]:
+                best_idx = np.argmin(combined_y)
+                best_historical_y = combined_y[best_idx]
+                best_historical_x = combined_X[best_idx].reshape(1, -1)
+        else:
+            if sampling_strategy in ["expected_improvement", "perturbation"]:
+                best_idx = np.argmin(y_train)
+                best_historical_y = y_train[best_idx]
+                best_historical_x = X_train[best_idx].reshape(1, -1)
+
+    # Pass predictions_per_interval directly
     candidate_idxs = _select_candidates(
-        all_bounds, n_observations, n_X_candidates, sampling_strategy
+        predictions_per_interval=predictions_per_interval,
+        n_candidates=n_X_candidates,
+        sampling_strategy=sampling_strategy,
+        X_space=X_space,
+        best_historical_y=best_historical_y,
+        best_historical_x=best_historical_x,
     )
 
     information_gain = np.zeros(n_observations)
@@ -436,6 +617,10 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
         self.X_val = X_val  # Store validation data
         self.y_val = y_val  # Store validation data
 
+        # Set random_state to the default value if using InformationGainSampler and no random_state was provided
+        if isinstance(self.sampler, InformationGainSampler) and random_state is None:
+            random_state = DEFAULT_IG_SAMPLER_RANDOM_STATE
+
         self.conformal_estimator.fit(
             X_train=X_train,
             y_train=y_train,
@@ -538,6 +723,11 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         self.y_train = y_train
         self.X_val = X_val  # Store validation data
         self.y_val = y_val  # Store validation data
+
+        # Set random_state for InformationGainSampler if not provided
+        random_state = random_state
+        if isinstance(self.sampler, InformationGainSampler) and random_state is None:
+            random_state = DEFAULT_IG_SAMPLER_RANDOM_STATE
 
         if isinstance(self.sampler, (PessimisticLowerBoundSampler, LowerBoundSampler)):
             upper_quantile_cap = 0.5
