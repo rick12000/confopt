@@ -197,15 +197,38 @@ def linear_data_drift():
 
 @pytest.fixture
 def conformal_bounds():
-    # Create three deterministic conformal bounds
-    predictions = []
-    for i in range(3):
-        bounds = ConformalBounds(
-            lower_bounds=np.array([0.1, 0.2, 0.3, 0.4, 0.5]) * (i + 1),
-            upper_bounds=np.array([1.1, 1.2, 1.3, 1.4, 1.5]) * (i + 1),
-        )
-        predictions.append(bounds)
-    return predictions
+    n_points = 5
+    n_intervals = 3
+
+    np.random.seed(42)
+    lower_bounds = []
+    upper_bounds = []
+
+    for _ in range(n_intervals):
+        lb = np.random.rand(n_points)
+        width = 0.1 + np.random.rand(n_points) * 0.2  # Width between 0.1 and 0.3
+        ub = lb + width
+        lower_bounds.append(lb)
+        upper_bounds.append(ub)
+
+    return [
+        ConformalBounds(lower_bounds=lb, upper_bounds=ub)
+        for lb, ub in zip(lower_bounds, upper_bounds)
+    ]
+
+
+@pytest.fixture
+def simple_conformal_bounds():
+    lower_bounds1 = np.array([0.1, 0.3, 0.5])
+    upper_bounds1 = np.array([0.4, 0.6, 0.8])
+
+    lower_bounds2 = np.array([0.2, 0.4, 0.6])
+    upper_bounds2 = np.array([0.5, 0.7, 0.9])
+
+    return [
+        ConformalBounds(lower_bounds=lower_bounds1, upper_bounds=upper_bounds1),
+        ConformalBounds(lower_bounds=lower_bounds2, upper_bounds=upper_bounds2),
+    ]
 
 
 @pytest.fixture
