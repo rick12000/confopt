@@ -4,7 +4,6 @@ from confopt.selection.adaptation import DtACI
 import warnings
 from confopt.wrapping import ConformalBounds
 import joblib
-from tqdm.auto import tqdm
 from copy import deepcopy
 
 
@@ -20,49 +19,102 @@ def flatten_conformal_bounds(
 
 
 def _differential_entropy_estimator(
-    samples: np.ndarray, alpha: float = 0.1, method: str = "distance"
+    samples: np.ndarray, method: Literal["distance", "histogram"] = "distance"
 ) -> float:
+    """
+    Estimate the differential entropy of samples using various methods.
+
+    Parameters:
+    -----------
+    samples : np.ndarray
+        The samples used to estimate differential entropy
+    method : str
+        The method to use for entropy estimation:
+        - 'distance': Based on nearest-neighbor distances (Vasicek estimator)
+        - 'histogram': Based on binned probability density
+
+    Returns:
+    --------
+    float: The estimated differential entropy
+    """
     n_samples = len(samples)
     if n_samples <= 1:
         return 0.0
+
+    # Check if all samples are identical (constant)
+    if np.all(samples == samples[0]):
+        return 0.0
+
     if method == "distance":
+        # Vasicek estimator based on spacings
+        m = int(np.sqrt(n_samples))  # Window size
+        if m >= n_samples:
+            m = max(1, n_samples // 2)
+
         sorted_samples = np.sort(samples)
-        distances = np.diff(sorted_samples)
-        distances = np.append(distances, np.median(distances))
-        distances = np.maximum(distances, alpha)
-        log_distances = np.log(distances)
-        entropy = np.mean(log_distances) + np.log(n_samples)
+        # Handle boundary cases by wrapping around
+        wrapped_samples = np.concatenate([sorted_samples, sorted_samples[:m]])
+
+        spacings = wrapped_samples[m : n_samples + m] - wrapped_samples[:n_samples]
+        # Avoid log of zero by setting very small spacings to a minimum value
+        spacings = np.maximum(spacings, np.finfo(float).eps)
+
+        # Vasicek estimator formula
+        entropy = np.sum(np.log(n_samples * spacings / m)) / n_samples
         return entropy
+
     elif method == "histogram":
-        n_bins = int(np.sqrt(n_samples))
-        hist, bin_edges = np.histogram(samples, bins=n_bins, density=True)
+        # Use Scott's rule for bin width selection
+        std = np.std(samples)
+        if std == 0:  # Handle constant samples
+            return 0.0
+
+        # Scott's rule: bin_width = 3.49 * std * n^(-1/3)
+        bin_width = 3.49 * std * (n_samples ** (-1 / 3))
+        data_range = np.max(samples) - np.min(samples)
+        n_bins = max(1, int(np.ceil(data_range / bin_width)))
+
+        # First get frequencies (counts) in each bin
+        hist, bin_edges = np.histogram(samples, bins=n_bins)
+
+        # Convert counts to probabilities (relative frequencies)
+        probs = hist / n_samples
+
+        # Remove zero probabilities (bins with no samples)
+        positive_idx = probs > 0
+        positive_probs = probs[positive_idx]
+
+        # Bin width is needed for conversion from discrete to differential entropy
         bin_widths = np.diff(bin_edges)
-        entropy = -np.sum(hist * np.log(hist + 1e-12) * bin_widths)
-        return entropy
+
+        # Differential entropy = discrete entropy + log(bin width)
+        # H(X) ≈ -Σ p(i)log(p(i)) + log(Δ)
+        # where Δ is the bin width
+
+        # Calculate discrete entropy component
+        discrete_entropy = -np.sum(positive_probs * np.log(positive_probs))
+
+        # Add log of average bin width to convert to differential entropy
+        # This is a standard correction factor when estimating differential entropy with histograms
+        avg_bin_width = np.mean(bin_widths)
+        differential_entropy = discrete_entropy + np.log(avg_bin_width)
+
+        return differential_entropy
     else:
-        raise ValueError(f"Unknown entropy estimation method: {method}")
+        raise ValueError(
+            f"Unknown entropy estimation method: {method}. Choose from 'distance' or 'histogram'."
+        )
 
 
-def _run_parallel_or_sequential(func, items, n_jobs=-1, desc=None):
+def _run_parallel_or_sequential(func, items, n_jobs=-1):
     if n_jobs == 1:
         results = []
-        for item in tqdm(items, desc=desc, disable=desc is None):
+        for item in items:
             results.append(func(item))
         return results
     else:
         with joblib.parallel_backend("loky", n_jobs=n_jobs):
-            if desc:
-                with tqdm(total=len(items), desc=desc) as progress_bar:
-
-                    def update_progress(*args, **kwargs):
-                        progress_bar.update()
-
-                    results = joblib.Parallel()(
-                        joblib.delayed(func)(item) for item in items
-                    )
-                    return results
-            else:
-                return joblib.Parallel()(joblib.delayed(func)(item) for item in items)
+            return joblib.Parallel()(joblib.delayed(func)(item) for item in items)
 
 
 class PessimisticLowerBoundSampler:
@@ -234,7 +286,6 @@ class ExpectedImprovementSampler:
         self.adapters = self._initialize_adapters(adapter)
 
     def update_best_value(self, value: float):
-        """Update the current best value found in optimization."""
         self.current_best_value = min(self.current_best_value, value)
 
     def _initialize_alphas(self) -> list[float]:
@@ -303,6 +354,7 @@ class InformationGainSampler:
         n_X_candidates: int = 10,
         n_y_candidates_per_x: int = 3,
         sampling_strategy: str = "uniform",
+        entropy_method: Literal["distance", "histogram"] = "distance",
     ):
         if n_quantiles % 2 != 0:
             raise ValueError("Number of quantiles must be even.")
@@ -312,6 +364,7 @@ class InformationGainSampler:
         self.n_X_candidates = n_X_candidates
         self.n_y_candidates_per_x = n_y_candidates_per_x
         self.sampling_strategy = sampling_strategy
+        self.entropy_method = entropy_method
 
         self.alphas = self._initialize_alphas()
         self.adapters = self._initialize_adapters(adapter)
@@ -354,8 +407,6 @@ class InformationGainSampler:
         self,
         all_bounds: np.ndarray,
         n_observations: int,
-        entropy_method: str = "distance",
-        alpha: float = 0.1,
     ) -> Tuple[float, np.ndarray]:
         indices_for_paths = np.vstack([np.arange(n_observations)] * self.n_paths)
         idxs = np.random.randint(
@@ -368,7 +419,7 @@ class InformationGainSampler:
             [y_paths[i, minimization_idxs[i]] for i in range(self.n_paths)]
         )
         best_x_entropy = _differential_entropy_estimator(
-            min_values, alpha, method=entropy_method
+            min_values, method=self.entropy_method
         )
 
         return best_x_entropy, indices_for_paths
@@ -404,51 +455,100 @@ class InformationGainSampler:
             return np.argsort(ei_values)[:capped_n_candidates]
 
         elif self.sampling_strategy == "sobol":
-            if X_space is None:
-                raise ValueError("X_space must be provided for space-filling designs")
-            n_dim = X_space.shape[1]
-            from scipy.stats import qmc
+            try:
+                from scipy.stats import qmc
 
-            sampler = qmc.Sobol(d=n_dim, scramble=True)
-            points = sampler.random(n=capped_n_candidates)
-            X_min = np.min(X_space, axis=0)
-            X_range = np.max(X_space, axis=0) - X_min
-            X_normalized = (X_space - X_min) / (X_range + 1e-10)
-            selected_indices = []
-            for point in points:
-                distances = np.sqrt(np.sum((X_normalized - point) ** 2, axis=1))
-                selected_idx = np.argmin(distances)
-                selected_indices.append(selected_idx)
-            return np.array(selected_indices)
+                # If X_space is not provided or is too small, fall back to random sampling
+                if X_space is None or len(X_space) < capped_n_candidates:
+                    return np.random.choice(
+                        n_observations, size=capped_n_candidates, replace=False
+                    )
 
-        elif self.sampling_strategy == "perturbation":
-            if X_space is None:
-                raise ValueError("X_space must be provided for perturbation sampling")
-            if best_historical_x is None or best_historical_y is None:
+                n_dim = X_space.shape[1]
+                sampler = qmc.Sobol(d=n_dim, scramble=True)
+                points = sampler.random(n=capped_n_candidates)
+
+                # Normalize the input space
+                X_min = np.min(X_space, axis=0)
+                X_range = np.max(X_space, axis=0) - X_min
+                X_range[X_range == 0] = 1.0  # Avoid division by zero
+                X_normalized = (X_space - X_min) / X_range
+
+                # Find closest points in the X_space to the Sobol points
+                selected_indices = []
+                for point in points:
+                    distances = np.sqrt(np.sum((X_normalized - point) ** 2, axis=1))
+                    selected_idx = np.argmin(distances)
+                    selected_indices.append(selected_idx)
+
+                return np.array(selected_indices)
+            except ImportError:
+                # Fall back to random sampling if scipy.stats.qmc is not available
                 return np.random.choice(
                     n_observations, size=capped_n_candidates, replace=False
                 )
-            n_dim = X_space.shape[1]
-            X_min = np.min(X_space, axis=0)
-            X_max = np.max(X_space, axis=0)
-            X_range = X_max - X_min
-            perturbation_scale = 0.1
-            lower_bounds = np.maximum(
-                best_historical_x - perturbation_scale * X_range, X_min
-            )
-            upper_bounds = np.minimum(
-                best_historical_x + perturbation_scale * X_range, X_max
-            )
-            random_points = np.random.uniform(
-                lower_bounds, upper_bounds, size=(capped_n_candidates, n_dim)
-            )
-            selected_indices = []
-            for point in random_points:
-                distances = np.sqrt(np.sum((X_space - point) ** 2, axis=1))
-                selected_idx = np.argmin(distances)
-                selected_indices.append(selected_idx)
-            return np.array(selected_indices)
+
+        elif self.sampling_strategy == "perturbation":
+            # If no historical best point is available or X_space is invalid, use random sampling
+            if (
+                X_space is None
+                or len(X_space) < 1
+                or best_historical_x is None
+                or best_historical_y is None
+            ):
+                return np.random.choice(
+                    n_observations, size=capped_n_candidates, replace=False
+                )
+
+            try:
+                n_dim = X_space.shape[1]
+
+                # Compute valid bounds for perturbation
+                X_min = np.min(X_space, axis=0)
+                X_max = np.max(X_space, axis=0)
+                X_range = X_max - X_min
+
+                # Scale perturbation based on data range
+                perturbation_scale = 0.1
+                # Ensure best_historical_x is 2D for proper broadcasting
+                if best_historical_x.ndim == 1:
+                    best_historical_x = best_historical_x.reshape(1, -1)
+
+                # Compute perturbation bounds
+                lower_bounds = np.maximum(
+                    best_historical_x - perturbation_scale * X_range, X_min
+                )
+                upper_bounds = np.minimum(
+                    best_historical_x + perturbation_scale * X_range, X_max
+                )
+
+                # Generate random perturbed points
+                perturbed_points = np.random.uniform(
+                    lower_bounds, upper_bounds, size=(capped_n_candidates, n_dim)
+                )
+
+                # Find closest X_space points to the perturbed points
+                selected_indices = []
+                for point in perturbed_points:
+                    distances = np.sqrt(np.sum((X_space - point) ** 2, axis=1))
+                    selected_idx = np.argmin(distances)
+                    if selected_idx not in selected_indices:
+                        selected_indices.append(selected_idx)
+
+                # If we didn't get enough unique points, fill with random ones
+                while len(selected_indices) < capped_n_candidates:
+                    idx = np.random.randint(0, n_observations)
+                    if idx not in selected_indices:
+                        selected_indices.append(idx)
+
+                return np.array(selected_indices)
+            except Exception:
+                # Fall back to random sampling if there are any issues
+                return np.random.choice(
+                    n_observations, size=capped_n_candidates, replace=False
+                )
         else:
+            # Default to uniform random sampling
             return np.random.choice(
                 n_observations, size=capped_n_candidates, replace=False
             )
@@ -462,14 +562,13 @@ class InformationGainSampler:
         X_space: np.ndarray,
         conformal_estimator,
         predictions_per_interval: List[ConformalBounds],
-        entropy_method: str = "distance",
-        alpha: float = 0.1,
-        n_jobs: int = -1,
+        n_jobs: int = 1,
     ) -> np.ndarray:
         all_bounds = flatten_conformal_bounds(predictions_per_interval)
         n_observations = len(predictions_per_interval[0].lower_bounds)
+
         prior_entropy, indices_for_paths = self._calculate_best_x_entropy(
-            all_bounds, n_observations, entropy_method, alpha
+            all_bounds, n_observations
         )
 
         best_historical_y = None
@@ -530,20 +629,20 @@ class InformationGainSampler:
                     ]
                 )
                 posterior_entropy = _differential_entropy_estimator(
-                    conditional_samples, alpha, method=entropy_method
+                    conditional_samples, method=self.entropy_method
                 )
                 information_gains.append(prior_entropy - posterior_entropy)
             return idx, np.mean(information_gains) if information_gains else 0.0
 
         information_gain = np.zeros(n_observations)
         results = _run_parallel_or_sequential(
-            lambda idx_list: process_candidate(idx_list[0]),
-            [[idx] for idx in candidate_idxs],
+            process_candidate,
+            candidate_idxs,
             n_jobs=n_jobs,
-            desc="Calculating information gain",
         )
         for idx, ig_value in results:
             information_gain[idx] = ig_value
+
         return -information_gain
 
 
@@ -552,11 +651,10 @@ class MaxValueEntropySearchSampler:
         self,
         n_quantiles: int = 4,
         adapter: Optional[Literal["DtACI"]] = None,
-        n_min_samples: int = 100,  # Number of samples to estimate minimum value distribution
-        n_y_samples: int = 20,  # Number of y samples to evaluate per candidate point
-        alpha: float = 0.1,  # Parameter for entropy estimation
-        sampling_strategy: str = "uniform",  # Strategy for selecting initial candidate points if needed
-        entropy_method: str = "distance",
+        n_min_samples: int = 100,
+        n_y_samples: int = 20,
+        sampling_strategy: str = "uniform",
+        entropy_method: Literal["distance", "histogram"] = "distance",
     ):
         if n_quantiles % 2 != 0:
             raise ValueError("Number of quantiles must be even.")
@@ -564,7 +662,6 @@ class MaxValueEntropySearchSampler:
         self.n_quantiles = n_quantiles
         self.n_min_samples = n_min_samples
         self.n_y_samples = n_y_samples
-        self.alpha = alpha
         self.sampling_strategy = sampling_strategy
         self.entropy_method = entropy_method
 
@@ -608,7 +705,7 @@ class MaxValueEntropySearchSampler:
     def calculate_max_value_entropy_search(
         self,
         predictions_per_interval: List[ConformalBounds],
-        n_jobs: int = -1,
+        n_jobs: int = 2,
     ) -> np.ndarray:
         all_bounds = flatten_conformal_bounds(predictions_per_interval)
         n_observations = len(predictions_per_interval[0].lower_bounds)
@@ -620,7 +717,7 @@ class MaxValueEntropySearchSampler:
             sampled_funcs[i] = all_bounds[np.arange(n_observations), idxs[i]]
         min_values = np.min(sampled_funcs, axis=1)
         h_prior = _differential_entropy_estimator(
-            min_values, self.alpha, method=self.entropy_method
+            min_values, method=self.entropy_method
         )
 
         def process_batch(batch_indices):
@@ -636,9 +733,7 @@ class MaxValueEntropySearchSampler:
                 h_posteriors = np.array(
                     [
                         _differential_entropy_estimator(
-                            updated_min_values[j],
-                            self.alpha,
-                            method=self.entropy_method,
+                            updated_min_values[j], method=self.entropy_method
                         )
                         for j in range(self.n_y_samples)
                     ]
@@ -660,7 +755,6 @@ class MaxValueEntropySearchSampler:
             process_batch,
             batches,
             n_jobs=n_jobs,
-            desc="Calculating max value entropy search",
         )
         for indices, values in results:
             mes_values[indices] = values

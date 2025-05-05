@@ -33,9 +33,9 @@ from conftest import (
 @pytest.mark.parametrize("point_arch", POINT_ESTIMATOR_ARCHITECTURES[:1])
 @pytest.mark.parametrize("variance_arch", POINT_ESTIMATOR_ARCHITECTURES[:1])
 def test_locally_weighted_conformal_searcher(
-    sampler_class, sampler_kwargs, point_arch, variance_arch, larger_toy_dataset
+    sampler_class, sampler_kwargs, point_arch, variance_arch, big_toy_dataset
 ):
-    X, y = larger_toy_dataset
+    X, y = big_toy_dataset
     X_train, y_train = X[:7], y[:7]
     X_val, y_val = X[7:], y[7:]
 
@@ -90,9 +90,9 @@ def test_locally_weighted_conformal_searcher(
     ],
 )
 def test_quantile_conformal_searcher(
-    sampler_class, sampler_kwargs, quantile_arch, larger_toy_dataset
+    sampler_class, sampler_kwargs, quantile_arch, big_toy_dataset
 ):
-    X, y = larger_toy_dataset
+    X, y = big_toy_dataset
     X_train, y_train = X[:7], y[:7]
     X_val, y_val = X[7:], y[7:]
 
@@ -128,17 +128,16 @@ def test_quantile_conformal_searcher(
     assert searcher.y_train[-1] == y_update
 
 
-def test_locally_weighted_searcher_prediction_methods(larger_toy_dataset):
-    X, y = larger_toy_dataset
+def test_locally_weighted_searcher_prediction_methods(big_toy_dataset):
+    X, y = big_toy_dataset
     X_train, y_train = X[:7], y[:7]
     X_val, y_val = X[7:], y[7:]
     X_test = X_val
 
-    # Test LowerBoundSampler with UCB prediction
     lb_sampler = LowerBoundSampler(interval_width=0.8, beta_decay=None)
     lb_searcher = LocallyWeightedConformalSearcher(
-        point_estimator_architecture="ridge",
-        variance_estimator_architecture="ridge",
+        point_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
+        variance_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
         sampler=lb_sampler,
     )
     lb_searcher.fit(
@@ -152,11 +151,10 @@ def test_locally_weighted_searcher_prediction_methods(larger_toy_dataset):
     lb_predictions = lb_searcher.predict(X_test)
     assert len(lb_predictions) == len(X_test)
 
-    # Test ThompsonSampler with Thompson prediction
     thompson_sampler = ThompsonSampler(n_quantiles=4)
     thompson_searcher = LocallyWeightedConformalSearcher(
-        point_estimator_architecture="ridge",
-        variance_estimator_architecture="ridge",
+        point_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
+        variance_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
         sampler=thompson_sampler,
     )
     thompson_searcher.fit(
@@ -170,11 +168,10 @@ def test_locally_weighted_searcher_prediction_methods(larger_toy_dataset):
     thompson_predictions = thompson_searcher.predict(X_test)
     assert len(thompson_predictions) == len(X_test)
 
-    # Test ExpectedImprovementSampler with EI prediction
     ei_sampler = ExpectedImprovementSampler(n_quantiles=4, current_best_value=0.5)
     ei_searcher = LocallyWeightedConformalSearcher(
-        point_estimator_architecture="ridge",
-        variance_estimator_architecture="ridge",
+        point_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
+        variance_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
         sampler=ei_sampler,
     )
     ei_searcher.fit(
@@ -188,11 +185,10 @@ def test_locally_weighted_searcher_prediction_methods(larger_toy_dataset):
     ei_predictions = ei_searcher.predict(X_test)
     assert len(ei_predictions) == len(X_test)
 
-    # Test PessimisticLowerBoundSampler with pessimistic_lower_bound prediction
     plb_sampler = PessimisticLowerBoundSampler(interval_width=0.8)
     plb_searcher = LocallyWeightedConformalSearcher(
-        point_estimator_architecture="ridge",
-        variance_estimator_architecture="ridge",
+        point_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
+        variance_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
         sampler=plb_sampler,
     )
     plb_searcher.fit(
@@ -206,29 +202,27 @@ def test_locally_weighted_searcher_prediction_methods(larger_toy_dataset):
     plb_predictions = plb_searcher.predict(X_test)
     assert len(plb_predictions) == len(X_test)
 
-    # The predictions should be different for different acquisition methods
     assert not np.array_equal(lb_predictions, thompson_predictions)
     assert not np.array_equal(thompson_predictions, ei_predictions)
     assert not np.array_equal(ei_predictions, plb_predictions)
 
 
-def test_locally_weighted_searcher_with_advanced_samplers(larger_toy_dataset):
-    X, y = larger_toy_dataset
+def test_locally_weighted_searcher_with_advanced_samplers(big_toy_dataset):
+    X, y = big_toy_dataset
     X_train, y_train = X[:7], y[:7]
     X_val, y_val = X[7:], y[7:]
-    X_test = X_val[:2]  # Use fewer test points to speed up tests
+    X_test = X_val[:2]
 
-    # Test InformationGainSampler
     ig_sampler = InformationGainSampler(
         n_quantiles=4,
-        n_paths=10,  # Reduced for testing
+        n_paths=10,
         n_X_candidates=2,
         n_y_candidates_per_x=2,
         sampling_strategy="thompson",
     )
     ig_searcher = LocallyWeightedConformalSearcher(
-        point_estimator_architecture="ridge",
-        variance_estimator_architecture="ridge",
+        point_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
+        variance_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
         sampler=ig_sampler,
     )
     ig_searcher.fit(
@@ -242,16 +236,14 @@ def test_locally_weighted_searcher_with_advanced_samplers(larger_toy_dataset):
     ig_predictions = ig_searcher.predict(X_test)
     assert len(ig_predictions) == len(X_test)
 
-    # Test MaxValueEntropySearchSampler
     mes_sampler = MaxValueEntropySearchSampler(
         n_quantiles=4,
-        n_min_samples=10,  # Reduced for testing
+        n_min_samples=10,
         n_y_samples=5,
-        alpha=0.1,
     )
     mes_searcher = LocallyWeightedConformalSearcher(
-        point_estimator_architecture="ridge",
-        variance_estimator_architecture="ridge",
+        point_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
+        variance_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
         sampler=mes_sampler,
     )
     mes_searcher.fit(
@@ -266,13 +258,12 @@ def test_locally_weighted_searcher_with_advanced_samplers(larger_toy_dataset):
     assert len(mes_predictions) == len(X_test)
 
 
-def test_quantile_searcher_prediction_methods(larger_toy_dataset):
-    X, y = larger_toy_dataset
+def test_quantile_searcher_prediction_methods(big_toy_dataset):
+    X, y = big_toy_dataset
     X_train, y_train = X[:7], y[:7]
     X_val, y_val = X[7:], y[7:]
     X_test = X_val
 
-    # Test LowerBoundSampler with UCB prediction
     lb_sampler = LowerBoundSampler(interval_width=0.8, beta_decay=None)
     lb_searcher = QuantileConformalSearcher(
         quantile_estimator_architecture="ql",
@@ -290,7 +281,6 @@ def test_quantile_searcher_prediction_methods(larger_toy_dataset):
     lb_predictions = lb_searcher.predict(X_test)
     assert len(lb_predictions) == len(X_test)
 
-    # Test ThompsonSampler with Thompson prediction
     thompson_sampler = ThompsonSampler(n_quantiles=4)
     thompson_searcher = QuantileConformalSearcher(
         quantile_estimator_architecture="ql",
@@ -308,7 +298,6 @@ def test_quantile_searcher_prediction_methods(larger_toy_dataset):
     thompson_predictions = thompson_searcher.predict(X_test)
     assert len(thompson_predictions) == len(X_test)
 
-    # Test ExpectedImprovementSampler with EI prediction
     ei_sampler = ExpectedImprovementSampler(n_quantiles=4, current_best_value=0.5)
     ei_searcher = QuantileConformalSearcher(
         quantile_estimator_architecture="ql",
@@ -326,7 +315,6 @@ def test_quantile_searcher_prediction_methods(larger_toy_dataset):
     ei_predictions = ei_searcher.predict(X_test)
     assert len(ei_predictions) == len(X_test)
 
-    # Test PessimisticLowerBoundSampler with pessimistic_lower_bound prediction
     plb_sampler = PessimisticLowerBoundSampler(interval_width=0.8)
     plb_searcher = QuantileConformalSearcher(
         quantile_estimator_architecture="ql",
@@ -345,16 +333,15 @@ def test_quantile_searcher_prediction_methods(larger_toy_dataset):
     assert len(plb_predictions) == len(X_test)
 
 
-def test_quantile_searcher_with_advanced_samplers(larger_toy_dataset):
-    X, y = larger_toy_dataset
+def test_quantile_searcher_with_advanced_samplers(big_toy_dataset):
+    X, y = big_toy_dataset
     X_train, y_train = X[:7], y[:7]
     X_val, y_val = X[7:], y[7:]
-    X_test = X_val[:2]  # Use fewer test points to speed up tests
+    X_test = X_val[:2]
 
-    # Test InformationGainSampler
     ig_sampler = InformationGainSampler(
         n_quantiles=4,
-        n_paths=10,  # Reduced for testing
+        n_paths=10,
         n_X_candidates=2,
         n_y_candidates_per_x=2,
         sampling_strategy="thompson",
@@ -375,12 +362,10 @@ def test_quantile_searcher_with_advanced_samplers(larger_toy_dataset):
     ig_predictions = ig_searcher.predict(X_test)
     assert len(ig_predictions) == len(X_test)
 
-    # Test MaxValueEntropySearchSampler
     mes_sampler = MaxValueEntropySearchSampler(
         n_quantiles=4,
-        n_min_samples=10,  # Reduced for testing
+        n_min_samples=10,
         n_y_samples=5,
-        alpha=0.1,
     )
     mes_searcher = QuantileConformalSearcher(
         quantile_estimator_architecture="ql",

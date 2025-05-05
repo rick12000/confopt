@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Union
+from typing import Optional, Union, Literal
 import numpy as np
 from abc import ABC, abstractmethod
 
@@ -21,6 +21,24 @@ from confopt.selection.estimation import initialize_estimator
 logger = logging.getLogger(__name__)
 
 DEFAULT_IG_SAMPLER_RANDOM_STATE = 1234
+
+# Point estimator architecture literals for LocallyWeightedConformalSearcher
+PointEstimatorArchitecture = Literal["gbm", "lgbm", "rf", "knn", "kr", "pens"]
+
+# Quantile estimator architecture literals for QuantileConformalSearcher
+QuantileEstimatorArchitecture = Literal[
+    "qrf",
+    "qgbm",
+    "qlgbm",
+    "qknn",
+    "ql",
+    "qgp",
+    "qens1",
+    "qens2",
+    "qens3",
+    "qens4",
+    "qens5",
+]
 
 
 class BaseConformalSearcher(ABC):
@@ -128,8 +146,8 @@ class BaseConformalSearcher(ABC):
 class LocallyWeightedConformalSearcher(BaseConformalSearcher):
     def __init__(
         self,
-        point_estimator_architecture: str,
-        variance_estimator_architecture: str,
+        point_estimator_architecture: PointEstimatorArchitecture,
+        variance_estimator_architecture: PointEstimatorArchitecture,
         sampler: Union[
             LowerBoundSampler,
             ThompsonSampler,
@@ -233,7 +251,7 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
 class QuantileConformalSearcher(BaseConformalSearcher):
     def __init__(
         self,
-        quantile_estimator_architecture: str,
+        quantile_estimator_architecture: QuantileEstimatorArchitecture,
         sampler: Union[
             LowerBoundSampler,
             ThompsonSampler,
