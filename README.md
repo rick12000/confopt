@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo.png" alt="ConfOpt Logo" width="300"/>
+  <img src="assets/logo.png" alt="ConfOpt Logo" width="450"/>
 </div>
 
 <br>
