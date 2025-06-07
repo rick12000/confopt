@@ -1,4 +1,8 @@
-## ConfOpt
+<div align="center">
+  <img src="assets/logo.png" alt="ConfOpt Logo" width="300"/>
+</div>
+
+<br>
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![arXiv](https://img.shields.io/badge/arXiv-ACHO-cyan)](https://doi.org/10.48550/arXiv.2207.03017)
@@ -47,30 +51,47 @@ parameter_search_space = {
 }
 ```
 
-Now import the `ConformalSearcher` class and initialize it with:
+Now import the `ConformalTuner` class. You'll need to define an `objective_function`
+that takes a parameter configuration, trains your model (e.g., `RandomForestRegressor`),
+evaluates it on the validation set, and returns a score to be optimized.
 
-- The model to tune.
-- The raw X and y data.
-- The parameter search space.
-- An extra variable clarifying whether this is a regression or classification problem.
+Initialize `ConformalTuner` with this `objective_function`, the
+`parameter_search_space`, and `metric_optimization` (either "minimize" or "maximize").
 
-Hyperparameter tuning can be kicked off with the `search` method and a specification
-of how long the tuning should run for (in seconds):
+Hyperparameter tuning can be kicked off with the `tune` method, specifying
+how long the tuning should run for (e.g., `runtime_budget` in seconds):
 
 ```python
-from confopt.tuning import ConformalSearcher
+from confopt.tuning import ConformalTuner
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error
 
-searcher = ConformalSearcher(
-    model=RandomForestRegressor(),
-    X_train=X_train,
-    y_train=y_train,
-    X_val=X_val,
-    y_val=y_val,
+# Define the objective function
+# This function will be called by ConformalTuner with different hyperparameter configurations
+def objective_function(config):
+    # Initialize the model with the given configuration
+    model = RandomForestRegressor(**config, random_state=42) # Using random_state for reproducibility
+
+    # Train the model
+    model.fit(X_train, y_train)
+
+    # Make predictions on the validation set
+    predictions = model.predict(X_val)
+
+    # Calculate the score (e.g., Mean Squared Error for regression)
+    score = mean_squared_error(y_val, predictions)
+
+    return score
+
+# Initialize the ConformalTuner
+tuner = ConformalTuner(
+    objective_function=objective_function,
     search_space=parameter_search_space,
-    prediction_type="regression",
+    metric_optimization="minimize",  # We want to minimize MSE
 )
 
-searcher.search(
+# Start the tuning process
+tuner.tune(
     runtime_budget=120  # How many seconds to run the search for
 )
 ```
@@ -78,13 +99,17 @@ searcher.search(
 Once done, you can retrieve the best parameters obtained during tuning using:
 
 ```python
-best_params = searcher.get_best_params()
+best_params = tuner.get_best_params()
+print(f"Best parameters found: {best_params}")
 ```
 
-Or automatically retrain your model on full data and optimal parameters with:
+You can then train your model on the full dataset using these optimal parameters:
 
 ```python
-best_model = searcher.fit_best_model()
+# Initialize and train the best model on the full dataset (X, y)
+best_model = RandomForestRegressor(**best_params, random_state=42)
+best_model.fit(X, y) # X and y are the complete dataset defined earlier
+print("Best model trained on full data.")
 ```
 
 More information on specific parameters and overrides not mentioned
