@@ -9,10 +9,10 @@ from confopt.utils.tracking import Trial
 
 
 @pytest.mark.parametrize(
-    "searchable_indices,current_runtime,runtime_budget,current_iter,max_iter,n_random_searches,expected",
+    "searchable_count,current_runtime,runtime_budget,current_iter,max_iter,n_random_searches,expected",
     [
         (
-            [],
+            0,
             None,
             None,
             None,
@@ -21,7 +21,7 @@ from confopt.utils.tracking import Trial
             (True, "All configurations have been searched"),
         ),  # Empty searchable indices
         (
-            [1, 2, 3],
+            3,
             11.0,
             10.0,
             None,
@@ -30,7 +30,7 @@ from confopt.utils.tracking import Trial
             (True, "Runtime budget (10.0) exceeded"),
         ),  # Runtime budget exceeded
         (
-            [1, 2, 3],
+            3,
             None,
             None,
             15,
@@ -38,11 +38,11 @@ from confopt.utils.tracking import Trial
             5,
             (True, "Maximum iterations (20) reached"),
         ),  # Max iterations reached
-        ([1, 2, 3], 5.0, 10.0, 10, 30, 5, False),  # Normal operation (no stopping)
+        (3, 5.0, 10.0, 10, 30, 5, False),  # Normal operation (no stopping)
     ],
 )
 def test_check_early_stopping(
-    searchable_indices,
+    searchable_count,
     current_runtime,
     runtime_budget,
     current_iter,
@@ -51,7 +51,7 @@ def test_check_early_stopping(
     expected,
 ):
     result = check_early_stopping(
-        searchable_indices=searchable_indices,
+        searchable_count=searchable_count,
         current_runtime=current_runtime,
         runtime_budget=runtime_budget,
         current_iter=current_iter,
@@ -92,38 +92,41 @@ class TestConformalTuner:
         for i, (config, _) in enumerate(warm_start_configs):
             assert tuner.study.trials[i].configuration == config
 
-        # Check that searched indices and performances are updated
-        assert len(tuner.searched_indices) == 2
+        # Check that searched configs and performances are updated
+        assert len(tuner.searched_configs) == 2
         assert len(tuner.searched_performances) == 2
 
-        # Check that searchable indices don't include the warm start indices
-        for idx in tuner.searched_indices:
-            assert idx not in tuner.searchable_indices
+        # Check that the configs are in the searched_configs_set
+        from confopt.tuning import create_config_hash
 
-        # Check that the total number of indices is preserved
-        assert len(tuner.searchable_indices) + len(tuner.searched_indices) == len(
-            tuner.tuning_configurations
-        )
+        for config, _ in warm_start_configs:
+            config_hash = create_config_hash(config)
+            assert config_hash in tuner.searched_configs_set
+
+        # Check that warm start configs aren't in searchable configs
+        for config, _ in warm_start_configs:
+            # Check it's not in searchable configurations
+            assert config not in tuner.searchable_configs
 
     def test_update_search_state(self, tuner):
         # Initialize tuning resources
         tuner._initialize_tuning_resources()
 
         # Save the initial state
-        initial_searchable_indices = tuner.searchable_indices.copy()
-        initial_searched_indices = tuner.searched_indices.copy()
+        initial_searchable_count = len(tuner.searchable_configs)
+        initial_searched_count = len(tuner.searched_configs)
         initial_searched_performances = tuner.searched_performances.copy()
 
-        # Select a config index to update
-        config_idx = 5
+        # Select a config to update
+        config = tuner.searchable_configs[0]
         performance = 0.75
 
         # Call the method under test
-        tuner._update_search_state(config_idx=config_idx, performance=performance)
+        tuner._update_search_state(config=config, performance=performance)
 
-        # Verify that config_idx was added to searched_indices
-        assert config_idx in tuner.searched_indices
-        assert len(tuner.searched_indices) == len(initial_searched_indices) + 1
+        # Verify that config was added to searched_configs
+        assert config in tuner.searched_configs
+        assert len(tuner.searched_configs) == initial_searched_count + 1
 
         # Verify that performance was added to searched_performances
         assert performance in tuner.searched_performances
@@ -131,16 +134,16 @@ class TestConformalTuner:
             len(tuner.searched_performances) == len(initial_searched_performances) + 1
         )
 
-        # Verify that config_idx was removed from searchable_indices
-        assert config_idx not in tuner.searchable_indices
-        assert len(tuner.searchable_indices) == len(initial_searchable_indices) - 1
+        # Verify that config was removed from searchable_configs
+        assert config not in tuner.searchable_configs
+        assert len(tuner.searchable_configs) == initial_searchable_count - 1
 
     def test_random_search(self, tuner):
         tuner._initialize_tuning_resources()
 
         # Save the initial state
-        initial_searchable_indices_count = len(tuner.searchable_indices)
-        initial_searched_indices_count = len(tuner.searched_indices)
+        initial_searchable_count = len(tuner.searchable_configs)
+        initial_searched_count = len(tuner.searched_configs)
 
         # Call the method under test with a small number of searches
         n_searches = 3
@@ -150,13 +153,8 @@ class TestConformalTuner:
         assert len(trials) == n_searches
 
         # Verify that the search state was updated correctly
-        assert (
-            len(tuner.searched_indices) == initial_searched_indices_count + n_searches
-        )
-        assert (
-            len(tuner.searchable_indices)
-            == initial_searchable_indices_count - n_searches
-        )
+        assert len(tuner.searched_configs) == initial_searched_count + n_searches
+        assert len(tuner.searchable_configs) == initial_searchable_count - n_searches
 
         # Verify that each trial has the correct metadata
         for trial in trials:

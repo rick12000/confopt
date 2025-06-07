@@ -3,3 +3,4 @@ scikit-learn
 tqdm
 pandas
 lightgbm
+scipy

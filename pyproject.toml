@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel", "Cython>=0.29.24", "numpy>=1.20.0", "setuptools-cythonize>=1.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "confopt"
+version = "1.0.2"
+description = "Conformal hyperparameter optimization tool"
+readme = "README.md"
+authors = [
+    {name = "Riccardo Doyle", email = "r.doyle.edu@gmail.com"}
+]
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = []  # Will be read from requirements.txt
+
+[project.urls]
+Homepage = "https://github.com/rick12000/confopt"
+
+[tool.setuptools]
+packages = ["confopt"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+confopt = ["utils/cy_entropy.pyx"]
+
+[tool.cythonize]
+modules = [
+    {include = ["confopt/utils/cy_entropy.pyx"]}
+]

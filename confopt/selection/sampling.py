@@ -45,65 +45,72 @@ def _differential_entropy_estimator(
     if np.all(samples == samples[0]):
         return 0.0
 
-    if method == "distance":
-        # Vasicek estimator based on spacings
-        m = int(np.sqrt(n_samples))  # Window size
-        if m >= n_samples:
-            m = max(1, n_samples // 2)
+    # Try to use the optimized Cython implementation if available
+    try:
+        from confopt.utils.cy_entropy import cy_differential_entropy
 
-        sorted_samples = np.sort(samples)
-        # Handle boundary cases by wrapping around
-        wrapped_samples = np.concatenate([sorted_samples, sorted_samples[:m]])
+        return cy_differential_entropy(samples, method)
+    except ImportError:
+        # Fall back to pure Python implementation
+        if method == "distance":
+            # Vasicek estimator based on spacings
+            m = int(np.sqrt(n_samples))  # Window size
+            if m >= n_samples:
+                m = max(1, n_samples // 2)
 
-        spacings = wrapped_samples[m : n_samples + m] - wrapped_samples[:n_samples]
-        # Avoid log of zero by setting very small spacings to a minimum value
-        spacings = np.maximum(spacings, np.finfo(float).eps)
+            sorted_samples = np.sort(samples)
+            # Handle boundary cases by wrapping around
+            wrapped_samples = np.concatenate([sorted_samples, sorted_samples[:m]])
 
-        # Vasicek estimator formula
-        entropy = np.sum(np.log(n_samples * spacings / m)) / n_samples
-        return entropy
+            spacings = wrapped_samples[m : n_samples + m] - wrapped_samples[:n_samples]
+            # Avoid log of zero by setting very small spacings to a minimum value
+            spacings = np.maximum(spacings, np.finfo(float).eps)
 
-    elif method == "histogram":
-        # Use Scott's rule for bin width selection
-        std = np.std(samples)
-        if std == 0:  # Handle constant samples
-            return 0.0
+            # Vasicek estimator formula
+            entropy = np.sum(np.log(n_samples * spacings / m)) / n_samples
+            return entropy
 
-        # Scott's rule: bin_width = 3.49 * std * n^(-1/3)
-        bin_width = 3.49 * std * (n_samples ** (-1 / 3))
-        data_range = np.max(samples) - np.min(samples)
-        n_bins = max(1, int(np.ceil(data_range / bin_width)))
+        elif method == "histogram":
+            # Use Scott's rule for bin width selection
+            std = np.std(samples)
+            if std == 0:  # Handle constant samples
+                return 0.0
 
-        # First get frequencies (counts) in each bin
-        hist, bin_edges = np.histogram(samples, bins=n_bins)
+            # Scott's rule: bin_width = 3.49 * std * n^(-1/3)
+            bin_width = 3.49 * std * (n_samples ** (-1 / 3))
+            data_range = np.max(samples) - np.min(samples)
+            n_bins = max(1, int(np.ceil(data_range / bin_width)))
 
-        # Convert counts to probabilities (relative frequencies)
-        probs = hist / n_samples
+            # First get frequencies (counts) in each bin
+            hist, bin_edges = np.histogram(samples, bins=n_bins)
 
-        # Remove zero probabilities (bins with no samples)
-        positive_idx = probs > 0
-        positive_probs = probs[positive_idx]
+            # Convert counts to probabilities (relative frequencies)
+            probs = hist / n_samples
 
-        # Bin width is needed for conversion from discrete to differential entropy
-        bin_widths = np.diff(bin_edges)
+            # Remove zero probabilities (bins with no samples)
+            positive_idx = probs > 0
+            positive_probs = probs[positive_idx]
 
-        # Differential entropy = discrete entropy + log(bin width)
-        # H(X) ≈ -Σ p(i)log(p(i)) + log(Δ)
-        # where Δ is the bin width
+            # Bin width is needed for conversion from discrete to differential entropy
+            bin_widths = np.diff(bin_edges)
 
-        # Calculate discrete entropy component
-        discrete_entropy = -np.sum(positive_probs * np.log(positive_probs))
+            # Differential entropy = discrete entropy + log(bin width)
+            # H(X) ≈ -Σ p(i)log(p(i)) + log(Δ)
+            # where Δ is the bin width
 
-        # Add log of average bin width to convert to differential entropy
-        # This is a standard correction factor when estimating differential entropy with histograms
-        avg_bin_width = np.mean(bin_widths)
-        differential_entropy = discrete_entropy + np.log(avg_bin_width)
+            # Calculate discrete entropy component
+            discrete_entropy = -np.sum(positive_probs * np.log(positive_probs))
 
-        return differential_entropy
-    else:
-        raise ValueError(
-            f"Unknown entropy estimation method: {method}. Choose from 'distance' or 'histogram'."
-        )
+            # Add log of average bin width to convert to differential entropy
+            # This is a standard correction factor when estimating differential entropy with histograms
+            avg_bin_width = np.mean(bin_widths)
+            differential_entropy = discrete_entropy + np.log(avg_bin_width)
+
+            return differential_entropy
+        else:
+            raise ValueError(
+                f"Unknown entropy estimation method: {method}. Choose from 'distance' or 'histogram'."
+            )
 
 
 def _run_parallel_or_sequential(func, items, n_jobs=-1):
@@ -355,6 +362,7 @@ class InformationGainSampler:
         n_y_candidates_per_x: int = 3,
         sampling_strategy: str = "uniform",
         entropy_method: Literal["distance", "histogram"] = "distance",
+        use_caching: bool = True,
     ):
         if n_quantiles % 2 != 0:
             raise ValueError("Number of quantiles must be even.")
@@ -365,6 +373,8 @@ class InformationGainSampler:
         self.n_y_candidates_per_x = n_y_candidates_per_x
         self.sampling_strategy = sampling_strategy
         self.entropy_method = entropy_method
+        self.use_caching = use_caching
+        self._entropy_cache = {}  # Cache for entropy calculations
 
         self.alphas = self._initialize_alphas()
         self.adapters = self._initialize_adapters(adapter)
@@ -403,24 +413,65 @@ class InformationGainSampler:
                 updated_alpha = adapter.update(beta=beta)
                 self.alphas[i] = updated_alpha
 
+    def _get_cached_entropy(self, samples):
+        """Get cached entropy value for the given samples if available"""
+        if not self.use_caching:
+            return None
+
+        # Use a hash of the sample data as the cache key
+        key = hash(samples.tobytes())
+        return self._entropy_cache.get(key)
+
+    def _set_cached_entropy(self, samples, entropy_value):
+        """Cache the entropy value for the given samples"""
+        if not self.use_caching:
+            return
+
+        key = hash(samples.tobytes())
+        self._entropy_cache[key] = entropy_value
+
+        # Limit cache size to prevent memory issues
+        if len(self._entropy_cache) > 1000:
+            # Remove a random key if cache gets too large
+            self._entropy_cache.pop(next(iter(self._entropy_cache)))
+
     def _calculate_best_x_entropy(
         self,
         all_bounds: np.ndarray,
         n_observations: int,
     ) -> Tuple[float, np.ndarray]:
+        """Calculate the entropy of the best function value across the candidate space"""
+        # Process in batches to manage memory for large observation sets
+        batch_size = min(1000, self.n_paths)
         indices_for_paths = np.vstack([np.arange(n_observations)] * self.n_paths)
-        idxs = np.random.randint(
-            0, all_bounds.shape[1], size=(self.n_paths, n_observations)
-        )
-        y_paths = all_bounds[indices_for_paths, idxs]
+        min_values = np.zeros(self.n_paths)
 
-        minimization_idxs = np.argmin(y_paths, axis=1)
-        min_values = np.array(
-            [y_paths[i, minimization_idxs[i]] for i in range(self.n_paths)]
-        )
-        best_x_entropy = _differential_entropy_estimator(
-            min_values, method=self.entropy_method
-        )
+        for batch_start in range(0, self.n_paths, batch_size):
+            batch_end = min(batch_start + batch_size, self.n_paths)
+            batch_size_actual = batch_end - batch_start
+
+            # Generate random indices for this batch
+            idxs = np.random.randint(
+                0, all_bounds.shape[1], size=(batch_size_actual, n_observations)
+            )
+
+            # Process each path in the batch
+            for i in range(batch_size_actual):
+                path_idx = batch_start + i
+                # Get samples for this path
+                path_samples = all_bounds[np.arange(n_observations), idxs[i]]
+                # Find minimum value
+                min_values[path_idx] = np.min(path_samples)
+
+        # Calculate entropy using the cached version if available
+        cached_entropy = self._get_cached_entropy(min_values)
+        if cached_entropy is not None:
+            best_x_entropy = cached_entropy
+        else:
+            best_x_entropy = _differential_entropy_estimator(
+                min_values, method=self.entropy_method
+            )
+            self._set_cached_entropy(min_values, best_x_entropy)
 
         return best_x_entropy, indices_for_paths
 
@@ -431,6 +482,7 @@ class InformationGainSampler:
         best_historical_y: Optional[float] = None,
         best_historical_x: Optional[np.ndarray] = None,
     ) -> np.ndarray:
+        """Select candidate points for information gain calculation"""
         all_bounds = flatten_conformal_bounds(predictions_per_interval)
         n_observations = len(predictions_per_interval[0].lower_bounds)
         capped_n_candidates = min(self.n_X_candidates, n_observations)
@@ -564,13 +616,23 @@ class InformationGainSampler:
         predictions_per_interval: List[ConformalBounds],
         n_jobs: int = 1,
     ) -> np.ndarray:
+        """
+        Calculate the information gain for each candidate point.
+
+        Optimized version with:
+        1. Entropy calculation caching
+        2. Memory management for large candidate spaces
+        3. Efficient parallelization
+        """
         all_bounds = flatten_conformal_bounds(predictions_per_interval)
         n_observations = len(predictions_per_interval[0].lower_bounds)
 
+        # Calculate prior entropy with caching
         prior_entropy, indices_for_paths = self._calculate_best_x_entropy(
             all_bounds, n_observations
         )
 
+        # Get historical best values for candidate selection
         best_historical_y = None
         best_historical_x = None
         if y_train is not None and len(y_train) > 0:
@@ -587,6 +649,7 @@ class InformationGainSampler:
                     best_historical_y = y_train[best_idx]
                     best_historical_x = X_train[best_idx].reshape(1, -1)
 
+        # Select candidates more efficiently
         candidate_idxs = self._select_candidates(
             predictions_per_interval=predictions_per_interval,
             X_space=X_space,
@@ -595,51 +658,102 @@ class InformationGainSampler:
         )
 
         def process_candidate(idx):
+            """Process a single candidate with optimizations"""
             X_cand = X_space[idx].reshape(1, -1)
+            # Generate all y candidate indices at once
             y_cand_idxs = np.random.randint(
                 0, all_bounds.shape[1], size=self.n_y_candidates_per_x
             )
+            # Get all y candidates at once
             y_range = all_bounds[idx, y_cand_idxs]
+
             information_gains = []
-            for y_cand in y_range:
-                X_expanded = np.vstack([X_train, X_cand])
-                y_expanded = np.append(y_train, y_cand)
-                cand_estimator = deepcopy(conformal_estimator)
-                cand_estimator.fit(
-                    X_train=X_expanded,
-                    y_train=y_expanded,
-                    X_val=X_val,
-                    y_val=y_val,
-                    tuning_iterations=0,
-                    random_state=1234,
-                )
-                cand_predictions = cand_estimator.predict_intervals(X_space)
-                cand_bounds = flatten_conformal_bounds(cand_predictions)
-                cond_idxs = np.random.randint(
-                    0, cand_bounds.shape[1], size=(self.n_paths, n_observations)
-                )
-                conditional_y_paths = cand_bounds[
-                    np.vstack([np.arange(n_observations)] * self.n_paths), cond_idxs
-                ]
-                cond_minimizers = np.argmin(conditional_y_paths, axis=1)
-                conditional_samples = np.array(
-                    [
-                        conditional_y_paths[i, cond_minimizers[i]]
-                        for i in range(self.n_paths)
-                    ]
-                )
-                posterior_entropy = _differential_entropy_estimator(
-                    conditional_samples, method=self.entropy_method
-                )
-                information_gains.append(prior_entropy - posterior_entropy)
+
+            # Process y candidates in smaller batches to manage memory
+            batch_size = min(5, self.n_y_candidates_per_x)
+            for batch_start in range(0, self.n_y_candidates_per_x, batch_size):
+                batch_end = min(batch_start + batch_size, self.n_y_candidates_per_x)
+                batch_y_candidates = y_range[batch_start:batch_end]
+
+                for y_cand in batch_y_candidates:
+                    # Create expanded dataset with the candidate point
+                    X_expanded = np.vstack([X_train, X_cand])
+                    y_expanded = np.append(y_train, y_cand)
+
+                    # Create a copy of the estimator for this candidate
+                    cand_estimator = deepcopy(conformal_estimator)
+
+                    # Fit the estimator with the expanded dataset
+                    cand_estimator.fit(
+                        X_train=X_expanded,
+                        y_train=y_expanded,
+                        X_val=X_val,
+                        y_val=y_val,
+                        tuning_iterations=0,
+                        random_state=1234,
+                    )
+
+                    # Get predictions using the updated model
+                    cand_predictions = cand_estimator.predict_intervals(X_space)
+                    cand_bounds = flatten_conformal_bounds(cand_predictions)
+
+                    # Process paths in batches to reduce memory usage
+                    path_batch_size = min(50, self.n_paths)
+                    conditional_samples = np.zeros(self.n_paths)
+
+                    for path_batch_start in range(0, self.n_paths, path_batch_size):
+                        path_batch_end = min(
+                            path_batch_start + path_batch_size, self.n_paths
+                        )
+                        batch_size_actual = path_batch_end - path_batch_start
+
+                        # Generate random indices for this batch
+                        cond_idxs_batch = np.random.randint(
+                            0,
+                            cand_bounds.shape[1],
+                            size=(batch_size_actual, n_observations),
+                        )
+
+                        # Get samples and find minimizers for each path
+                        for i in range(batch_size_actual):
+                            path_idx = path_batch_start + i
+                            # Extract samples for this path
+                            path_idx_in_batch = i
+                            path_samples = cand_bounds[
+                                np.arange(n_observations),
+                                cond_idxs_batch[path_idx_in_batch],
+                            ]
+                            # Find minimizer and its value
+                            cond_minimizer = np.argmin(path_samples)
+                            conditional_samples[path_idx] = path_samples[cond_minimizer]
+
+                    # Calculate posterior entropy with caching
+                    cached_posterior = self._get_cached_entropy(conditional_samples)
+                    if cached_posterior is not None:
+                        posterior_entropy = cached_posterior
+                    else:
+                        posterior_entropy = _differential_entropy_estimator(
+                            conditional_samples, method=self.entropy_method
+                        )
+                        self._set_cached_entropy(conditional_samples, posterior_entropy)
+
+                    # Calculate information gain
+                    information_gains.append(prior_entropy - posterior_entropy)
+
+            # Return the mean information gain for this candidate
             return idx, np.mean(information_gains) if information_gains else 0.0
 
+        # Initialize information gain array
         information_gain = np.zeros(n_observations)
+
+        # Process candidates in parallel or sequentially
         results = _run_parallel_or_sequential(
             process_candidate,
             candidate_idxs,
             n_jobs=n_jobs,
         )
+
+        # Collect results
         for idx, ig_value in results:
             information_gain[idx] = ig_value
 
@@ -653,8 +767,8 @@ class MaxValueEntropySearchSampler:
         adapter: Optional[Literal["DtACI"]] = None,
         n_min_samples: int = 100,
         n_y_samples: int = 20,
-        sampling_strategy: str = "uniform",
         entropy_method: Literal["distance", "histogram"] = "distance",
+        use_caching: bool = True,
     ):
         if n_quantiles % 2 != 0:
             raise ValueError("Number of quantiles must be even.")
@@ -662,8 +776,9 @@ class MaxValueEntropySearchSampler:
         self.n_quantiles = n_quantiles
         self.n_min_samples = n_min_samples
         self.n_y_samples = n_y_samples
-        self.sampling_strategy = sampling_strategy
         self.entropy_method = entropy_method
+        self.use_caching = use_caching
+        self._entropy_cache = {}  # Cache for entropy calculations
 
         self.alphas = self._initialize_alphas()
         self.adapters = self._initialize_adapters(adapter)
@@ -702,60 +817,154 @@ class MaxValueEntropySearchSampler:
                 updated_alpha = adapter.update(beta=beta)
                 self.alphas[i] = updated_alpha
 
+    def _get_cached_entropy(self, samples):
+        """Get cached entropy value for the given samples if available"""
+        if not self.use_caching:
+            return None
+
+        key = hash(samples.tobytes())
+        return self._entropy_cache.get(key)
+
+    def _set_cached_entropy(self, samples, entropy_value):
+        """Cache the entropy value for the given samples"""
+        if not self.use_caching:
+            return
+
+        key = hash(samples.tobytes())
+        self._entropy_cache[key] = entropy_value
+
+        # Limit cache size to prevent memory issues
+        if len(self._entropy_cache) > 1000:
+            self._entropy_cache.pop(next(iter(self._entropy_cache)))
+
     def calculate_max_value_entropy_search(
         self,
         predictions_per_interval: List[ConformalBounds],
         n_jobs: int = 2,
     ) -> np.ndarray:
-        all_bounds = flatten_conformal_bounds(predictions_per_interval)
+        """
+        Calculate the max value entropy search acquisition function for each candidate point.
+
+        Parameters:
+        -----------
+        predictions_per_interval: List of ConformalBounds
+            Predicted confidence intervals for each point
+        n_jobs: int
+            Number of parallel jobs to run
+
+        Returns:
+        --------
+        np.ndarray: Acquisition function values (negated for minimization)
+        """
         n_observations = len(predictions_per_interval[0].lower_bounds)
+
+        # Flatten conformal bounds for easier processing
+        all_bounds = flatten_conformal_bounds(predictions_per_interval)
+
+        # Generate indices for sampling the prior
         idxs = np.random.randint(
             0, all_bounds.shape[1], size=(self.n_min_samples, n_observations)
         )
-        sampled_funcs = np.zeros((self.n_min_samples, n_observations))
+
+        # Calculate min values
+        min_values = np.zeros(self.n_min_samples)
         for i in range(self.n_min_samples):
-            sampled_funcs[i] = all_bounds[np.arange(n_observations), idxs[i]]
-        min_values = np.min(sampled_funcs, axis=1)
-        h_prior = _differential_entropy_estimator(
-            min_values, method=self.entropy_method
-        )
+            min_values[i] = np.min(all_bounds[np.arange(n_observations), idxs[i]])
+
+        # Try to use Cython implementation if available
+        try:
+            from confopt.utils.cy_entropy import cy_differential_entropy
+
+            h_prior = cy_differential_entropy(min_values, self.entropy_method)
+        except ImportError:
+            # Check cache first
+            cached_entropy = self._get_cached_entropy(min_values)
+            if cached_entropy is not None:
+                h_prior = cached_entropy
+            else:
+                h_prior = _differential_entropy_estimator(
+                    min_values, method=self.entropy_method
+                )
+                self._set_cached_entropy(min_values, h_prior)
+
+        # Pre-calculate min/max values for fast-path checks
+        min_of_mins = np.min(min_values)
+        max_of_mins = np.max(min_values)
 
         def process_batch(batch_indices):
+            """Process a batch of points"""
             batch_mes = np.zeros(len(batch_indices))
+
             for i, idx in enumerate(batch_indices):
-                y_sample_idxs = np.random.randint(
+                # Generate y samples
+                y_idxs = np.random.randint(
                     0, all_bounds.shape[1], size=self.n_y_samples
                 )
-                candidate_y_samples = all_bounds[idx, y_sample_idxs]
-                updated_min_values = np.minimum(
-                    min_values[np.newaxis, :], candidate_y_samples[:, np.newaxis]
-                )
-                h_posteriors = np.array(
-                    [
-                        _differential_entropy_estimator(
-                            updated_min_values[j], method=self.entropy_method
-                        )
-                        for j in range(self.n_y_samples)
-                    ]
-                )
-                sample_mes = h_prior - h_posteriors
+                y_samples = all_bounds[idx, y_idxs]
+
+                h_posteriors = np.zeros(self.n_y_samples)
+
+                # Process each y sample
+                for j in range(self.n_y_samples):
+                    y = y_samples[j]
+
+                    # Fast path 1: y greater than all min values
+                    if y > max_of_mins:
+                        h_posteriors[j] = h_prior
+                        continue
+
+                    # Fast path 2: y smaller than all min values
+                    if y < min_of_mins:
+                        h_posteriors[j] = 0.0
+                        continue
+
+                    # Calculate updated min values
+                    updated_mins = np.minimum(min_values, y)
+
+                    # Check entropy cache
+                    cached = self._get_cached_entropy(updated_mins)
+                    if cached is not None:
+                        h_posteriors[j] = cached
+                    else:
+                        # Try to use the Cython implementation
+                        try:
+                            from confopt.utils.cy_entropy import cy_differential_entropy
+
+                            h_posteriors[j] = cy_differential_entropy(
+                                updated_mins, self.entropy_method
+                            )
+                        except ImportError:
+                            h_posteriors[j] = _differential_entropy_estimator(
+                                updated_mins, method=self.entropy_method
+                            )
+                        # Cache the result
+                        self._set_cached_entropy(updated_mins, h_posteriors[j])
+
+                # Calculate information gain
+                h_diff = h_prior - h_posteriors
+                sample_mes = np.maximum(0, h_diff)
                 batch_mes[i] = np.mean(sample_mes)
+
             return batch_indices, batch_mes
 
-        batch_size = min(
-            100,
-            max(1, n_observations // (joblib.cpu_count() if n_jobs <= 0 else n_jobs)),
-        )
+        # Create batches for parallel processing
+        batch_size = max(5, n_observations // (n_jobs * 2))
+        all_indices = np.arange(n_observations)
         batches = [
-            list(range(i, min(i + batch_size, n_observations)))
+            all_indices[i : min(i + batch_size, n_observations)]
             for i in range(0, n_observations, batch_size)
         ]
+
+        # Process batches
         mes_values = np.zeros(n_observations)
         results = _run_parallel_or_sequential(
             process_batch,
             batches,
             n_jobs=n_jobs,
         )
+
+        # Collect results
         for indices, values in results:
             mes_values[indices] = values
+
         return -mes_values
