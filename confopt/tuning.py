@@ -683,26 +683,28 @@ class ConformalTuner:
             if np.isnan(validation_performance):
                 continue
 
-            # Update the searcher with the new result
+            # Callbacks:
             config_hash = create_config_hash(config)
             tabularized = self.tabularized_configs_map[config_hash]
             transformed_X = scaler.transform(tabularized.reshape(1, -1))
-            searcher.update(
-                X=transformed_X, y_true=self.metric_sign * validation_performance
-            )
 
             # Calculate breach for logging/tracking
             breach = None
             if isinstance(
                 searcher.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)
             ):
-                if searcher.last_beta is not None:
-                    # Breach is 1 if beta < alpha, 0 otherwise
-                    breach = 1 if searcher.last_beta < searcher.sampler.alpha else 0
+                # Calculate breach directly using interval bounds
+                breach = searcher.calculate_breach(
+                    X=transformed_X, y_true=self.metric_sign * validation_performance
+                )
 
             estimator_error = searcher.primary_estimator_error
 
-            # Update search state with the config itself
+            searcher.update(
+                X=transformed_X, y_true=self.metric_sign * validation_performance
+            )
+
+            # Update search state
             self._update_search_state(config=config, performance=validation_performance)
 
             # Create and add trial

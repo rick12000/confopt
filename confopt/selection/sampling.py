@@ -128,7 +128,7 @@ class PessimisticLowerBoundSampler:
     def __init__(
         self,
         interval_width: float = 0.8,
-        adapter: Optional[Literal["DtACI"]] = None,
+        adapter: Optional[Literal["DtACI", "ACI"]] = None,
     ):
         self.interval_width = interval_width
 
@@ -136,14 +136,16 @@ class PessimisticLowerBoundSampler:
         self.adapter = self._initialize_adapter(adapter)
 
     def _initialize_adapter(
-        self, adapter: Optional[Literal["DtACI"]] = None
+        self, adapter: Optional[Literal["DtACI", "ACI"]] = None
     ) -> Optional[DtACI]:
         if adapter is None:
             return None
         elif adapter == "DtACI":
             return DtACI(alpha=self.alpha, gamma_values=[0.05, 0.01, 0.1])
+        elif adapter == "ACI":
+            return DtACI(alpha=self.alpha, gamma_values=[0.005])
         else:
-            raise ValueError("adapter must be None or 'DtACI'")
+            raise ValueError("adapter must be None, 'DtACI', or 'ACI'")
 
     def fetch_alphas(self) -> List[float]:
         return [self.alpha]
@@ -161,7 +163,7 @@ class LowerBoundSampler(PessimisticLowerBoundSampler):
     def __init__(
         self,
         interval_width: float = 0.8,
-        adapter: Optional[Literal["DtACI"]] = None,
+        adapter: Optional[Literal["DtACI", "ACI"]] = None,
         beta_decay: Optional[
             Literal[
                 "inverse_square_root_decay",
@@ -210,7 +212,7 @@ class ThompsonSampler:
     def __init__(
         self,
         n_quantiles: int = 4,
-        adapter: Optional[Literal["DtACI"]] = None,
+        adapter: Optional[Literal["DtACI", "ACI"]] = None,
         enable_optimistic_sampling: bool = False,
     ):
         if n_quantiles % 2 != 0:
@@ -235,7 +237,7 @@ class ThompsonSampler:
         return alphas
 
     def _initialize_adapters(
-        self, adapter: Optional[Literal["DtACI"]] = None
+        self, adapter: Optional[Literal["DtACI", "ACI"]] = None
     ) -> Optional[List[DtACI]]:
         if adapter is None:
             return None
@@ -244,8 +246,10 @@ class ThompsonSampler:
                 DtACI(alpha=alpha, gamma_values=[0.05, 0.01, 0.1])
                 for alpha in self.alphas
             ]
+        elif adapter == "ACI":
+            return [DtACI(alpha=alpha, gamma_values=[0.005]) for alpha in self.alphas]
         else:
-            raise ValueError("adapter must be None or 'DtACI'")
+            raise ValueError("adapter must be None, 'DtACI', or 'ACI'")
 
     def fetch_alphas(self) -> List[float]:
         return self.alphas
@@ -278,7 +282,7 @@ class ExpectedImprovementSampler:
     def __init__(
         self,
         n_quantiles: int = 4,
-        adapter: Optional[Literal["DtACI"]] = None,
+        adapter: Optional[Literal["DtACI", "ACI"]] = None,
         current_best_value: float = float("inf"),
         num_ei_samples: int = 20,
     ):
@@ -308,7 +312,7 @@ class ExpectedImprovementSampler:
         return alphas
 
     def _initialize_adapters(
-        self, adapter: Optional[Literal["DtACI"]] = None
+        self, adapter: Optional[Literal["DtACI", "ACI"]] = None
     ) -> Optional[List[DtACI]]:
         if adapter is None:
             return None
@@ -317,8 +321,10 @@ class ExpectedImprovementSampler:
                 DtACI(alpha=alpha, gamma_values=[0.05, 0.01, 0.1])
                 for alpha in self.alphas
             ]
+        elif adapter == "ACI":
+            return [DtACI(alpha=alpha, gamma_values=[0.005]) for alpha in self.alphas]
         else:
-            raise ValueError("adapter must be None or 'DtACI'")
+            raise ValueError("adapter must be None, 'DtACI', or 'ACI'")
 
     def fetch_alphas(self) -> List[float]:
         return self.alphas
@@ -356,7 +362,7 @@ class InformationGainSampler:
     def __init__(
         self,
         n_quantiles: int = 4,
-        adapter: Optional[Literal["DtACI"]] = None,
+        adapter: Optional[Literal["DtACI", "ACI"]] = None,
         n_paths: int = 100,
         n_X_candidates: int = 10,
         n_y_candidates_per_x: int = 3,
@@ -392,7 +398,7 @@ class InformationGainSampler:
         return alphas
 
     def _initialize_adapters(
-        self, adapter: Optional[Literal["DtACI"]] = None
+        self, adapter: Optional[Literal["DtACI", "ACI"]] = None
     ) -> Optional[List[DtACI]]:
         if adapter is None:
             return None
@@ -401,8 +407,10 @@ class InformationGainSampler:
                 DtACI(alpha=alpha, gamma_values=[0.05, 0.01, 0.1])
                 for alpha in self.alphas
             ]
+        elif adapter == "ACI":
+            return [DtACI(alpha=alpha, gamma_values=[0.005]) for alpha in self.alphas]
         else:
-            raise ValueError("adapter must be None or 'DtACI'")
+            raise ValueError("adapter must be None, 'DtACI', or 'ACI'")
 
     def fetch_alphas(self) -> List[float]:
         return self.alphas
@@ -764,7 +772,7 @@ class MaxValueEntropySearchSampler:
     def __init__(
         self,
         n_quantiles: int = 4,
-        adapter: Optional[Literal["DtACI"]] = None,
+        adapter: Optional[Literal["DtACI", "ACI"]] = None,
         n_min_samples: int = 100,
         n_y_samples: int = 20,
         entropy_method: Literal["distance", "histogram"] = "distance",
@@ -796,7 +804,7 @@ class MaxValueEntropySearchSampler:
         return alphas
 
     def _initialize_adapters(
-        self, adapter: Optional[Literal["DtACI"]] = None
+        self, adapter: Optional[Literal["DtACI", "ACI"]] = None
     ) -> Optional[List[DtACI]]:
         if adapter is None:
             return None
@@ -805,8 +813,10 @@ class MaxValueEntropySearchSampler:
                 DtACI(alpha=alpha, gamma_values=[0.05, 0.01, 0.1])
                 for alpha in self.alphas
             ]
+        elif adapter == "ACI":
+            return [DtACI(alpha=alpha, gamma_values=[0.005]) for alpha in self.alphas]
         else:
-            raise ValueError("adapter must be None or 'DtACI'")
+            raise ValueError("adapter must be None, 'DtACI', or 'ACI'")
 
     def fetch_alphas(self) -> List[float]:
         return self.alphas

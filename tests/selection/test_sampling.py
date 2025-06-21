@@ -26,7 +26,7 @@ class TestPessimisticLowerBoundSampler:
         assert alphas[0] == pytest.approx(expected_alpha)
 
     @pytest.mark.parametrize("interval_width", [0.8, 0.9])
-    @pytest.mark.parametrize("adapter", [None, "DtACI"])
+    @pytest.mark.parametrize("adapter", [None, "DtACI", "ACI"])
     def test_update_interval_width(self, interval_width, adapter):
         sampler = PessimisticLowerBoundSampler(
             interval_width=interval_width, adapter=adapter
@@ -35,10 +35,23 @@ class TestPessimisticLowerBoundSampler:
         beta = 0.5
         sampler.update_interval_width(beta)
 
-        if adapter == "DtACI":
+        if adapter in ["DtACI", "ACI"]:
             assert sampler.alpha != pytest.approx(1 - interval_width)
         else:
             assert sampler.alpha == pytest.approx(1 - interval_width)
+
+    def test_adapter_initialization(self):
+        # Test that ACI adapter uses correct gamma values
+        sampler_aci = PessimisticLowerBoundSampler(interval_width=0.8, adapter="ACI")
+        assert sampler_aci.adapter is not None
+        assert sampler_aci.adapter.gamma_values.tolist() == [0.005]
+
+        # Test that DtACI adapter uses correct gamma values
+        sampler_dtaci = PessimisticLowerBoundSampler(
+            interval_width=0.8, adapter="DtACI"
+        )
+        assert sampler_dtaci.adapter is not None
+        assert sampler_dtaci.adapter.gamma_values.tolist() == [0.05, 0.01, 0.1]
 
 
 class TestLowerBoundSampler:
@@ -117,7 +130,7 @@ class TestThompsonSampler:
         assert alphas[0] == pytest.approx(0.4)
         assert alphas[1] == pytest.approx(0.8)
 
-    @pytest.mark.parametrize("adapter", [None, "DtACI"])
+    @pytest.mark.parametrize("adapter", [None, "DtACI", "ACI"])
     def test_update_interval_width(self, adapter):
         sampler = ThompsonSampler(n_quantiles=4, adapter=adapter)
         betas = [0.3, 0.5]
@@ -125,7 +138,7 @@ class TestThompsonSampler:
 
         sampler.update_interval_width(betas)
 
-        if adapter == "DtACI":
+        if adapter in ["DtACI", "ACI"]:
             assert sampler.alphas != previous_alphas
         else:
             assert sampler.alphas == previous_alphas
@@ -208,7 +221,7 @@ class TestExpectedImprovementSampler:
         sampler.update_best_value(0.3)
         assert sampler.current_best_value == 0.3
 
-    @pytest.mark.parametrize("adapter", [None, "DtACI"])
+    @pytest.mark.parametrize("adapter", [None, "DtACI", "ACI"])
     def test_update_interval_width(self, adapter):
         sampler = ExpectedImprovementSampler(n_quantiles=4, adapter=adapter)
         betas = [0.3, 0.5]
@@ -216,7 +229,7 @@ class TestExpectedImprovementSampler:
 
         sampler.update_interval_width(betas)
 
-        if adapter == "DtACI":
+        if adapter in ["DtACI", "ACI"]:
             assert sampler.alphas != previous_alphas
         else:
             assert sampler.alphas == previous_alphas
@@ -299,7 +312,7 @@ class TestInformationGainSampler:
         assert sampler.sampling_strategy == sampling_strategy
         assert len(sampler.alphas) == 3
 
-    @pytest.mark.parametrize("adapter", [None, "DtACI"])
+    @pytest.mark.parametrize("adapter", [None, "DtACI", "ACI"])
     def test_update_interval_width(self, adapter):
         sampler = InformationGainSampler(n_quantiles=4, adapter=adapter)
         betas = [0.3, 0.5]
@@ -307,7 +320,7 @@ class TestInformationGainSampler:
 
         sampler.update_interval_width(betas)
 
-        if adapter == "DtACI":
+        if adapter in ["DtACI", "ACI"]:
             assert sampler.alphas != previous_alphas
         else:
             assert sampler.alphas == previous_alphas
@@ -491,7 +504,7 @@ class TestMaxValueEntropySearchSampler:
         assert alphas[0] == pytest.approx(0.4)
         assert alphas[1] == pytest.approx(0.8)
 
-    @pytest.mark.parametrize("adapter", [None, "DtACI"])
+    @pytest.mark.parametrize("adapter", [None, "DtACI", "ACI"])
     def test_update_interval_width(self, adapter):
         sampler = MaxValueEntropySearchSampler(n_quantiles=4, adapter=adapter)
         betas = [0.3, 0.5]
@@ -499,7 +512,7 @@ class TestMaxValueEntropySearchSampler:
 
         sampler.update_interval_width(betas)
 
-        if adapter == "DtACI":
+        if adapter in ["DtACI", "ACI"]:
             assert sampler.alphas != previous_alphas
         else:
             assert sampler.alphas == previous_alphas

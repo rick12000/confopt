@@ -103,6 +103,39 @@ class BaseConformalSearcher(ABC):
     def _calculate_betas(self, X: np.array, y_true: float) -> list[float]:
         pass
 
+    def calculate_breach(self, X: np.array, y_true: float) -> int:
+        """
+        Calculate whether y_true breaches the predicted interval.
+        Only works for LowerBoundSampler and PessimisticLowerBoundSampler.
+
+        Args:
+            X: Input configuration (1D array)
+            y_true: True performance value
+
+        Returns:
+            int: 1 if y_true is outside the interval (breach), 0 if inside (no breach)
+        """
+        if isinstance(self.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)):
+
+            predictions_per_interval = self.conformal_estimator.predict_intervals(
+                X.reshape(1, -1)
+            )
+
+            # Grab first predictions per interval object, since these samplers have only one alpha/interval
+            # Then grab first index of upper and lower bound, since we're predicting for only one X configuration
+            interval = predictions_per_interval[0]
+            lower_bound = interval.lower_bounds[0]
+            upper_bound = interval.upper_bounds[0]
+
+            breach_status = lower_bound <= y_true <= upper_bound
+
+        else:
+            raise ValueError(
+                "Breach calculation only supported for LowerBoundSampler and PessimisticLowerBoundSampler"
+            )
+
+        return breach_status
+
     def update(self, X: np.array, y_true: float) -> None:
         if self.X_train is not None:
             self.X_train = np.vstack([self.X_train, X])
