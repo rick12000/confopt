@@ -47,7 +47,7 @@ def _differential_entropy_estimator(
 
     # Try to use the optimized Cython implementation if available
     try:
-        from confopt.utils.cy_entropy import cy_differential_entropy
+        from confopt.selection.cy_entropy import cy_differential_entropy
 
         return cy_differential_entropy(samples, method)
     except ImportError:
@@ -873,7 +873,7 @@ class MaxValueEntropySearchSampler:
 
         # Try to use Cython implementation if available
         try:
-            from confopt.utils.cy_entropy import cy_differential_entropy
+            from confopt.selection.cy_entropy import cy_differential_entropy
 
             h_prior = cy_differential_entropy(min_values, self.entropy_method)
         except ImportError:
@@ -928,7 +928,9 @@ class MaxValueEntropySearchSampler:
                     else:
                         # Try to use the Cython implementation
                         try:
-                            from confopt.utils.cy_entropy import cy_differential_entropy
+                            from confopt.selection.cy_entropy import (
+                                cy_differential_entropy,
+                            )
 
                             h_posteriors[j] = cy_differential_entropy(
                                 updated_mins, self.entropy_method
