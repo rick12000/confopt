@@ -127,7 +127,7 @@ class BaseConformalSearcher(ABC):
             lower_bound = interval.lower_bounds[0]
             upper_bound = interval.upper_bounds[0]
 
-            breach_status = lower_bound <= y_true <= upper_bound
+            breach_status = int(y_true < lower_bound or y_true > upper_bound)
 
         else:
             raise ValueError(
