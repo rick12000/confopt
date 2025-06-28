@@ -250,7 +250,6 @@ class GaussianProcessQuantileEstimator(BaseSingleFitQuantileEstimator):
     def _get_kernel_object(self, kernel_name=None):
         """Convert a kernel name string to a scikit-learn kernel object."""
         if kernel_name is None:
-            # Default kernel: RBF with constant
             return C(1.0) * Matern(length_scale=3, nu=1.5)
 
         if isinstance(kernel_name, str):

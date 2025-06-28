@@ -50,7 +50,7 @@ def test_get_tuning_configurations__reproducibility(dummy_parameter_grid):
         parameter_grid=dummy_parameter_grid,
         n_configurations=dummy_n_configurations,
         random_state=DEFAULT_SEED,
-        warm_start_configs=None,
+        searched_configs=None,
     )
 
     # Second call with same seed
@@ -59,7 +59,7 @@ def test_get_tuning_configurations__reproducibility(dummy_parameter_grid):
         parameter_grid=dummy_parameter_grid,
         n_configurations=dummy_n_configurations,
         random_state=DEFAULT_SEED,
-        warm_start_configs=None,
+        searched_configs=None,
     )
 
     # Check that configurations are identical
@@ -90,7 +90,7 @@ def test_get_tuning_configurations_with_warm_start():
         parameter_grid=parameter_grid,
         n_configurations=n_configurations,
         random_state=DEFAULT_SEED,
-        warm_start_configs=warm_start_configs,
+        searched_configs=warm_start_configs,
     )
 
     # Check correct number of configurations generated

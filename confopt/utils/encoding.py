@@ -1,17 +1,12 @@
 import logging
 import random
-from typing import Dict, List, Optional, Any, Literal, Set, Tuple
+from typing import Dict, List, Optional, Literal
 
 import numpy as np
 import pandas as pd
 from confopt.wrapping import IntRange, FloatRange, CategoricalRange, ParameterRange
 
-try:
-    from scipy.stats import qmc
-
-    HAS_SCIPY = True
-except ImportError:
-    HAS_SCIPY = False
+from scipy.stats import qmc
 
 logger = logging.getLogger(__name__)
 
@@ -20,103 +15,39 @@ def get_tuning_configurations(
     parameter_grid: Dict[str, ParameterRange],
     n_configurations: int,
     random_state: Optional[int] = None,
-    warm_start_configs: Optional[List[Dict[str, Any]]] = None,
     sampling_method: Literal["uniform", "sobol"] = "uniform",
 ) -> List[Dict]:
-    """
-    Sample list of unique hyperparameter configurations using the specified sampling method.
-
-    Each configuration is constructed from parameter ranges defined in the parameter grid.
-    If warm start configurations are provided, they are included in the output.
-
-    Parameters
-    ----------
-    parameter_grid :
-        Dictionary of parameter names to their range definitions.
-    n_configurations :
-        Number of desired configurations to randomly construct.
-    random_state :
-        Random seed.
-    warm_start_configs :
-        Optional list of pre-defined configurations to include in the output.
-    sampling_method :
-        Method to use for sampling parameter configurations. Options:
-        - "uniform": Use uniform random sampling (default)
-        - "sobol": Use Sobol sequence sampling for better space coverage
-
-    Returns
-    -------
-    configurations :
-        Unique hyperparameter configurations including warm starts.
-    """
     if random_state is not None:
         random.seed(random_state)
         np.random.seed(random_state)
 
-    # Initialize with warm start configurations if provided
-    configurations, configurations_set = _process_warm_starts(warm_start_configs)
+    # No warm start configs needed for sampling anymore
+    configurations = []
+    configurations_set = set()
+    n_configurations_target = n_configurations
 
-    # Calculate how many additional configurations we need
-    n_additional = max(0, n_configurations - len(configurations))
-
-    if n_additional > 0:
-        # For efficiency, use uniform sampling for most cases
-        # Only use Sobol for specific cases where it's most beneficial
-        if (
-            sampling_method == "sobol" and n_additional > 50
-        ):  # Only use Sobol for larger samples
-            if not HAS_SCIPY:
-                logger.warning(
-                    "Sobol sampling requested but scipy is not available. Falling back to uniform sampling."
-                )
-                return _uniform_sampling(
-                    parameter_grid,
-                    configurations,
-                    configurations_set,
-                    n_configurations,
-                    random_state,
-                )
-            else:
-                return _sobol_sampling(
-                    parameter_grid,
-                    configurations,
-                    configurations_set,
-                    n_configurations,
-                    random_state,
-                )
-        else:  # "uniform" or any other value defaults to uniform
-            return _uniform_sampling(
-                parameter_grid,
-                configurations,
-                configurations_set,
-                n_configurations,
-                random_state,
-            )
-
-    return configurations
-
-
-def _process_warm_starts(
-    warm_start_configs: Optional[List[Dict[str, Any]]]
-) -> Tuple[List[Dict], Set[Tuple]]:
-    """Process warm start configurations and return configurations and their hashable set"""
-    if warm_start_configs:
-        configurations = warm_start_configs.copy()
-        # Create a set of hashable configurations for deduplication
-        configurations_set = {
-            tuple(
-                sorted(
-                    (k, str(v) if isinstance(v, (list, dict, set)) else v)
-                    for k, v in config.items()
-                )
-            )
-            for config in warm_start_configs
-        }
+    if sampling_method == "sobol":
+        samples = _sobol_sampling(
+            parameter_grid,
+            configurations,
+            configurations_set,
+            n_configurations_target,
+            random_state,
+        )
+    elif sampling_method == "uniform":
+        samples = _uniform_sampling(
+            parameter_grid,
+            configurations,
+            configurations_set,
+            n_configurations_target,
+            random_state,
+        )
     else:
-        configurations = []
-        configurations_set = set()
+        raise ValueError(
+            f"Invalid sampling method: {sampling_method}. Must be 'uniform' or 'sobol'."
+        )
 
-    return configurations, configurations_set
+    return samples
 
 
 def _uniform_sampling(
@@ -127,6 +58,10 @@ def _uniform_sampling(
     random_state: Optional[int] = None,
 ) -> List[Dict]:
     """Helper function to perform uniform random sampling of parameter configurations."""
+    if random_state is not None:
+        random.seed(random_state)
+        np.random.seed(random_state)
+
     # Calculate how many additional configurations we need
     n_additional = max(0, n_configurations - len(configurations))
 
@@ -256,18 +191,6 @@ def _sobol_sampling(
 
     # Create Sobol sampler
     n_dimensions = len(numeric_params)
-    if n_dimensions == 0:
-        # If no numeric dimensions, fall back to uniform sampling
-        logger.info(
-            "No numeric parameters found for Sobol sampling, falling back to uniform sampling."
-        )
-        return _uniform_sampling(
-            parameter_grid,
-            configurations,
-            configurations_set,
-            n_configurations,
-            random_state,
-        )
 
     # Initialize the Sobol sequence generator
     sobol_engine = qmc.Sobol(d=n_dimensions, scramble=True, seed=random_state)

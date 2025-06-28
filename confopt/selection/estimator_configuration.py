@@ -438,7 +438,7 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QGP_NAME,
         estimator_class=GaussianProcessQuantileEstimator,
         default_params={
-            "kernel": None,  # Use default kernel (RBF)
+            "kernel": "matern",
             "alpha": 1e-10,
             "n_samples": 1000,
             "random_state": None,

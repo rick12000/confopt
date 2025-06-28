@@ -320,3 +320,37 @@ def tuner(mock_constant_objective_function, dummy_parameter_grid):
         metric_optimization="minimize",
         n_candidate_configurations=100,
     )
+
+
+@pytest.fixture
+def small_parameter_grid():
+    """Small parameter grid for focused configuration testing"""
+    return {
+        "x": FloatRange(min_value=0.0, max_value=1.0),
+        "y": IntRange(min_value=1, max_value=3),
+        "z": CategoricalRange(choices=["A", "B"]),
+    }
+
+
+@pytest.fixture
+def dynamic_tuner(mock_constant_objective_function, small_parameter_grid):
+    """Tuner configured for dynamic sampling with small candidate count"""
+    return ConformalTuner(
+        objective_function=mock_constant_objective_function,
+        search_space=small_parameter_grid,
+        metric_optimization="minimize",
+        n_candidate_configurations=5,
+        dynamic_sampling=True,
+    )
+
+
+@pytest.fixture
+def static_tuner(mock_constant_objective_function, small_parameter_grid):
+    """Tuner configured for static sampling with small candidate count"""
+    return ConformalTuner(
+        objective_function=mock_constant_objective_function,
+        search_space=small_parameter_grid,
+        metric_optimization="minimize",
+        n_candidate_configurations=10,
+        dynamic_sampling=False,
+    )
