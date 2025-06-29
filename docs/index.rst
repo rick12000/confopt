@@ -10,7 +10,7 @@ Welcome to ConfOpt's documentation! ConfOpt is an accessibility software with mi
    :caption: Developer Guide
 
    developer/architecture
-   developer/components
+   developer/components/index
 
 .. toctree::
    :maxdepth: 1

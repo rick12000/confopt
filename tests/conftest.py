@@ -354,3 +354,48 @@ def static_tuner(mock_constant_objective_function, small_parameter_grid):
         n_candidate_configurations=10,
         dynamic_sampling=False,
     )
+
+
+# Fixtures for quantile estimation testing
+
+
+@pytest.fixture
+def toy_regression_data():
+    """Generate simple regression data for basic testing."""
+
+    def _generate(n_samples=100, n_features=3, noise_level=0.1, random_state=42):
+        np.random.seed(random_state)
+        X = np.random.randn(n_samples, n_features)
+        # Simple linear relationship with noise
+        y = np.sum(X, axis=1) + noise_level * np.random.randn(n_samples)
+        return X, y
+
+    return _generate
+
+
+@pytest.fixture
+def uniform_regression_data():
+    """Generate uniform regression data for quantile testing."""
+    np.random.seed(42)
+    n_samples = 300
+    n_features = 3
+
+    X = np.random.uniform(-1, 1, size=(n_samples, n_features))
+    y = np.random.uniform(0, 1, size=n_samples)
+
+    return X, y
+
+
+@pytest.fixture
+def heteroscedastic_regression_data():
+    """Generate heteroscedastic regression data for robust quantile testing."""
+    np.random.seed(42)
+    n_samples = 200
+    n_features = 2
+
+    X = np.random.uniform(-2, 2, size=(n_samples, n_features))
+    # Create heteroscedastic noise (variance depends on X)
+    noise_scale = 0.1 + 0.5 * np.abs(X[:, 0])
+    y = 2 * X[:, 0] + X[:, 1] + noise_scale * np.random.randn(n_samples)
+
+    return X, y

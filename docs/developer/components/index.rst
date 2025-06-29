@@ -12,7 +12,8 @@ Selection Framework
 .. toctree::
    :maxdepth: 2
 
-   components/ensembling
+   ensembling
+   quantile_estimation
 
 Estimation Components
 ~~~~~~~~~~~~~~~~~~~

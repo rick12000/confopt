@@ -1,3 +1,11 @@
+"""Ensemble estimators for combining multiple point and quantile predictors.
+
+This module provides ensemble methods that combine predictions from multiple base
+estimators to improve predictive performance and robustness. Ensembles use cross-
+validation based stacking with linear regression meta-learners to optimally weight
+individual estimator contributions.
+"""
+
 import logging
 from typing import List, Optional, Tuple, Literal, Union
 import numpy as np
@@ -18,12 +26,45 @@ logger = logging.getLogger(__name__)
 def calculate_quantile_error(
     y_pred: np.ndarray, y: np.ndarray, quantiles: List[float]
 ) -> List[float]:
+    """Calculate pinball loss for quantile predictions.
+
+    Computes the pinball loss (quantile loss) for each quantile prediction,
+    which is the standard metric for evaluating quantile regression models.
+
+    Args:
+        y_pred: Predicted quantile values with shape (n_samples, n_quantiles).
+        y: True target values with shape (n_samples,).
+        quantiles: Quantile levels corresponding to prediction columns.
+
+    Returns:
+        List of pinball losses for each quantile level.
+    """
     return [
         mean_pinball_loss(y, y_pred[:, i], alpha=q) for i, q in enumerate(quantiles)
     ]
 
 
 class BaseEnsembleEstimator(ABC):
+    """Abstract base class for ensemble estimators.
+
+    Provides common initialization and interface for combining multiple estimators
+    using either uniform averaging or cross-validation based linear stacking. The
+    stacking approach trains a linear meta-learner on out-of-fold predictions to
+    learn optimal weights for each base estimator.
+
+    Args:
+        estimators: List of base estimators to ensemble. Must be scikit-learn
+            compatible estimators or quantile estimators with fit/predict methods.
+        cv: Number of cross-validation folds for stacking meta-learner training.
+        weighting_strategy: Method for combining estimator predictions. "uniform"
+            applies equal weights, "linear_stack" learns optimal weights via
+            cross-validation and linear regression.
+        random_state: Seed for reproducible cross-validation splits.
+
+    Raises:
+        ValueError: If fewer than 2 estimators provided.
+    """
+
     def __init__(
         self,
         estimators: List[
@@ -51,6 +92,21 @@ class BaseEnsembleEstimator(ABC):
 
 
 class PointEnsembleEstimator(BaseEnsembleEstimator):
+    """Ensemble estimator for point (single-value) predictions.
+
+    Combines multiple regression estimators using either uniform weighting or
+    learned weights from cross-validation stacking. The stacking approach trains
+    a constrained linear regression meta-learner on out-of-fold predictions to
+    determine optimal combination weights.
+
+    Args:
+        estimators: List of scikit-learn compatible regression estimators.
+        cv: Number of cross-validation folds for weight learning.
+        weighting_strategy: Combination method - "uniform" for equal weights,
+            "linear_stack" for learned weights via constrained linear regression.
+        random_state: Seed for reproducible cross-validation splits.
+    """
+
     def __init__(
         self,
         estimators: List[BaseEstimator],
@@ -61,6 +117,23 @@ class PointEnsembleEstimator(BaseEnsembleEstimator):
         super().__init__(estimators, cv, weighting_strategy, random_state)
 
     def _get_stacking_training_data(self, X: np.ndarray, y: np.ndarray) -> Tuple:
+        """Generate out-of-fold predictions for stacking meta-learner training.
+
+        Uses k-fold cross-validation to generate unbiased predictions from each
+        base estimator. Each estimator is trained on k-1 folds and predicts on
+        the held-out fold, ensuring no data leakage for meta-learner training.
+
+        Args:
+            X: Training features with shape (n_samples, n_features).
+            y: Training targets with shape (n_samples,).
+
+        Returns:
+            Tuple containing:
+                - val_indices: Indices of validation samples.
+                - val_targets: True targets for validation samples.
+                - val_predictions: Out-of-fold predictions with shape
+                  (n_samples, n_estimators).
+        """
         kf = KFold(n_splits=self.cv, shuffle=True, random_state=self.random_state)
 
         val_indices = np.array([], dtype=int)
@@ -89,6 +162,23 @@ class PointEnsembleEstimator(BaseEnsembleEstimator):
         return val_indices, val_targets, val_predictions
 
     def _compute_weights(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """Compute ensemble weights based on the selected weighting strategy.
+
+        For uniform weighting, assigns equal weights to all estimators. For linear
+        stacking, learns optimal weights by training a constrained linear regression
+        on out-of-fold predictions. Weights are constrained to be non-negative and
+        sum to 1.
+
+        Args:
+            X: Training features with shape (n_samples, n_features).
+            y: Training targets with shape (n_samples,).
+
+        Returns:
+            Array of ensemble weights with shape (n_estimators,).
+
+        Raises:
+            ValueError: If unknown weighting strategy specified.
+        """
         if self.weighting_strategy == "uniform":
             return np.ones(len(self.estimators)) / len(self.estimators)
 
@@ -112,12 +202,34 @@ class PointEnsembleEstimator(BaseEnsembleEstimator):
             raise ValueError(f"Unknown weighting strategy: {self.weighting_strategy}")
 
     def fit(self, X: np.ndarray, y: np.ndarray):
+        """Fit all base estimators and compute ensemble weights.
+
+        Trains each base estimator on the full training data, then computes
+        optimal ensemble weights using the specified weighting strategy. For
+        linear stacking, this involves cross-validation to generate out-of-fold
+        predictions for meta-learner training.
+
+        Args:
+            X: Training features with shape (n_samples, n_features).
+            y: Training targets with shape (n_samples,).
+        """
         for estimator in self.estimators:
             estimator.fit(X, y)
 
         self.weights = self._compute_weights(X, y)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
+        """Generate ensemble predictions by weighting individual estimator outputs.
+
+        Combines predictions from all base estimators using the learned or uniform
+        weights. Uses tensor dot product for efficient weighted averaging.
+
+        Args:
+            X: Features for prediction with shape (n_samples, n_features).
+
+        Returns:
+            Ensemble predictions with shape (n_samples,).
+        """
         predictions = np.array([estimator.predict(X) for estimator in self.estimators])
         # TODO: Reintroduce if using more complex stacker architectures
         # and want to predict from predictions rather than apply weights:
@@ -126,6 +238,22 @@ class PointEnsembleEstimator(BaseEnsembleEstimator):
 
 
 class QuantileEnsembleEstimator(BaseEnsembleEstimator):
+    """Ensemble estimator for quantile regression predictions.
+
+    Combines multiple quantile regression estimators using either uniform weighting
+    or learned weights from cross-validation stacking. Supports separate weight
+    learning for each quantile level, allowing the ensemble to adapt differently
+    across the prediction distribution.
+
+    Args:
+        estimators: List of quantile regression estimators (BaseMultiFitQuantileEstimator
+            or BaseSingleFitQuantileEstimator instances).
+        cv: Number of cross-validation folds for weight learning.
+        weighting_strategy: Combination method - "uniform" for equal weights,
+            "linear_stack" for quantile-specific learned weights.
+        random_state: Seed for reproducible cross-validation splits.
+    """
+
     def __init__(
         self,
         estimators: List[
@@ -140,6 +268,24 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
     def _get_stacking_training_data(
         self, X: np.ndarray, y: np.ndarray, quantiles: List[float]
     ) -> Tuple:
+        """Generate out-of-fold quantile predictions for stacking meta-learner training.
+
+        Uses k-fold cross-validation to generate unbiased quantile predictions from
+        each base estimator. Each estimator is trained on k-1 folds and predicts
+        quantiles on the held-out fold, with predictions organized by quantile level.
+
+        Args:
+            X: Training features with shape (n_samples, n_features).
+            y: Training targets with shape (n_samples,).
+            quantiles: List of quantile levels to predict.
+
+        Returns:
+            Tuple containing:
+                - val_indices: Indices of validation samples.
+                - val_targets: True targets for validation samples.
+                - val_predictions_by_quantile: List of prediction arrays, one per
+                  quantile level, each with shape (n_samples, n_estimators).
+        """
         kf = KFold(n_splits=self.cv, shuffle=True, random_state=self.random_state)
         n_quantiles = len(quantiles)
 
@@ -174,6 +320,24 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
     def _compute_quantile_weights(
         self, X: np.ndarray, y: np.ndarray, quantiles: List[float]
     ) -> List[np.ndarray]:
+        """Compute ensemble weights for each quantile level.
+
+        For uniform weighting, assigns equal weights across all quantiles. For linear
+        stacking, learns separate optimal weights for each quantile using constrained
+        linear regression on out-of-fold predictions. This allows the ensemble to
+        weight estimators differently across the prediction distribution.
+
+        Args:
+            X: Training features with shape (n_samples, n_features).
+            y: Training targets with shape (n_samples,).
+            quantiles: List of quantile levels to compute weights for.
+
+        Returns:
+            List of weight arrays, one per quantile, each with shape (n_estimators,).
+
+        Raises:
+            ValueError: If unknown weighting strategy specified.
+        """
         if self.weighting_strategy == "uniform":
             return [
                 np.ones(len(self.estimators)) / len(self.estimators)
@@ -205,6 +369,21 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
             raise ValueError(f"Unknown weighting strategy: {self.weighting_strategy}")
 
     def fit(self, X: np.ndarray, y: np.ndarray, quantiles: List[float]):
+        """Fit all base quantile estimators and compute quantile-specific weights.
+
+        Trains each base quantile estimator on the full training data for the
+        specified quantile levels, then computes optimal ensemble weights using
+        the selected weighting strategy. For linear stacking, this involves
+        cross-validation to generate out-of-fold predictions for meta-learner training.
+
+        Args:
+            X: Training features with shape (n_samples, n_features).
+            y: Training targets with shape (n_samples,).
+            quantiles: List of quantile levels to predict, with values in [0, 1].
+
+        Raises:
+            ValueError: If quantiles list is empty or contains invalid values.
+        """
         self.quantiles = quantiles
         if not quantiles or not all(0 <= q <= 1 for q in quantiles):
             raise ValueError(
@@ -217,6 +396,18 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
         self.quantile_weights = self._compute_quantile_weights(X, y, quantiles)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
+        """Generate ensemble quantile predictions using quantile-specific weights.
+
+        Combines quantile predictions from all base estimators using the learned
+        or uniform weights. Each quantile level uses its own set of weights,
+        allowing the ensemble to adapt differently across the prediction distribution.
+
+        Args:
+            X: Features for prediction with shape (n_samples, n_features).
+
+        Returns:
+            Ensemble quantile predictions with shape (n_samples, n_quantiles).
+        """
         n_samples = X.shape[0]
         n_quantiles = len(self.quantiles)
         weighted_predictions = np.zeros((n_samples, n_quantiles))
