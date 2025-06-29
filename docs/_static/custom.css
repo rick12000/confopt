@@ -1,0 +1,133 @@
+/* Logo styling */
+.wy-side-nav-search .wy-dropdown > a img.logo,
+.wy-side-nav-search > a img.logo {
+    width: auto;
+    height: 45px;
+    max-height: 45px;
+    margin-bottom: 0.5em;
+}
+
+/* Enhanced code blocks */
+.highlight {
+    border-radius: 4px;
+    border: 1px solid #e1e4e5;
+}
+
+.highlight pre {
+    padding: 12px;
+    line-height: 1.4;
+}
+
+/* Admonition styling */
+.admonition {
+    border-radius: 4px;
+    border-left: 4px solid;
+    margin: 1em 0;
+    padding: 0.5em 1em;
+}
+
+.admonition.note {
+    border-left-color: #6ab0de;
+    background-color: #e7f2fa;
+}
+
+.admonition.warning {
+    border-left-color: #f0b37e;
+    background-color: #ffedcc;
+}
+
+.admonition.important {
+    border-left-color: #a6d96a;
+    background-color: #dbf0c7;
+}
+
+/* Table styling */
+.wy-table-responsive table td,
+.wy-table-responsive table th {
+    white-space: normal;
+}
+
+/* Navigation improvements */
+.wy-nav-content {
+    max-width: 1200px;
+}
+
+/* Code signature styling */
+.sig-name {
+    font-weight: bold;
+}
+
+.sig-param {
+    font-style: italic;
+}
+
+/* API documentation improvements */
+.class > dt,
+.function > dt,
+.method > dt {
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+}
+
+/* Emoji support for feature lists */
+.feature-list {
+    list-style: none;
+    padding-left: 0;
+}
+
+.feature-list li {
+    margin-bottom: 0.5em;
+    padding-left: 1.5em;
+    position: relative;
+}
+
+/* Search results styling */
+.search li {
+    margin-bottom: 1em;
+    padding-bottom: 1em;
+    border-bottom: 1px solid #e1e4e5;
+}
+
+/* Version badge */
+.version-badge {
+    background-color: #afafaf;
+    color: white;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.8em;
+    margin-left: 0.5em;
+}
+
+/* Responsive improvements */
+@media screen and (max-width: 768px) {
+    .wy-nav-content {
+        margin-left: 0;
+    }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+    .highlight {
+        border-color: #404448;
+    }
+
+    .admonition.note {
+        background-color: #8d959f;
+        border-left-color: #848990;
+    }
+
+    .admonition.warning {
+        background-color: #5f4a1e;
+        border-left-color: #e29d4a;
+    }
+
+    .class > dt,
+    .function > dt,
+    .method > dt {
+        background-color: #2d2d2d;
+        border-color: #404448;
+    }
+}
