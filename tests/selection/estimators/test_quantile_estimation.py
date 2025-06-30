@@ -168,6 +168,7 @@ def test_quantile_ordering_consistency(uniform_regression_data, quantiles):
     estimators = [
         QuantileForest(n_estimators=20, random_state=42),
         QuantileKNN(n_neighbors=10),
+        QuantileLeaf(n_estimators=20, random_state=42),
         GaussianProcessQuantileEstimator(
             kernel="rbf", n_inducing_points=10, random_state=42
         ),

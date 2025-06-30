@@ -17,6 +17,7 @@ from confopt.selection.estimators.quantile_estimation import (
     QuantileKNN,
     QuantileLasso,
     GaussianProcessQuantileEstimator,
+    QuantileLeaf,  # Added QuantileLeaf to imports
 )
 from confopt.wrapping import ParameterRange
 from confopt.selection.estimators.ensembling import (
@@ -66,6 +67,8 @@ SFQENS_NAME: str = "sfqens"  # Quantile ensemble model
 MFENS_NAME: str = "mfqens"  # Ensemble model name for QLGBM + QL combination
 PENS_NAME: str = "pens"  # Point ensemble model for GBM + KNN combination
 QGP_NAME: str = "qgp"  # Gaussian Process Quantile Estimator
+QLEAF_NAME: str = "qleaf"  # New quantile estimator
+
 # New ensemble estimator names
 QENS1_NAME: str = "qens1"  # Ensemble of QL + QKNN + QRF
 QENS2_NAME: str = "qens2"  # Ensemble of QL + QKNN + QGBM
@@ -199,6 +202,27 @@ ESTIMATOR_REGISTRY = {
         },
         estimator_parameter_space={
             "n_neighbors": IntRange(min_value=5, max_value=10),
+        },
+    ),
+    QLEAF_NAME: EstimatorConfig(
+        estimator_name=QLEAF_NAME,
+        estimator_class=QuantileLeaf,
+        default_params={
+            "n_estimators": 15,
+            "max_depth": 4,
+            "max_features": 0.8,
+            "min_samples_split": 5,
+            "min_samples_leaf": 3,
+            "bootstrap": True,
+            "random_state": None,
+        },
+        estimator_parameter_space={
+            "n_estimators": IntRange(min_value=10, max_value=30),
+            "max_depth": IntRange(min_value=3, max_value=6),
+            "max_features": FloatRange(min_value=0.6, max_value=0.9),
+            "min_samples_split": IntRange(min_value=3, max_value=8),
+            "min_samples_leaf": IntRange(min_value=2, max_value=5),
+            "bootstrap": CategoricalRange(choices=[True, False]),
         },
     ),
     # Multi-fit quantile estimators
