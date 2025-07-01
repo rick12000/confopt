@@ -24,7 +24,7 @@ dependencies = []  # Will be read from requirements.txt
 Homepage = "https://github.com/rick12000/confopt"
 
 [tool.setuptools]
-packages = {find = {exclude = ["tests*", "examples*", "misc*"]}}
+packages = {find = {exclude = ["tests*", "examples*", "misc*", "build*", "dist*", "*.egg-info*"]}}
 include-package-data = true
 
 [tool.setuptools.package-data]

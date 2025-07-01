@@ -1,0 +1,16 @@
+# Exclude build artifacts from source and binary distributions
+prune build
+prune dist
+prune *.egg-info
+
+# Exclude test and example directories
+prune tests
+prune examples
+prune misc
+
+# Include Cython source file
+include confopt/utils/cy_entropy.pyx
+
+# Include license and readme
+include LICENSE
+include README.md
