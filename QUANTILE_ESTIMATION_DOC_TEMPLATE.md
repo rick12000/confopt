@@ -6,7 +6,7 @@ This template provides a step-by-step guide and example prompt for documenting a
 
 ## 1. Docstring Requirements
 
-Add detailed and informative Google-style docstrings following these guidelines:
+Add or update detailed and informative Google-style docstrings following these guidelines:
 
 ### Module-level docstring:
 - Brief description of the module's purpose and core functionality
@@ -28,7 +28,6 @@ Add detailed and informative Google-style docstrings following these guidelines:
 - Implementation details for complex algorithms
 
 ### Coding style compliance:
-- Follow the user's coding guidelines (DRY, explicit inputs, descriptive variables, etc.)
 - Be informative but brief and to the point
 - Only keep the most salient aspects of methodology or approach
 - Base understanding on contextual analysis of the module and its usage in the codebase
@@ -84,7 +83,7 @@ See Also
 
 ### Content requirements:
 - Technical depth appropriate for developers
-- Mathematical foundations with LaTeX equations where relevant
+- Mathematical foundations with LaTeX equations where relevant (cite relevant papers if mainstream, do not hallucinate, if unsure do not cite any)
 - Practical usage examples with actual code
 - Performance and scalability guidance
 - Integration context within the framework

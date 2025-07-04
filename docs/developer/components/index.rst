@@ -12,6 +12,7 @@ Selection Framework
 .. toctree::
    :maxdepth: 2
 
+   conformalization
    ensembling
    quantile_estimation
 
