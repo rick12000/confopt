@@ -19,7 +19,10 @@ Selection Framework
 Estimation Components
 ~~~~~~~~~~~~~~~~~~~
 
-*Coming soon: Core estimation modules documentation*
+.. toctree::
+   :maxdepth: 2
+
+   estimation
 
 Optimization Components
 ~~~~~~~~~~~~~~~~~~~~~

@@ -399,3 +399,31 @@ def heteroscedastic_regression_data():
     y = 2 * X[:, 0] + X[:, 1] + noise_scale * np.random.randn(n_samples)
 
     return X, y
+
+
+@pytest.fixture
+def estimation_test_data():
+    """Generate test data for estimation module tests."""
+    np.random.seed(42)
+    X = np.random.rand(50, 5)
+    y = X.sum(axis=1) + np.random.normal(0, 0.1, 50)
+    from sklearn.model_selection import train_test_split
+
+    return train_test_split(X, y, test_size=0.25, random_state=42)
+
+
+@pytest.fixture
+def point_tuner():
+    """Create a PointTuner instance for testing."""
+    from confopt.selection.estimation import PointTuner
+
+    return PointTuner(random_state=42)
+
+
+@pytest.fixture
+def quantile_tuner_with_quantiles():
+    """Create a QuantileTuner instance with quantiles for testing."""
+    from confopt.selection.estimation import QuantileTuner
+
+    quantiles = [0.1, 0.9]
+    return QuantileTuner(quantiles=quantiles, random_state=42), quantiles
