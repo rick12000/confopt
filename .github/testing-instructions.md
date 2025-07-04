@@ -12,3 +12,7 @@
 - Do not test initialization of classes. Do not use asserts that just check if an attribute of a class exists, or is equal to what you just defined it as, these are bloated tests that accomplish little, but add maintenance cost.
 - If you're testing a function or method that returns a shaped object, always check the shape (should it be the same as the input's? Should it be different? Should it be a specific size based on the inputs you passed to the function? etc. based on these questions formulate asserts that check those shape aspects)
 - Test the intent behind a function or method, not form or attributes. Read through the function or method carefully, understand its goals and approach, then write meaningful tests that check quality of outputs relative to intent.
+- Do not add strings after asserts, eg. do NOT do this:
+    assert len(final_alphas) == len(initial_alphas), "Alpha count should remain consistent"
+    after any assert statement, it should just be assert len(final_alphas) == len(initial_alphas)
+- Keep comments to a minimum, comments should just explain more obscure asserts or tests.

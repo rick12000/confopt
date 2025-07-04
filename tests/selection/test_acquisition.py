@@ -65,10 +65,8 @@ def test_locally_weighted_conformal_searcher(
 
     searcher.update(X_update, y_update)
 
-    assert len(searcher.X_train) == initial_X_train_len + 1
-    assert len(searcher.y_train) == initial_y_train_len + 1
-    assert np.array_equal(searcher.X_train[-1], X_update.flatten())
-    assert searcher.y_train[-1] == y_update
+    assert len(searcher.X_train) == initial_X_train_len
+    assert len(searcher.y_train) == initial_y_train_len
 
 
 @pytest.mark.parametrize(
@@ -122,10 +120,9 @@ def test_quantile_conformal_searcher(
 
     searcher.update(X_update, y_update)
 
-    assert len(searcher.X_train) == initial_X_train_len + 1
-    assert len(searcher.y_train) == initial_y_train_len + 1
-    assert np.array_equal(searcher.X_train[-1], X_update.flatten())
-    assert searcher.y_train[-1] == y_update
+    # Data doesn't change, only updates samplers and other states:
+    assert len(searcher.X_train) == initial_X_train_len
+    assert len(searcher.y_train) == initial_y_train_len
 
 
 def test_locally_weighted_searcher_prediction_methods(big_toy_dataset):
@@ -382,3 +379,71 @@ def test_quantile_searcher_with_advanced_samplers(big_toy_dataset):
     )
     mes_predictions = mes_searcher.predict(X_test)
     assert len(mes_predictions) == len(X_test)
+
+
+@pytest.mark.parametrize("current_best_value", [0.0, 0.5, 1.0, 10.0])
+def test_expected_improvement_best_value_update(current_best_value, big_toy_dataset):
+    """Test that Expected Improvement properly tracks and updates best values."""
+    X, y = big_toy_dataset
+    X_train, y_train = X[:10], y[:10]
+    X_val, y_val = X[10:20], y[10:20]
+
+    sampler = ExpectedImprovementSampler(
+        n_quantiles=4, current_best_value=current_best_value
+    )
+    searcher = LocallyWeightedConformalSearcher(
+        point_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
+        variance_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
+        sampler=sampler,
+    )
+
+    searcher.fit(
+        X_train=X_train, y_train=y_train, X_val=X_val, y_val=y_val, random_state=42
+    )
+
+    # Test that sampler has correct initial best value
+    assert sampler.current_best_value == current_best_value
+
+    # Test update with better value (remember: we minimize, so lower is better)
+    new_value = current_best_value - 1.0
+    searcher.update(X_val[0], new_value)
+    assert sampler.current_best_value == new_value
+
+    # Test update with worse value (should not change)
+    worse_value = current_best_value + 1.0
+    searcher.update(X_val[1], worse_value)
+    assert sampler.current_best_value == new_value  # Should remain the better value
+
+
+def test_adaptive_alpha_updating(big_toy_dataset):
+    """Test that adaptive alpha updating works correctly for compatible samplers."""
+    X, y = big_toy_dataset
+    X_train, y_train = X[:15], y[:15]
+    X_val, y_val = X[15:30], y[15:30]
+
+    # Test with adaptive sampler
+    sampler = LowerBoundSampler(interval_width=0.8, adapter="DtACI")
+    searcher = LocallyWeightedConformalSearcher(
+        point_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
+        variance_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
+        sampler=sampler,
+    )
+
+    searcher.fit(
+        X_train=X_train, y_train=y_train, X_val=X_val, y_val=y_val, random_state=42
+    )
+
+    # Store initial alpha values
+    initial_alphas = searcher.sampler.fetch_alphas().copy()
+
+    # Perform several updates
+    for i in range(3):
+        test_point = X_val[i]
+        test_value = y_val[i]
+        searcher.update(test_point, test_value)
+
+    # Check that alphas change:
+    final_alphas = searcher.sampler.fetch_alphas()
+    assert len(final_alphas) == len(initial_alphas)
+    assert all(0 < alpha < 1 for alpha in final_alphas)
+    assert not np.array_equal(initial_alphas, final_alphas)

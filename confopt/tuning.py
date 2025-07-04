@@ -632,16 +632,16 @@ class ConformalTuner:
                 ) = tuning_optimizer.select_arm()
 
             # Select the next configuration to evaluate
-            config = self._select_next_configuration(
+            next_config = self._select_next_configuration(
                 searcher, available_configs, tabularized_available
             )
 
-            if config is None:
+            if next_config is None:
                 logger.warning("No more configurations to search.")
                 break
 
             # Evaluate the selected configuration
-            validation_performance, _ = self._evaluate_configuration(config)
+            validation_performance, _ = self._evaluate_configuration(next_config)
             logger.debug(
                 f"Conformal search iter {search_iter} performance: {validation_performance}"
             )
@@ -655,7 +655,7 @@ class ConformalTuner:
                 searcher.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)
             ):
                 config_tabularized = self.config_manager.get_tabularized_configs(
-                    [config]
+                    [next_config]
                 )
                 transformed_X = scaler.transform(config_tabularized)
                 breach = searcher.calculate_breach(
@@ -663,20 +663,22 @@ class ConformalTuner:
                 )
 
             # Update searcher
-            config_tabularized = self.config_manager.get_tabularized_configs([config])
+            config_tabularized = self.config_manager.get_tabularized_configs(
+                [next_config]
+            )
             transformed_X = scaler.transform(config_tabularized)
             searcher.update(
                 X=transformed_X, y_true=self.metric_sign * validation_performance
             )
 
             # Update search state
-            self.config_manager.mark_as_searched(config, validation_performance)
+            self.config_manager.mark_as_searched(next_config, validation_performance)
 
             # Create and add trial
             trial = Trial(
                 iteration=len(self.study.trials),
                 timestamp=datetime.now(),
-                configuration=config.copy(),
+                configuration=next_config.copy(),
                 performance=validation_performance,
                 acquisition_source=str(searcher),
                 searcher_runtime=searcher_runtime,

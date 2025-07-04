@@ -1,5 +1,5 @@
 from typing import Union
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, ValidationInfo
 import numpy as np
 
 
@@ -10,8 +10,12 @@ class IntRange(BaseModel):
     max_value: int
 
     @field_validator("max_value")
-    def max_gt_min(cls, v, values):
-        if "min_value" in values and v <= values["min_value"]:
+    def max_gt_min(cls, v, info: ValidationInfo):
+        if (
+            hasattr(info, "data")
+            and "min_value" in info.data
+            and v <= info.data["min_value"]
+        ):
             raise ValueError("max_value must be greater than min_value")
         return v
 
@@ -24,8 +28,12 @@ class FloatRange(BaseModel):
     log_scale: bool = False  # Whether to sample on a logarithmic scale
 
     @field_validator("max_value")
-    def max_gt_min(cls, v, values):
-        if "min_value" in values and v <= values["min_value"]:
+    def max_gt_min(cls, v, info: ValidationInfo):
+        if (
+            hasattr(info, "data")
+            and "min_value" in info.data
+            and v <= info.data["min_value"]
+        ):
             raise ValueError("max_value must be greater than min_value")
         return v
 

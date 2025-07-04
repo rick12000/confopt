@@ -27,10 +27,6 @@ class DtACI:
 
         self.weights = np.ones(self.k) / self.k
 
-        # TODO: TEMP FOR PAPER
-        self.error_history = []
-        self.previous_chosen_idx = None
-
     def update(self, beta: float) -> float:
         losses = pinball_loss(beta=beta, theta=self.alpha_t_values, alpha=self.alpha)
 
@@ -44,18 +40,11 @@ class DtACI:
 
         errors = self.alpha_t_values > beta
 
-        # TODO: TEMP FOR PAPER
-        if self.previous_chosen_idx is not None:
-            self.error_history.append(errors[self.previous_chosen_idx])
-
         self.alpha_t_values = np.clip(
             self.alpha_t_values + self.gamma_values * (self.alpha - errors), 0.01, 0.99
         )
 
         chosen_idx = np.random.choice(range(self.k), size=1, p=self.weights)[0]
         self.alpha_t = self.alpha_t_values[chosen_idx]
-
-        # TODO: TEMP FOR PAPER
-        self.previous_chosen_idx = chosen_idx
 
         return self.alpha_t
