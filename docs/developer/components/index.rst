@@ -14,6 +14,7 @@ Selection Framework
 
    acquisition
    conformalization
+   adaptation
    ensembling
    quantile_estimation
 
