@@ -6,7 +6,6 @@ from typing import Dict
 from confopt.tuning import (
     ConformalTuner,
 )
-from confopt.utils.encoding import get_tuning_configurations
 
 from confopt.wrapping import FloatRange, IntRange, CategoricalRange, ConformalBounds
 from sklearn.base import BaseEstimator
@@ -75,14 +74,6 @@ class ObjectiveSurfaceGenerator:
 
 
 @pytest.fixture
-def mock_random_objective_function():
-    def objective(configuration: Dict):
-        return random.uniform(0, 1)
-
-    return objective
-
-
-@pytest.fixture
 def mock_constant_objective_function():
     def objective(configuration: Dict):
         return 2
@@ -132,41 +123,12 @@ def dummy_expanding_quantile_gaussian_dataset():
 
 
 @pytest.fixture
-def dummy_configuration_performance_bounds():
-    performance_lower_bounds = np.arange(0, 100, 0.5)
-    performance_upper_bounds = performance_lower_bounds + 10
-    return performance_lower_bounds, performance_upper_bounds
-
-
-@pytest.fixture
 def dummy_parameter_grid():
     return {
         "param_1": FloatRange(min_value=0.01, max_value=100, log_scale=True),
         "param_2": IntRange(min_value=1, max_value=100),
         "param_3": CategoricalRange(choices=["option1", "option2", "option3"]),
     }
-
-
-@pytest.fixture
-def dummy_configurations(dummy_parameter_grid):
-    return get_tuning_configurations(
-        parameter_grid=dummy_parameter_grid, n_configurations=50, random_state=42
-    )
-
-
-@pytest.fixture
-def dummy_tuner(dummy_parameter_grid):
-    def objective_function(configuration):
-        generator = ObjectiveSurfaceGenerator(generator="rastrigin")
-        return generator.predict(params=configuration)
-
-    searcher = ConformalTuner(
-        objective_function=objective_function,
-        search_space=dummy_parameter_grid,
-        metric_optimization="inverse",
-    )
-
-    return searcher
 
 
 @pytest.fixture
@@ -193,28 +155,6 @@ def linear_data_drift():
     y[second_segment:] = 2.5 * X[second_segment:].flatten() + 8 + noise[second_segment:]
 
     return X, y
-
-
-@pytest.fixture
-def conformal_bounds():
-    n_points = 5
-    n_intervals = 3
-
-    np.random.seed(42)
-    lower_bounds = []
-    upper_bounds = []
-
-    for _ in range(n_intervals):
-        lb = np.random.rand(n_points)
-        width = 0.1 + np.random.rand(n_points) * 0.2  # Width between 0.1 and 0.3
-        ub = lb + width
-        lower_bounds.append(lb)
-        upper_bounds.append(ub)
-
-    return [
-        ConformalBounds(lower_bounds=lb, upper_bounds=ub)
-        for lb, ub in zip(lower_bounds, upper_bounds)
-    ]
 
 
 @pytest.fixture
@@ -430,15 +370,6 @@ def quantile_tuner_with_quantiles():
 
 
 @pytest.fixture
-def sample_conformal_bounds():
-    """Create sample ConformalBounds for testing."""
-    n_obs = 50
-    lower_bounds = np.random.uniform(-2, 0, n_obs)
-    upper_bounds = lower_bounds + np.random.uniform(0.5, 2.0, n_obs)
-    return ConformalBounds(lower_bounds=lower_bounds, upper_bounds=upper_bounds)
-
-
-@pytest.fixture
 def multi_interval_bounds():
     """Create multiple ConformalBounds objects for multi-interval testing."""
     n_obs = 30
@@ -496,6 +427,67 @@ def small_dataset():
 
 
 @pytest.fixture
-def point_predictions():
-    """Point predictions for optimistic sampling tests."""
-    return np.random.uniform(-1, 1, 25)
+def test_predictions_and_widths():
+    """Combined point predictions and interval widths for LCB testing."""
+    np.random.seed(42)
+    n_points = 15
+    point_estimates = np.random.uniform(-2, 2, n_points)
+    interval_widths = np.random.uniform(0.2, 1.5, n_points)
+    return point_estimates, interval_widths
+
+
+@pytest.fixture
+def entropy_samples_gaussian():
+    """Gaussian samples for entropy calculation testing."""
+    np.random.seed(42)
+    return np.random.normal(0, 1, 100)
+
+
+@pytest.fixture
+def entropy_samples_uniform():
+    """Uniform samples for entropy calculation testing."""
+    np.random.seed(42)
+    return np.random.uniform(-2, 2, 50)
+
+
+@pytest.fixture
+def entropy_samples_identical():
+    """Identical samples for entropy edge case testing."""
+    return np.array([3.14, 3.14, 3.14, 3.14, 3.14])
+
+
+@pytest.fixture
+def entropy_samples_linear():
+    """Linear samples for deterministic entropy testing."""
+    return np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+
+
+@pytest.fixture
+def conformal_bounds_deterministic():
+    """Deterministic conformal bounds for reproducible testing."""
+    lower_bounds1 = np.array([1.0, 2.0, 3.0, 4.0])
+    upper_bounds1 = np.array([1.5, 2.5, 3.5, 4.5])
+
+    lower_bounds2 = np.array([0.8, 1.8, 2.8, 3.8])
+    upper_bounds2 = np.array([1.3, 2.3, 3.3, 4.3])
+
+    return [
+        ConformalBounds(lower_bounds=lower_bounds1, upper_bounds=upper_bounds1),
+        ConformalBounds(lower_bounds=lower_bounds2, upper_bounds=upper_bounds2),
+    ]
+
+
+@pytest.fixture
+def monte_carlo_bounds_simple():
+    """Simple bounds for Monte Carlo entropy testing."""
+    # Create bounds that will yield predictable minimum values
+    lower_bounds1 = np.array([10.0, 20.0, 5.0])  # min will be 5.0
+    upper_bounds1 = np.array([15.0, 25.0, 8.0])
+
+    lower_bounds2 = np.array([12.0, 18.0, 6.0])  # min will be 6.0
+    upper_bounds2 = np.array([17.0, 23.0, 9.0])
+
+    return [
+        ConformalBounds(lower_bounds=lower_bounds1, upper_bounds=upper_bounds1),
+        ConformalBounds(lower_bounds=lower_bounds2, upper_bounds=upper_bounds2),
+    ]

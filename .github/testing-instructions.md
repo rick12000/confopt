@@ -17,3 +17,6 @@
     after any assert statement, it should just be assert len(final_alphas) == len(initial_alphas)
 - Keep comments to a minimum, comments should just explain more obscure asserts or tests.
 - Each unit test should be a function, functions should not be grouped in testing classes and should not have self attributes.
+- When testing mathematical functions, understand the derivations and test assumptions and outputs given mathematical constraints and theory.
+- Do not write excessive amounts of tests, focus on the most important aspects of each function.
+- Avoid lenghty code repetition. If multiple tests share the same set ups or fixture processing but only differ in asserts, join them in a single test and add comments before each assert.

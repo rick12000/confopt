@@ -218,43 +218,6 @@ def update_single_interval_width(
         return alpha
 
 
-def fetch_alphas(
-    n_quantiles: int, alpha_type: Optional[Literal["uniform", "quantile"]] = "quantile"
-) -> List[float]:
-    """
-    Fetch alpha values using specified initialization strategy.
-
-    This utility function provides convenient access to different alpha value
-    initialization strategies without requiring manual configuration. The
-    function supports both uniform weighting for equal importance across
-    intervals and quantile-based initialization for methodologically-driven
-    confidence level selection.
-
-    Args:
-        n_quantiles: Number of quantiles to generate. Must be even for
-            quantile-based initialization to ensure symmetric pairing.
-        alpha_type: Initialization strategy. "uniform" provides equal weights
-            across all intervals, while "quantile" uses symmetric quantile
-            pairing for nested interval construction.
-
-    Returns:
-        List of alpha values according to the specified initialization strategy.
-
-    Raises:
-        ValueError: If n_quantiles is not even (for quantile type) or if
-            alpha_type is not recognized.
-    """
-    if n_quantiles % 2 != 0:
-        raise ValueError("Number of quantiles must be even.")
-
-    if alpha_type == "uniform":
-        return [1.0 / n_quantiles] * n_quantiles
-    elif alpha_type == "quantile":
-        return initialize_quantile_alphas(n_quantiles)
-    else:
-        raise ValueError("alpha_type must be 'uniform' or 'quantile'")
-
-
 def validate_even_quantiles(n_quantiles: int, sampler_name: str = "sampler") -> None:
     """
     Validate quantile count constraints for symmetric sampling strategies.

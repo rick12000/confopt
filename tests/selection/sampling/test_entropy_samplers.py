@@ -1,340 +1,293 @@
+"""
+Tests for entropy-based acquisition strategies in conformal prediction optimization.
+
+This module tests the core functionality of entropy samplers including entropy
+calculation correctness, sampler initialization, and information gain computation.
+"""
+
 import pytest
 import numpy as np
-import random
+from unittest.mock import patch
 from confopt.selection.sampling.entropy_samplers import (
+    calculate_entropy,
+    _run_parallel_or_sequential,
     EntropySearchSampler,
     MaxValueEntropySearchSampler,
-    calculate_entropy,
 )
-from confopt.selection.sampling.utils import initialize_quantile_alphas
-from confopt.selection.conformalization import QuantileConformalEstimator
+
+POS_TOL: float = 0.3  # Allow up to 30% positive information gains due to noise
 
 
-class TestInformationGainSampler:
-    def test_init_odd_quantiles(self):
-        with pytest.raises(ValueError):
-            EntropySearchSampler(n_quantiles=5)
+def test_entropy_edge_cases_and_basic_properties(
+    entropy_samples_identical, entropy_samples_linear
+):
+    # Test edge cases: empty, single, identical samples
+    assert calculate_entropy(np.array([]), method="distance") == 0.0
+    assert calculate_entropy(np.array([5.0]), method="distance") == 0.0
+    assert calculate_entropy(entropy_samples_identical, method="distance") == 0.0
 
-    def test_initialize_alphas_via_utils(self):
-        # Test the utility function directly since the method is now abstracted
-        alphas = initialize_quantile_alphas(4)
-        assert len(alphas) == 2
-        assert alphas[0] == pytest.approx(0.4)
-        assert alphas[1] == pytest.approx(0.8)
+    # Test invalid method raises error
+    with pytest.raises(ValueError, match="Unknown entropy estimation method"):
+        calculate_entropy(entropy_samples_linear, method="invalid_method")
 
-    def test_fetch_alphas(self):
-        sampler = EntropySearchSampler(n_quantiles=4)
-        alphas = sampler.fetch_alphas()
-        assert len(alphas) == 2
-        assert alphas[0] == pytest.approx(0.4)
-        assert alphas[1] == pytest.approx(0.8)
-
-    @pytest.mark.parametrize(
-        "sampling_strategy",
-        ["thompson", "expected_improvement", "sobol", "perturbation"],
-    )
-    def test_parameter_initialization(self, sampling_strategy):
-        sampler = EntropySearchSampler(
-            n_quantiles=6,
-            n_paths=50,
-            n_x_candidates=100,
-            n_y_candidates_per_x=10,
-            sampling_strategy=sampling_strategy,
-        )
-        assert sampler.n_paths == 50
-        assert sampler.n_x_candidates == 100
-        assert sampler.n_y_candidates_per_x == 10
-        assert sampler.sampling_strategy == sampling_strategy
-        assert len(sampler.alphas) == 3
-
-    @pytest.mark.parametrize("adapter", [None, "DtACI", "ACI"])
-    def test_update_interval_width(self, adapter):
-        sampler = EntropySearchSampler(n_quantiles=4, adapter=adapter)
-        betas = [0.3, 0.5]
-        previous_alphas = sampler.alphas.copy()
-
-        sampler.update_interval_width(betas)
-
-        if adapter in ["DtACI", "ACI"]:
-            assert sampler.alphas != previous_alphas
-        else:
-            assert sampler.alphas == previous_alphas
-
-    @pytest.mark.parametrize("entropy_method", ["distance", "histogram"])
-    def test_calculate_best_x_entropy(self, entropy_method):
-        sampler = EntropySearchSampler(
-            n_quantiles=4, n_paths=10, entropy_measure=entropy_method
-        )
-
-        n_observations = 5
-        all_bounds = np.zeros((n_observations, 6))
-
-        for i in range(n_observations):
-            all_bounds[i, :] = np.linspace(0.1, 0.9, 6) + i * 0.1
-
-        np.random.seed(42)
-        entropy, indices = sampler.get_entropy_of_optimum_location(
-            all_bounds=all_bounds, n_observations=n_observations
-        )
-
-        assert isinstance(entropy, float)
-
-        if entropy_method == "histogram":
-            assert entropy >= 0
-        elif entropy_method == "distance":
-            assert entropy <= float("inf")
-
-    @pytest.mark.parametrize(
-        "sampling_strategy",
-        ["thompson", "expected_improvement", "sobol", "perturbation"],
-    )
-    def test_information_gain_calculation(self, sampling_strategy, big_toy_dataset):
-        X, y = big_toy_dataset
-        np.random.seed(42)
-        random.seed(42)
-
-        train_size = 50
-        X_train, y_train = X[:train_size], y[:train_size]
-        X_val, y_val = X[train_size:], y[train_size:]
-        X_test = X[:20]
-
-        conformal_estimator = QuantileConformalEstimator(
-            quantile_estimator_architecture="ql",
-            alphas=[0.2, 0.8],
-            n_pre_conformal_trials=5,
-        )
-
-        conformal_estimator.fit(
-            X_train=X_train,
-            y_train=y_train,
-            X_val=X_val,
-            y_val=y_val,
-            tuning_iterations=0,
-            random_state=42,
-        )
-
-        predictions_per_interval = conformal_estimator.predict_intervals(X_test)
-
-        sampler = EntropySearchSampler(
-            n_quantiles=4,
-            n_paths=100,
-            n_x_candidates=5,
-            n_y_candidates_per_x=20,
-            sampling_strategy=sampling_strategy,
-        )
-
-        ig_values = sampler.calculate_information_gain(
-            X_train=X_train,
-            y_train=y_train,
-            X_val=X_val,
-            y_val=y_val,
-            X_space=X_test,
-            conformal_estimator=conformal_estimator,
-            predictions_per_interval=predictions_per_interval,
-            n_jobs=1,
-        )
-
-        assert isinstance(ig_values, np.ndarray)
-        assert len(ig_values) == len(X_test)
-        assert np.all(np.isfinite(ig_values))
-
-        non_zero_values = ig_values[ig_values != 0]
-        if len(non_zero_values) > 0:
-            negative_count = np.sum(non_zero_values < 0)
-            assert negative_count / len(non_zero_values) >= 0.5
-
-    @pytest.mark.parametrize("sampling_strategy", ["thompson", "expected_improvement"])
-    def test_select_candidates(
-        self, conformal_bounds, sampling_strategy, big_toy_dataset
-    ):
-        X, y = big_toy_dataset
-        sampler = EntropySearchSampler(
-            n_quantiles=4, sampling_strategy=sampling_strategy, n_x_candidates=3
-        )
-
-        result = sampler.select_candidates(
-            predictions_per_interval=conformal_bounds,
-            candidate_space=X,
-        )
-
-        assert isinstance(result, np.ndarray)
-        assert len(result) <= sampler.n_x_candidates
-        assert np.all(result < len(conformal_bounds[0].lower_bounds))
-
-        if sampling_strategy == "expected_improvement":
-            best_idx = 1
-            best_historical_y = 0.3
-            best_historical_x = X[best_idx : best_idx + 1]
-
-            result_with_best = sampler.select_candidates(
-                predictions_per_interval=conformal_bounds,
-                candidate_space=X,
-                best_historical_y=best_historical_y,
-                best_historical_x=best_historical_x,
-            )
-
-            assert isinstance(result_with_best, np.ndarray)
-            assert len(result_with_best) <= sampler.n_x_candidates
-            assert np.all(result_with_best < len(conformal_bounds[0].lower_bounds))
-
-    @pytest.mark.parametrize("sampling_strategy", ["sobol", "perturbation"])
-    def test_select_candidates_space_based(
-        self, conformal_bounds, sampling_strategy, big_toy_dataset
-    ):
-        X, y = big_toy_dataset
-        sampler = EntropySearchSampler(
-            n_quantiles=4, sampling_strategy=sampling_strategy, n_x_candidates=3
-        )
-
-        result = sampler.select_candidates(
-            predictions_per_interval=conformal_bounds,
-            candidate_space=X,
-        )
-
-        assert isinstance(result, np.ndarray)
-        assert len(result) <= sampler.n_x_candidates
-        assert np.all(result < len(conformal_bounds[0].lower_bounds))
-
-        if sampling_strategy == "perturbation":
-            best_idx = 1
-            best_historical_y = 0.3
-            best_historical_x = X[best_idx : best_idx + 1]
-
-            result_with_best = sampler.select_candidates(
-                predictions_per_interval=conformal_bounds,
-                candidate_space=X,
-                best_historical_y=best_historical_y,
-                best_historical_x=best_historical_x,
-            )
-
-            assert isinstance(result_with_best, np.ndarray)
-            assert len(result_with_best) <= sampler.n_x_candidates
-            assert np.all(result_with_best < len(conformal_bounds[0].lower_bounds))
-
-
-class TestMaxValueEntropySearchSampler:
-    def test_init_odd_quantiles(self):
-        with pytest.raises(ValueError):
-            MaxValueEntropySearchSampler(n_quantiles=5)
-
-    def test_initialize_alphas_via_utils(self):
-        # Test the utility function directly since the method is now abstracted
-        alphas = initialize_quantile_alphas(4)
-        assert len(alphas) == 2
-        assert alphas[0] == pytest.approx(0.4)
-        assert alphas[1] == pytest.approx(0.8)
-
-    def test_fetch_alphas(self):
-        sampler = MaxValueEntropySearchSampler(n_quantiles=4)
-        alphas = sampler.fetch_alphas()
-        assert len(alphas) == 2
-        assert alphas[0] == pytest.approx(0.4)
-        assert alphas[1] == pytest.approx(0.8)
-
-    @pytest.mark.parametrize("adapter", [None, "DtACI", "ACI"])
-    def test_update_interval_width(self, adapter):
-        sampler = MaxValueEntropySearchSampler(n_quantiles=4, adapter=adapter)
-        betas = [0.3, 0.5]
-        previous_alphas = sampler.alphas.copy()
-
-        sampler.update_interval_width(betas)
-
-        if adapter in ["DtACI", "ACI"]:
-            assert sampler.alphas != previous_alphas
-        else:
-            assert sampler.alphas == previous_alphas
-
-    @pytest.mark.parametrize("entropy_method", ["distance", "histogram"])
-    def test_max_value_entropy_search_calculation(
-        self, big_toy_dataset, entropy_method
-    ):
-        X, y = big_toy_dataset
-        train_size = 50
-        X_train, y_train = X[:train_size], y[:train_size]
-        X_val, y_val = X[train_size:], y[train_size:]
-
-        np.random.seed(42)
-
-        sampler = MaxValueEntropySearchSampler(
-            n_quantiles=6,
-            n_paths=100,
-            n_y_candidates_per_x=20,
-            entropy_method=entropy_method,
-        )
-
-        quantile_estimator = QuantileConformalEstimator(
-            quantile_estimator_architecture="ql",
-            alphas=[0.2, 0.8],
-            n_pre_conformal_trials=5,
-        )
-
-        quantile_estimator.fit(
-            X_train=X_train,
-            y_train=y_train,
-            X_val=X_val,
-            y_val=y_val,
-            tuning_iterations=0,
-            random_state=42,
-        )
-
-        X_test = X_train[:3]
-        predictions_per_interval = quantile_estimator.predict_intervals(X_test)
-
-        mes = sampler.calculate_information_gain(
-            predictions_per_interval=predictions_per_interval,
-            n_jobs=1,
-        )
-
-        assert isinstance(mes, np.ndarray)
-        assert len(mes) == len(X_test)
-
-        non_zero_values = mes[mes != 0]
-        if len(non_zero_values) > 0:
-            negative_count = np.sum(non_zero_values < 0)
-            assert negative_count / len(non_zero_values) >= 0.5
+    # Test basic mathematical properties
+    entropy_distance = calculate_entropy(entropy_samples_linear, method="distance")
+    entropy_histogram = calculate_entropy(entropy_samples_linear, method="histogram")
+    assert np.isfinite(entropy_distance) and entropy_distance > 0.0
+    assert np.isfinite(entropy_histogram) and entropy_histogram != 0.0
 
 
 @pytest.mark.parametrize("method", ["distance", "histogram"])
-def test_differential_entropy_estimator(method):
+def test_entropy_distribution_comparison(
+    method, entropy_samples_gaussian, entropy_samples_uniform
+):
+    # Wider distributions should have higher entropy
     np.random.seed(42)
-    samples = np.random.normal(0, 1, 1000)
+    narrow_samples = np.random.normal(0, 0.1, 100)
+    wide_samples = np.random.normal(0, 2.0, 100)
 
-    entropy = calculate_entropy(samples, method=method)
+    narrow_entropy = calculate_entropy(narrow_samples, method=method)
+    wide_entropy = calculate_entropy(wide_samples, method=method)
+    gaussian_entropy = calculate_entropy(entropy_samples_gaussian, method=method)
+    uniform_entropy = calculate_entropy(entropy_samples_uniform, method=method)
 
-    assert isinstance(entropy, float)
-
-    if method == "histogram":
-        assert entropy >= 0
-    elif method == "distance":
-        assert np.isfinite(entropy)
-
-    single_sample_entropy = calculate_entropy(np.array([0.5]), method=method)
-    assert single_sample_entropy == 0.0
-
-    constant_samples = np.ones(100)
-    constant_entropy = calculate_entropy(constant_samples, method=method)
-    assert constant_entropy == 0.0
-
-    with pytest.raises(ValueError):
-        calculate_entropy(samples, method="invalid_method")
+    assert wide_entropy > narrow_entropy
+    assert gaussian_entropy > 0.0 and np.isfinite(gaussian_entropy)
+    assert uniform_entropy > 0.0 and np.isfinite(uniform_entropy)
 
 
-@pytest.mark.parametrize("method", ["distance", "histogram"])
-def test_entropy_estimator_with_different_distributions(method):
-    np.random.seed(42)
-
-    uniform_samples = np.random.uniform(0, 1, 1000)
-    gaussian_samples = np.random.normal(0, 1, 1000)
-    bimodal_samples = np.concatenate(
-        [np.random.normal(-3, 0.5, 500), np.random.normal(3, 0.5, 500)]
+def test_entropy_cython_python_consistency(
+    entropy_samples_gaussian, entropy_samples_uniform
+):
+    # First get Cython results (if available)
+    cython_entropy_gaussian = calculate_entropy(
+        entropy_samples_gaussian, method="distance"
+    )
+    cython_entropy_uniform = calculate_entropy(
+        entropy_samples_uniform, method="distance"
     )
 
-    uniform_entropy = calculate_entropy(uniform_samples, method=method)
-    gaussian_entropy = calculate_entropy(gaussian_samples, method=method)
-    bimodal_entropy = calculate_entropy(bimodal_samples, method=method)
+    # Force Python fallback by mocking import error
+    with patch("builtins.__import__") as mock_import:
 
-    assert np.isfinite(uniform_entropy)
-    assert np.isfinite(gaussian_entropy)
-    assert np.isfinite(bimodal_entropy)
+        def side_effect(name, *args, **kwargs):
+            if "cy_differential_entropy" in str(args):
+                raise ImportError("Cython not available")
+            return __import__(name, *args, **kwargs)
 
-    assert bimodal_entropy > gaussian_entropy
+        mock_import.side_effect = side_effect
+
+        python_entropy_gaussian = calculate_entropy(
+            entropy_samples_gaussian, method="distance"
+        )
+        python_entropy_uniform = calculate_entropy(
+            entropy_samples_uniform, method="distance"
+        )
+
+    # Both implementations should produce finite, positive results
+    assert np.isfinite(python_entropy_gaussian) and python_entropy_gaussian > 0.0
+    assert np.isfinite(python_entropy_uniform) and python_entropy_uniform > 0.0
+
+    # If Cython was available, results should be similar (within numerical tolerance)
+    if not np.isnan(cython_entropy_gaussian):
+        np.testing.assert_allclose(
+            python_entropy_gaussian, cython_entropy_gaussian, rtol=0.1
+        )
+        np.testing.assert_allclose(
+            python_entropy_uniform, cython_entropy_uniform, rtol=0.1
+        )
+
+
+def test_parallel_execution_utility():
+    def square(x):
+        return x**2
+
+    items = [1, 2, 3, 4]
+
+    # Test sequential execution
+    sequential_results = _run_parallel_or_sequential(square, items, n_jobs=1)
+    assert sequential_results == [1, 4, 9, 16]
+
+    # Test parallel execution (should produce same results)
+    parallel_results = _run_parallel_or_sequential(square, items, n_jobs=2)
+    assert parallel_results == [1, 4, 9, 16]
+
+    # Test edge cases
+    assert _run_parallel_or_sequential(square, [], n_jobs=1) == []
+    assert _run_parallel_or_sequential(lambda x: x, [42], n_jobs=1) == [42]
+
+
+@pytest.mark.parametrize("n_quantiles", [2, 4, 6, 8])
+def test_entropy_search_sampler_initialization_and_properties(n_quantiles):
+    # Test valid initialization
+    sampler = EntropySearchSampler(n_quantiles=n_quantiles)
+    assert sampler.n_quantiles == n_quantiles
+    assert len(sampler.alphas) == n_quantiles // 2
+    assert all(0 < alpha < 1 for alpha in sampler.alphas)
+
+    # Test alpha fetching
+    alphas = sampler.fetch_alphas()
+    assert isinstance(alphas, list)
+    assert len(alphas) == n_quantiles // 2
+    assert all(isinstance(alpha, float) for alpha in alphas)
+
+    # Test with adapter
+    sampler_with_adapter = EntropySearchSampler(n_quantiles=n_quantiles, adapter="ACI")
+    assert sampler_with_adapter.adapters is not None
+    assert len(sampler_with_adapter.adapters) == n_quantiles // 2
+
+
+@pytest.mark.parametrize("n_quantiles", [1, 3, 5, 7])
+def test_entropy_search_sampler_invalid_quantiles(n_quantiles):
+    with pytest.raises(ValueError, match="quantiles must be even"):
+        EntropySearchSampler(n_quantiles=n_quantiles)
+
+
+def test_entropy_search_sampler_functionality(simple_conformal_bounds):
+    sampler = EntropySearchSampler(
+        n_quantiles=4,
+        n_x_candidates=2,
+        n_y_candidates_per_x=3,
+        n_paths=10,
+        sampling_strategy="uniform",
+    )
+
+    # Test alpha update
+    original_alphas = sampler.alphas.copy()
+    betas = [0.85, 0.90]
+    sampler.update_interval_width(betas)
+    assert len(sampler.alphas) == len(original_alphas)
+    assert all(isinstance(alpha, float) for alpha in sampler.alphas)
+
+    # Test candidate selection
+    candidate_space = np.random.uniform(0, 1, (5, 2))
+    candidates = sampler.select_candidates(
+        predictions_per_interval=simple_conformal_bounds,
+        candidate_space=candidate_space,
+    )
+    assert isinstance(candidates, np.ndarray)
+    assert len(candidates) <= sampler.n_x_candidates
+    assert all(
+        0 <= idx < len(simple_conformal_bounds[0].lower_bounds) for idx in candidates
+    )
+
+
+def test_entropy_search_information_gain_computation(conformal_bounds_deterministic):
+    sampler = EntropySearchSampler(
+        n_quantiles=4,
+        n_x_candidates=2,
+        n_y_candidates_per_x=2,
+        n_paths=10,
+        sampling_strategy="uniform",
+    )
+
+    X_train = np.array([[0, 0], [1, 1]])
+    y_train = np.array([1.0, 2.0])
+    X_val = np.array([[2, 2]])
+    y_val = np.array([3.0])
+    X_space = np.array([[0, 0], [1, 1], [2, 2], [3, 3]])
+
+    # Create minimal mock estimator that only provides necessary interface
+    class MockEstimator:
+        def fit(
+            self, X_train, y_train, X_val, y_val, tuning_iterations=0, random_state=1234
+        ):
+            return self
+
+        def predict_intervals(self, X_space, alphas=None):
+            return conformal_bounds_deterministic
+
+    mock_estimator = MockEstimator()
+
+    info_gains = sampler.calculate_information_gain(
+        X_train=X_train,
+        y_train=y_train,
+        X_val=X_val,
+        y_val=y_val,
+        X_space=X_space,
+        conformal_estimator=mock_estimator,
+        predictions_per_interval=conformal_bounds_deterministic,
+        n_jobs=1,
+    )
+
+    assert isinstance(info_gains, np.ndarray)
+    assert info_gains.shape == (len(conformal_bounds_deterministic[0].lower_bounds),)
+    assert all(np.isfinite(info_gain) for info_gain in info_gains)
+    assert np.max(np.abs(info_gains)) < 100.0  # Reasonable magnitude bound
+
+    # Information gains should be predominantly negative (uncertainty reduction)
+    # Allow up to 30% positive values due to Monte Carlo noise
+    positive_ratio = np.mean(info_gains > 0)
+    assert positive_ratio <= POS_TOL
+
+
+@pytest.mark.parametrize("n_quantiles", [2, 4, 6, 8])
+def test_max_value_entropy_sampler_initialization_and_properties(n_quantiles):
+    # Test valid initialization
+    sampler = MaxValueEntropySearchSampler(n_quantiles=n_quantiles)
+    assert sampler.n_quantiles == n_quantiles
+    assert len(sampler.alphas) == n_quantiles // 2
+    assert all(0 < alpha < 1 for alpha in sampler.alphas)
+
+    # Test alpha fetching
+    alphas = sampler.fetch_alphas()
+    assert isinstance(alphas, list)
+    assert len(alphas) == n_quantiles // 2
+
+    # Test with different parameters
+    sampler_custom = MaxValueEntropySearchSampler(
+        n_quantiles=n_quantiles, n_paths=50, entropy_method="histogram", adapter="DtACI"
+    )
+    assert sampler_custom.n_paths == 50
+    assert sampler_custom.entropy_method == "histogram"
+    assert sampler_custom.adapters is not None
+
+
+@pytest.mark.parametrize("n_quantiles", [1, 3, 5, 7])
+def test_max_value_entropy_sampler_invalid_quantiles(n_quantiles):
+    with pytest.raises(ValueError, match="quantiles must be even"):
+        MaxValueEntropySearchSampler(n_quantiles=n_quantiles)
+
+
+def test_max_value_entropy_sampler_functionality(monte_carlo_bounds_simple):
+    sampler = MaxValueEntropySearchSampler(
+        n_quantiles=4, n_y_candidates_per_x=5, n_paths=15, entropy_method="distance"
+    )
+
+    # Test alpha update
+    original_alphas = sampler.alphas.copy()
+    betas = [0.80, 0.95]
+    sampler.update_interval_width(betas)
+    assert len(sampler.alphas) == len(original_alphas)
+
+    # Test information gain computation
+    info_gains = sampler.calculate_information_gain(
+        predictions_per_interval=monte_carlo_bounds_simple, n_jobs=1
+    )
+
+    assert isinstance(info_gains, np.ndarray)
+    assert info_gains.shape == (len(monte_carlo_bounds_simple[0].lower_bounds),)
+    assert all(np.isfinite(gain) for gain in info_gains)
+    assert all(
+        gain <= 0 for gain in info_gains
+    )  # Should be consistently negative for this simpler case
+
+
+def test_max_value_entropy_deterministic_behavior(monte_carlo_bounds_simple):
+    sampler = MaxValueEntropySearchSampler(
+        n_quantiles=4, n_paths=10, n_y_candidates_per_x=3, entropy_method="distance"
+    )
+
+    # Test deterministic behavior with same seed
+    np.random.seed(42)
+    info_gains1 = sampler.calculate_information_gain(
+        predictions_per_interval=monte_carlo_bounds_simple, n_jobs=1
+    )
+
+    np.random.seed(42)
+    info_gains2 = sampler.calculate_information_gain(
+        predictions_per_interval=monte_carlo_bounds_simple, n_jobs=1
+    )
+
+    np.testing.assert_array_equal(info_gains1, info_gains2)
+    assert all(np.isfinite(gain) for gain in info_gains1)

@@ -441,6 +441,10 @@ class EntropySearchSampler:
             best_idx = np.argmin(combined_y)
             best_historical_y = combined_y[best_idx]
             best_historical_x = combined_X[best_idx].reshape(1, -1)
+        else:
+            best_historical_y = None
+            best_historical_x = None
+
         candidate_idxs = self.select_candidates(
             predictions_per_interval=predictions_per_interval,
             candidate_space=X_space,

@@ -220,7 +220,6 @@ class TestConformalTuner:
         tuner.tune(n_random_searches=15, max_iter=30, verbose=False)
         # Collect all primary_estimator_error values from trials
         errors = [trial.primary_estimator_error for trial in tuner.study.trials]
-        print(errors)
         # Check that at least one is not None and not NaN
         assert any(
             (e is not None and not (isinstance(e, float) and (e != e))) for e in errors
