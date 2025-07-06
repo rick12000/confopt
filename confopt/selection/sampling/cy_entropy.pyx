@@ -38,23 +38,30 @@ def cy_differential_entropy(np.ndarray[double, ndim=1] samples, str method='dist
         return 0.0
 
     if method == 'distance':
-        # Vasicek estimator (spacing method)
-        cdef int m = int(sqrt(n_samples))
-        if m >= n_samples:
-            m = max(1, n_samples // 2)
+        # Vasicek estimator using k-nearest neighbor spacing
+        cdef int k = int(sqrt(n_samples))
+        if k >= n_samples:
+            k = max(1, n_samples // 2)
 
         # Sort the samples
         cdef np.ndarray[double, ndim=1] sorted_samples = np.sort(samples)
 
-        # Create wrapped samples
-        cdef np.ndarray[double, ndim=1] wrapped_samples = np.concatenate([sorted_samples, sorted_samples[:m]])
-
-        cdef np.ndarray[double, ndim=1] spacings = np.zeros(n_samples, dtype=np.float64)
         cdef double total_log_spacing = 0.0
 
         for i in range(n_samples):
-            spacings[i] = max(wrapped_samples[i+m] - wrapped_samples[i], eps)
-            total_log_spacing += log(n_samples * spacings[i] / m)
+            # Calculate k-nearest neighbor distance
+            cdef int left_idx = max(0, i - k // 2)
+            cdef int right_idx = min(n_samples - 1, i + k // 2)
+
+            # Ensure we have k neighbors
+            if right_idx - left_idx + 1 < k:
+                if left_idx == 0:
+                    right_idx = min(n_samples - 1, left_idx + k - 1)
+                else:
+                    left_idx = max(0, right_idx - k + 1)
+
+            cdef double spacing = max(sorted_samples[right_idx] - sorted_samples[left_idx], eps)
+            total_log_spacing += log(spacing * n_samples / k)
 
         return total_log_spacing / n_samples
 
@@ -74,11 +81,12 @@ def cy_differential_entropy(np.ndarray[double, ndim=1] samples, str method='dist
         # Convert to probabilities
         cdef np.ndarray[double, ndim=1] probs = hist.astype(np.float64) / n_samples
 
-        # Remove zeros
-        cdef np.ndarray[double, ndim=1] positive_probs = probs[probs > 0]
-
-        # Calculate discrete entropy
-        cdef double discrete_entropy = -np.sum(positive_probs * np.log(positive_probs))
+        # Calculate discrete entropy only for positive probabilities
+        cdef double discrete_entropy = 0.0
+        cdef int j
+        for j in range(len(probs)):
+            if probs[j] > 0:
+                discrete_entropy -= probs[j] * log(probs[j])
 
         # Add log of bin width for differential entropy
         cdef np.ndarray[double, ndim=1] bin_widths = np.diff(bin_edges)

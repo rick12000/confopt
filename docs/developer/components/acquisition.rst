@@ -172,7 +172,7 @@ Basic Locally Weighted Acquisition
 .. code-block:: python
 
     from confopt.selection.acquisition import LocallyWeightedConformalSearcher
-    from confopt.selection.sampling import LowerBoundSampler
+    from confopt.selection.sampling.bound_samplers import LowerBoundSampler
     import numpy as np
 
     # Initialize sampler with exploration schedule
@@ -213,7 +213,7 @@ Quantile-Based Acquisition with Thompson Sampling
 .. code-block:: python
 
     from confopt.selection.acquisition import QuantileConformalSearcher
-    from confopt.selection.sampling import ThompsonSampler
+    from confopt.selection.sampling.thompson_samplers import ThompsonSampler
 
     # Initialize Thompson sampler with optimistic bias
     sampler = ThompsonSampler(
@@ -255,7 +255,7 @@ Information Gain Acquisition
 
 .. code-block:: python
 
-    from confopt.selection.sampling import InformationGainSampler
+    from confopt.selection.sampling.entropy_samplers import InformationGainSampler
 
     # Initialize information gain sampler
     sampler = InformationGainSampler(

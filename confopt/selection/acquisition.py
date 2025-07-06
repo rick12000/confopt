@@ -31,12 +31,16 @@ from confopt.selection.conformalization import (
     LocallyWeightedConformalEstimator,
     QuantileConformalEstimator,
 )
-from confopt.selection.sampling import (
+from confopt.selection.sampling.bound_samplers import (
     LowerBoundSampler,
-    ThompsonSampler,
     PessimisticLowerBoundSampler,
+)
+from confopt.selection.sampling.thompson_samplers import ThompsonSampler
+from confopt.selection.sampling.expected_improvement_samplers import (
     ExpectedImprovementSampler,
-    InformationGainSampler,
+)
+from confopt.selection.sampling.entropy_samplers import (
+    EntropySearchSampler,
     MaxValueEntropySearchSampler,
 )
 from confopt.selection.estimation import initialize_estimator
@@ -86,7 +90,7 @@ class BaseConformalSearcher(ABC):
             ThompsonSampler,
             PessimisticLowerBoundSampler,
             ExpectedImprovementSampler,
-            InformationGainSampler,
+            EntropySearchSampler,
             MaxValueEntropySearchSampler,
         ],
     ):
@@ -138,7 +142,7 @@ class BaseConformalSearcher(ABC):
             return self._predict_with_pessimistic_lower_bound(X)
         elif isinstance(self.sampler, ExpectedImprovementSampler):
             return self._predict_with_expected_improvement(X)
-        elif isinstance(self.sampler, InformationGainSampler):
+        elif isinstance(self.sampler, EntropySearchSampler):
             return self._predict_with_information_gain(X)
         elif isinstance(self.sampler, MaxValueEntropySearchSampler):
             return self._predict_with_max_value_entropy_search(X)
@@ -340,7 +344,7 @@ class BaseConformalSearcher(ABC):
                     (
                         ThompsonSampler,
                         ExpectedImprovementSampler,
-                        InformationGainSampler,
+                        EntropySearchSampler,
                         MaxValueEntropySearchSampler,
                     ),
                 ):
@@ -412,7 +416,7 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
             ThompsonSampler,
             PessimisticLowerBoundSampler,
             ExpectedImprovementSampler,
-            InformationGainSampler,
+            EntropySearchSampler,
             MaxValueEntropySearchSampler,
         ],
     ):
@@ -463,7 +467,7 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
         self.y_train = y_train
         self.X_val = X_val
         self.y_val = y_val
-        if isinstance(self.sampler, InformationGainSampler) and random_state is None:
+        if isinstance(self.sampler, EntropySearchSampler) and random_state is None:
             random_state = DEFAULT_IG_SAMPLER_RANDOM_STATE
         self.conformal_estimator.fit(
             X_train=X_train,
@@ -525,7 +529,6 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
         interval = self.predictions_per_interval[0]
         width = (interval.upper_bounds - interval.lower_bounds).reshape(-1, 1) / 2
         return self.sampler.calculate_ucb_predictions(
-            predictions_per_interval=self.predictions_per_interval,
             point_estimates=point_estimates,
             interval_width=width,
         )
@@ -639,7 +642,7 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
             estimates to guide the search toward promising regions.
         """
         self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
-        return self.sampler.calculate_max_value_entropy_search(
+        return self.sampler.calculate_information_gain(
             predictions_per_interval=self.predictions_per_interval,
             n_jobs=1,
         )
@@ -734,7 +737,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             ThompsonSampler,
             PessimisticLowerBoundSampler,
             ExpectedImprovementSampler,
-            InformationGainSampler,
+            EntropySearchSampler,
             MaxValueEntropySearchSampler,
         ],
         n_pre_conformal_trials: int = 20,
@@ -789,7 +792,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         self.X_val = X_val
         self.y_val = y_val
         random_state = random_state
-        if isinstance(self.sampler, InformationGainSampler) and random_state is None:
+        if isinstance(self.sampler, EntropySearchSampler) and random_state is None:
             random_state = DEFAULT_IG_SAMPLER_RANDOM_STATE
         if isinstance(self.sampler, (PessimisticLowerBoundSampler, LowerBoundSampler)):
             upper_quantile_cap = 0.5
@@ -814,7 +817,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             self.sampler,
             (
                 ExpectedImprovementSampler,
-                InformationGainSampler,
+                EntropySearchSampler,
                 MaxValueEntropySearchSampler,
             ),
         ):
@@ -876,7 +879,6 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         interval = self.predictions_per_interval[0]
         width = interval.upper_bounds - interval.lower_bounds
         return self.sampler.calculate_ucb_predictions(
-            predictions_per_interval=self.predictions_per_interval,
             point_estimates=interval.upper_bounds,
             interval_width=width,
         )
@@ -982,7 +984,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             asymmetric uncertainty patterns in optimum location inference.
         """
         self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
-        return self.sampler.calculate_max_value_entropy_search(
+        return self.sampler.calculate_information_gain(
             predictions_per_interval=self.predictions_per_interval,
             n_jobs=1,
         )

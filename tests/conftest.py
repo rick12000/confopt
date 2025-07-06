@@ -427,3 +427,75 @@ def quantile_tuner_with_quantiles():
 
     quantiles = [0.1, 0.9]
     return QuantileTuner(quantiles=quantiles, random_state=42), quantiles
+
+
+@pytest.fixture
+def sample_conformal_bounds():
+    """Create sample ConformalBounds for testing."""
+    n_obs = 50
+    lower_bounds = np.random.uniform(-2, 0, n_obs)
+    upper_bounds = lower_bounds + np.random.uniform(0.5, 2.0, n_obs)
+    return ConformalBounds(lower_bounds=lower_bounds, upper_bounds=upper_bounds)
+
+
+@pytest.fixture
+def multi_interval_bounds():
+    """Create multiple ConformalBounds objects for multi-interval testing."""
+    n_obs = 30
+    bounds_list = []
+    for i in range(3):
+        width_factor = (i + 1) * 0.5
+        lower = np.random.uniform(-1, 0, n_obs)
+        upper = lower + np.random.uniform(0.2 * width_factor, 1.0 * width_factor, n_obs)
+        bounds_list.append(ConformalBounds(lower_bounds=lower, upper_bounds=upper))
+    return bounds_list
+
+
+@pytest.fixture
+def nested_intervals():
+    """Create properly nested intervals for testing interval relationships."""
+    n_obs = 20
+    # Create nested intervals: each inner interval contained within outer
+    center = np.random.uniform(-1, 1, n_obs)
+
+    # Widest interval (lowest confidence)
+    wide_lower = center - 2.0
+    wide_upper = center + 2.0
+
+    # Medium interval
+    med_lower = center - 1.0
+    med_upper = center + 1.0
+
+    # Narrowest interval (highest confidence)
+    narrow_lower = center - 0.5
+    narrow_upper = center + 0.5
+
+    return [
+        ConformalBounds(lower_bounds=wide_lower, upper_bounds=wide_upper),
+        ConformalBounds(lower_bounds=med_lower, upper_bounds=med_upper),
+        ConformalBounds(lower_bounds=narrow_lower, upper_bounds=narrow_upper),
+    ]
+
+
+@pytest.fixture
+def coverage_feedback():
+    """Sample coverage feedback for adaptation testing."""
+    return [0.85, 0.78, 0.92]
+
+
+@pytest.fixture
+def small_dataset():
+    """Small dataset for computational testing."""
+    n_obs = 10
+    bounds = []
+    for _ in range(2):
+        lower = np.random.uniform(-0.5, 0, n_obs)
+        upper = lower + np.random.uniform(0.1, 0.5, n_obs)
+        bounds.append(ConformalBounds(lower_bounds=lower, upper_bounds=upper))
+    return bounds
+
+
+@pytest.fixture
+def point_predictions():
+    """Point predictions for optimistic sampling tests."""
+    return np.random.uniform(-1, 1, 25)

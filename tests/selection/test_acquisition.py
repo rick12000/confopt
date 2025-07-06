@@ -4,12 +4,16 @@ from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
 )
-from confopt.selection.sampling import (
+from confopt.selection.sampling.bound_samplers import (
     PessimisticLowerBoundSampler,
     LowerBoundSampler,
-    ThompsonSampler,
+)
+from confopt.selection.sampling.thompson_samplers import ThompsonSampler
+from confopt.selection.sampling.expected_improvement_samplers import (
     ExpectedImprovementSampler,
-    InformationGainSampler,
+)
+from confopt.selection.sampling.entropy_samplers import (
+    EntropySearchSampler,
     MaxValueEntropySearchSampler,
 )
 from conftest import (
@@ -26,7 +30,7 @@ from conftest import (
         (LowerBoundSampler, {"interval_width": 0.8}),
         (ThompsonSampler, {"n_quantiles": 4}),
         (ExpectedImprovementSampler, {"n_quantiles": 4}),
-        (InformationGainSampler, {"n_quantiles": 4}),
+        (EntropySearchSampler, {"n_quantiles": 4}),
         (MaxValueEntropySearchSampler, {"n_quantiles": 4}),
     ],
 )
@@ -76,7 +80,7 @@ def test_locally_weighted_conformal_searcher(
         (LowerBoundSampler, {"interval_width": 0.8}),
         (ThompsonSampler, {"n_quantiles": 4}),
         (ExpectedImprovementSampler, {"n_quantiles": 4}),
-        (InformationGainSampler, {"n_quantiles": 4}),
+        (EntropySearchSampler, {"n_quantiles": 4}),
         (MaxValueEntropySearchSampler, {"n_quantiles": 4}),
     ],
 )
@@ -210,10 +214,10 @@ def test_locally_weighted_searcher_with_advanced_samplers(big_toy_dataset):
     X_val, y_val = X[7:], y[7:]
     X_test = X_val[:2]
 
-    ig_sampler = InformationGainSampler(
+    ig_sampler = EntropySearchSampler(
         n_quantiles=4,
         n_paths=10,
-        n_X_candidates=2,
+        n_x_candidates=2,
         n_y_candidates_per_x=2,
         sampling_strategy="thompson",
     )
@@ -235,8 +239,8 @@ def test_locally_weighted_searcher_with_advanced_samplers(big_toy_dataset):
 
     mes_sampler = MaxValueEntropySearchSampler(
         n_quantiles=4,
-        n_min_samples=10,
-        n_y_samples=5,
+        n_paths=10,
+        n_y_candidates_per_x=5,
     )
     mes_searcher = LocallyWeightedConformalSearcher(
         point_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
@@ -336,10 +340,10 @@ def test_quantile_searcher_with_advanced_samplers(big_toy_dataset):
     X_val, y_val = X[7:], y[7:]
     X_test = X_val[:2]
 
-    ig_sampler = InformationGainSampler(
+    ig_sampler = EntropySearchSampler(
         n_quantiles=4,
         n_paths=10,
-        n_X_candidates=2,
+        n_x_candidates=2,
         n_y_candidates_per_x=2,
         sampling_strategy="thompson",
     )
@@ -361,8 +365,8 @@ def test_quantile_searcher_with_advanced_samplers(big_toy_dataset):
 
     mes_sampler = MaxValueEntropySearchSampler(
         n_quantiles=4,
-        n_min_samples=10,
-        n_y_samples=5,
+        n_paths=10,
+        n_y_candidates_per_x=5,
     )
     mes_searcher = QuantileConformalSearcher(
         quantile_estimator_architecture="ql",

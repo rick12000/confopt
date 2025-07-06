@@ -16,3 +16,4 @@
     assert len(final_alphas) == len(initial_alphas), "Alpha count should remain consistent"
     after any assert statement, it should just be assert len(final_alphas) == len(initial_alphas)
 - Keep comments to a minimum, comments should just explain more obscure asserts or tests.
+- Each unit test should be a function, functions should not be grouped in testing classes and should not have self attributes.

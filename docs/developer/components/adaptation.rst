@@ -187,7 +187,7 @@ Integration with Conformal Prediction
 .. code-block:: python
 
    from confopt.selection.acquisition import LocallyWeightedConformalSearcher
-   from confopt.selection.sampling import LowerBoundSampler
+   from confopt.selection.sampling.bound_samplers import LowerBoundSampler
 
    # Create sampler with Dt-ACI adaptation
    sampler = LowerBoundSampler(
@@ -392,7 +392,7 @@ Pipeline Integration
 
    from confopt.tuning import HyperparameterOptimizer
    from confopt.selection.acquisition import LocallyWeightedConformalSearcher
-   from confopt.selection.sampling import LowerBoundSampler
+   from confopt.selection.sampling.bound_samplers import LowerBoundSampler
 
    # Create adaptive acquisition function
    sampler = LowerBoundSampler(alpha=0.1, adapter="DtACI")

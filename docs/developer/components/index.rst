@@ -40,3 +40,62 @@ Utility Components
 ~~~~~~~~~~~~~~~~
 
 *Coming soon: Utility and helper modules documentation*
+
+Components Reference
+====================
+
+This section provides detailed documentation for each component of the confopt framework, including implementation details, theoretical foundations, and practical usage guidelines.
+
+Core Components
+---------------
+
+.. toctree::
+   :maxdepth: 2
+
+   conformal_prediction
+   quantile_estimation
+
+Optimization Components
+-----------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   acquisition_functions
+
+Sampling Strategies
+------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   sampling_utils
+   thompson_samplers
+   expected_improvement_samplers
+   entropy_samplers
+   bound_samplers
+
+Adaptation Components
+--------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   adaptation
+
+Selection Components
+-------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   selection_strategies
+
+Utility Components
+-----------------
+
+.. toctree::
+   :maxdepth: 2
+
+   utilities
+   data_processing
