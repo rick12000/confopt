@@ -49,7 +49,7 @@ def process_and_split_estimation_data(
         y=y,
         train_split=train_split,
         normalize=False,  # False, handled outside of this function
-        ordinal=False,  # FIXED: Use random split to avoid data leakage
+        ordinal=False,
         random_state=random_state,
     )
 
@@ -89,173 +89,128 @@ def create_config_hash(config: Dict) -> str:
     return "|".join(items)
 
 
-class ConfigurationManager:
-    """Manages searched and searchable configurations with efficient state tracking"""
-
+class BaseConfigurationManager:
     def __init__(
         self,
         search_space: Dict[str, ParameterRange],
         n_candidate_configurations: int,
-        dynamic_sampling: bool,
     ):
         self.search_space = search_space
         self.n_candidate_configurations = n_candidate_configurations
-        self.dynamic_sampling = dynamic_sampling
-
-        # Core state tracking
-        self.searched_configs = (
-            []
-        )  # List[Dict] - configurations that have been evaluated
-        self.searched_performances = (
-            []
-        )  # List[float] - corresponding performance scores
-        self.searched_config_hashes = set()  # Set[str] - for O(1) duplicate checking
-
-        # Static mode only: pre-generated pool of searchable configurations
-        self.static_searchable_configs = []  # List[Dict] - only used in static mode
-
-        # Encoder for tabularization
+        self.searched_configs = []
+        self.searched_performances = []
+        self.searched_config_hashes = set()
         self.encoder = None
+        self.banned_configurations = []
 
-    def initialize_encoder(self):
-        """Initialize and train the encoder on a representative sample"""
-        # Generate a large sample to ensure encoder captures all categorical values
+    def _setup_encoder(self, configs: List[Dict]):
         encoder_training_configs = get_tuning_configurations(
             parameter_grid=self.search_space,
             n_configurations=min(1000, self.n_candidate_configurations),
             random_state=None,
             sampling_method="uniform",
         )
-        # Include any searched configs to ensure they're covered
-        if self.searched_configs:
-            encoder_training_configs.extend(self.searched_configs)
+        if configs:
+            encoder_training_configs.extend(configs)
         self.encoder = ConfigurationEncoder()
         self.encoder.fit(encoder_training_configs)
-        logger.debug(
-            f"Encoder trained on {len(encoder_training_configs)} configurations"
-        )
-
-    def process_warm_starts(
-        self, warm_start_configurations: Optional[List[Tuple[Dict, float]]]
-    ) -> List[Trial]:
-        """Process warm start configurations and return trials"""
-        if not warm_start_configurations:
-            return []
-
-        warm_start_trials = []
-        for i, (config, performance) in enumerate(warm_start_configurations):
-            self.mark_as_searched(config, performance)
-
-            warm_start_trials.append(
-                Trial(
-                    iteration=i,
-                    timestamp=datetime.now(),
-                    configuration=config.copy(),
-                    performance=performance,
-                    acquisition_source="warm_start",
-                )
-            )
-
-        logger.debug(f"Processed {len(warm_start_trials)} warm start configurations")
-        return warm_start_trials
-
-    def initialize_static_pool(self):
-        """Initialize static searchable configuration pool (static mode only)"""
-        if self.dynamic_sampling:
-            return
-        # Generate configurations excluding already searched ones
-        all_configs = get_tuning_configurations(
-            parameter_grid=self.search_space,
-            n_configurations=self.n_candidate_configurations
-            + len(self.searched_configs),
-            random_state=None,
-            sampling_method="uniform",
-        )
-        # Filter out searched configurations
-        self.static_searchable_configs = []
-        for config in all_configs:
-            config_hash = create_config_hash(config)
-            if config_hash not in self.searched_config_hashes:
-                self.static_searchable_configs.append(config)
-                if (
-                    len(self.static_searchable_configs)
-                    >= self.n_candidate_configurations
-                ):
-                    break
-        logger.debug(
-            f"Initialized static pool with {len(self.static_searchable_configs)} configurations"
-        )
-
-    def get_searchable_configurations(self) -> List[Dict]:
-        """Get current searchable configurations based on sampling mode"""
-        if self.dynamic_sampling:
-            return self._generate_dynamic_searchable_configs()
-        else:
-            return self._get_static_searchable_configs()
-
-    def _generate_dynamic_searchable_configs(self) -> List[Dict]:
-        """Generate fresh searchable configurations for dynamic mode"""
-        # Generate new configurations excluding searched ones
-        all_configs = get_tuning_configurations(
-            parameter_grid=self.search_space,
-            n_configurations=self.n_candidate_configurations
-            + len(self.searched_configs),
-            random_state=None,
-            sampling_method="uniform",
-        )
-        # Filter out searched configurations
-        searchable_configs = []
-        for config in all_configs:
-            config_hash = create_config_hash(config)
-            if config_hash not in self.searched_config_hashes:
-                searchable_configs.append(config)
-                if len(searchable_configs) >= self.n_candidate_configurations:
-                    break
-        return searchable_configs
-
-    def _get_static_searchable_configs(self) -> List[Dict]:
-        """Get searchable configurations from static pool"""
-        if not self.static_searchable_configs:
-            # Pool exhausted, regenerate
-            logger.debug("Static pool exhausted, regenerating configurations")
-            self.initialize_static_pool()
-
-        return self.static_searchable_configs.copy()
 
     def mark_as_searched(self, config: Dict, performance: float):
-        """Mark a configuration as searched and update state"""
         config_hash = create_config_hash(config)
-
-        # Add to searched collections
         self.searched_configs.append(config)
         self.searched_performances.append(performance)
         self.searched_config_hashes.add(config_hash)
 
-        # Remove from static pool if in static mode
-        if not self.dynamic_sampling:
-            self.static_searchable_configs = [
-                c
-                for c in self.static_searchable_configs
-                if create_config_hash(c) != config_hash
-            ]
-
     def get_tabularized_configs(self, configs: List[Dict]) -> np.array:
-        """Convert configurations to tabularized format using encoder"""
         if not configs:
             return np.array([])
         return self.encoder.transform(configs).to_numpy()
 
-    def get_search_state_summary(self) -> Dict:
-        """Get summary of current search state"""
-        searchable_count = len(self.get_searchable_configurations())
-        return {
-            "searched_count": len(self.searched_configs),
-            "searchable_count": searchable_count,
-            "mode": "dynamic" if self.dynamic_sampling else "static",
-            "static_pool_size": len(self.static_searchable_configs)
-            if not self.dynamic_sampling
-            else None,
-        }
+    def add_to_banned_configurations(self, config: Dict):
+        # Add configuration to banned list if not already present
+        config_hash = create_config_hash(config)
+        if config_hash not in [
+            create_config_hash(c) for c in self.banned_configurations
+        ]:
+            self.banned_configurations.append(config)
+
+
+class StaticConfigurationManager(BaseConfigurationManager):
+    def __init__(
+        self,
+        search_space: Dict[str, ParameterRange],
+        n_candidate_configurations: int,
+    ):
+        super().__init__(search_space, n_candidate_configurations)
+        self.cached_searchable_configs = []
+        self._initialize_static_configs_and_encoder()
+
+    def _initialize_static_configs_and_encoder(self):
+        candidate_configurations = get_tuning_configurations(
+            parameter_grid=self.search_space,
+            n_configurations=self.n_candidate_configurations,
+            random_state=None,
+            sampling_method="uniform",
+        )
+        filtered_configs = []
+        for config in candidate_configurations:
+            config_hash = create_config_hash(config)
+            if config_hash not in self.searched_config_hashes:
+                filtered_configs.append(config)
+        self.cached_searchable_configs = filtered_configs
+        self._setup_encoder(self.searched_configs + self.cached_searchable_configs)
+
+    def get_searchable_configurations(self) -> List[Dict]:
+        # Remove already searched and banned configs from cache
+        banned_hashes = set(create_config_hash(c) for c in self.banned_configurations)
+        self.cached_searchable_configs = [
+            c
+            for c in self.cached_searchable_configs
+            if create_config_hash(c) not in self.searched_config_hashes
+            and create_config_hash(c) not in banned_hashes
+        ]
+        return self.cached_searchable_configs.copy()
+
+    def mark_as_searched(self, config: Dict, performance: float):
+        super().mark_as_searched(config, performance)
+        # Remove from cache if present
+        config_hash = create_config_hash(config)
+        self.cached_searchable_configs = [
+            c
+            for c in self.cached_searchable_configs
+            if create_config_hash(c) != config_hash
+        ]
+
+
+class DynamicConfigurationManager(BaseConfigurationManager):
+    def __init__(
+        self,
+        search_space: Dict[str, ParameterRange],
+        n_candidate_configurations: int,
+    ):
+        super().__init__(search_space, n_candidate_configurations)
+        self._setup_encoder(self.searched_configs)
+
+    def get_searchable_configurations(self) -> List[Dict]:
+        candidate_configurations = get_tuning_configurations(
+            parameter_grid=self.search_space,
+            n_configurations=self.n_candidate_configurations
+            + len(self.searched_configs),
+            random_state=None,
+            sampling_method="uniform",
+        )
+        banned_hashes = set(create_config_hash(c) for c in self.banned_configurations)
+        filtered_configs = []
+        for config in candidate_configurations:
+            config_hash = create_config_hash(config)
+            if (
+                config_hash not in self.searched_config_hashes
+                and config_hash not in banned_hashes
+            ):
+                filtered_configs.append(config)
+                if len(filtered_configs) >= self.n_candidate_configurations:
+                    break
+        return filtered_configs
 
 
 class ConformalTuner:
@@ -274,13 +229,8 @@ class ConformalTuner:
         self.search_space = search_space
         self.metric_sign = -1 if metric_optimization == "maximize" else 1
         self.warm_start_configurations = warm_start_configurations
-
-        # Initialize configuration manager
-        self.config_manager = ConfigurationManager(
-            search_space=search_space,
-            n_candidate_configurations=n_candidate_configurations,
-            dynamic_sampling=dynamic_sampling,
-        )
+        self.n_candidate_configurations = n_candidate_configurations
+        self.dynamic_sampling = dynamic_sampling
 
     @staticmethod
     def _set_conformal_validation_split(X: np.array) -> float:
@@ -313,28 +263,36 @@ class ConformalTuner:
                 "The return type of the objective function must be numeric (int, float, or np.number)."
             )
 
+    def process_warm_starts(self):
+        for idx, (config, performance) in enumerate(self.warm_start_configurations):
+            self.config_manager.mark_as_searched(config, performance)
+            trial = Trial(
+                iteration=idx,
+                timestamp=datetime.now(),
+                configuration=config.copy(),
+                performance=performance,
+                acquisition_source="warm_start",
+            )
+            self.study.append_trial(trial)
+
     def _initialize_tuning_resources(self):
-        """Initialize all tuning resources"""
         self.study = Study()
 
-        # Process warm starts first
-        warm_start_trials = self.config_manager.process_warm_starts(
-            self.warm_start_configurations
-        )
-        if warm_start_trials:
-            self.study.batch_append_trials(trials=warm_start_trials)
+        if self.dynamic_sampling:
+            self.config_manager = DynamicConfigurationManager(
+                search_space=self.search_space,
+                n_candidate_configurations=self.n_candidate_configurations,
+            )
+        else:
+            self.config_manager = StaticConfigurationManager(
+                search_space=self.search_space,
+                n_candidate_configurations=self.n_candidate_configurations,
+            )
 
-        # Initialize encoder
-        self.config_manager.initialize_encoder()
+        if self.warm_start_configurations:
+            self.process_warm_starts()
 
-        # Initialize static pool if needed
-        self.config_manager.initialize_static_pool()
-
-        # Log initial state
-        state_summary = self.config_manager.get_search_state_summary()
-        logger.debug(f"Initialized tuning resources: {state_summary}")
-
-    def _evaluate_configuration(self, configuration):
+    def _evaluate_configuration(self, configuration) -> Tuple[float, float]:
         runtime_tracker = RuntimeTracker()
         performance = self.objective_function(configuration=configuration)
         runtime = runtime_tracker.return_runtime()
@@ -343,9 +301,9 @@ class ConformalTuner:
     def _random_search(
         self,
         n_searches: int,
-        verbose: bool = True,
         max_runtime: Optional[int] = None,
         max_iter: Optional[int] = None,
+        verbose: bool = True,
     ) -> List[Trial]:
         """Perform random search phase"""
         rs_trials = []
@@ -356,7 +314,7 @@ class ConformalTuner:
 
         if adj_n_searches == 0:
             logger.warning("No configurations available for random search")
-            return []
+            rs_trials = []
 
         # Randomly sample configurations
         search_idxs = np.random.choice(
@@ -379,6 +337,7 @@ class ConformalTuner:
                 logger.debug(
                     "Obtained non-numerical performance, skipping configuration."
                 )
+                self.config_manager.add_to_banned_configurations(config)
                 continue
 
             # Update search state
@@ -647,6 +606,7 @@ class ConformalTuner:
             )
 
             if np.isnan(validation_performance):
+                self.config_manager.add_to_banned_configurations(next_config)
                 continue
 
             # Calculate breach for logging/tracking
@@ -792,47 +752,3 @@ class ConformalTuner:
 
     def get_best_value(self) -> float:
         return self.study.get_best_performance()
-
-    # Properties for accessing configuration state
-    @property
-    def searched_configs(self):
-        """List of configurations that have been evaluated"""
-        return self.config_manager.searched_configs
-
-    @property
-    def searched_performances(self):
-        """List of performance scores for evaluated configurations"""
-        return self.config_manager.searched_performances
-
-    @property
-    def searchable_configs(self):
-        """List of configurations available for searching in current iteration"""
-        return self.config_manager.get_searchable_configurations()
-
-    @property
-    def searched_configs_set(self):
-        """Set of hashes for evaluated configurations (for O(1) duplicate checking)"""
-        return self.config_manager.searched_config_hashes
-
-    @property
-    def dynamic_sampling(self):
-        """Whether dynamic sampling mode is enabled"""
-        return self.config_manager.dynamic_sampling
-
-    @property
-    def n_candidate_configurations(self):
-        """Number of candidate configurations to sample per iteration"""
-        return self.config_manager.n_candidate_configurations
-
-    # Internal methods for backward compatibility with tests
-    def _sample_configurations_for_iteration(self):
-        """Get configurations available for current iteration"""
-        return self.config_manager.get_searchable_configurations()
-
-    def _get_tabularized_configs(self, configs):
-        """Convert configurations to tabularized format"""
-        return self.config_manager.get_tabularized_configs(configs)
-
-    def _update_search_state(self, config, performance):
-        """Mark a configuration as searched and update state"""
-        self.config_manager.mark_as_searched(config, performance)
