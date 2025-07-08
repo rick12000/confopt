@@ -6,3 +6,4 @@ lightgbm>=3.2.0
 tqdm>=4.60.0
 pydantic>=2.0.0
 joblib>=1.0.0
+statsmodels>=0.13.0
