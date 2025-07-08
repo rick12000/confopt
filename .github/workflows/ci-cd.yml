@@ -36,10 +36,10 @@ jobs:
         pytest tests/ -v --tb=short --junitxml=test-results-${{ matrix.python-version }}.xml
 
     - name: Upload test results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: test-results-${{ matrix.python-version }}
+        name: test-results-${{ matrix.python-version }} # Ensure unique names if needed
         path: test-results-${{ matrix.python-version }}.xml
 
   lint:
@@ -91,9 +91,9 @@ jobs:
       run: twine check dist/*
 
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: dist
+        name: dist # Ensure unique names if needed
         path: dist/
 
   version-check:
