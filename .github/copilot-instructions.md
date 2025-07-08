@@ -18,3 +18,8 @@
 - Don't rely on default values for function arguments.
 - Avoid *args or **kwargs unless absolutely necessary.
 - Use pydantic models for configuration values.
+- Always comply with DRY and SOLID principles.
+- Use as little code as is necessary to carry out the desired functionality, do not over-engineer or over-validate your code.
+- Write easily testable and maintainable code.
+- Maximize separation of concerns.
+- Consider how your changes will affect the wider codebase, think several dependancies ahead.

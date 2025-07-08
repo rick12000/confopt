@@ -9,7 +9,7 @@ from scipy.stats import norm
 logger = logging.getLogger(__name__)
 
 
-class BayesianTuner:
+class BayesianSearcherOptimizer:
     def __init__(
         self,
         max_tuning_count: int = 20,
@@ -200,7 +200,7 @@ class BayesianTuner:
         return (int(best_count), int(best_interval))
 
 
-class FixedSurrogateTuner:
+class FixedSearcherOptimizer:
     def __init__(
         self,
         n_tuning_episodes: int = 10,

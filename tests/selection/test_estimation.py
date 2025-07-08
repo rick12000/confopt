@@ -70,10 +70,6 @@ def test_quantile_tuner_returns_valid_configuration(
         for arch, config in ESTIMATOR_REGISTRY.items()
         if config.is_quantile_estimator()
     ]
-
-    if not quantile_architectures:
-        pytest.skip("No quantile estimators available")
-
     estimator_architecture = quantile_architectures[0]
     estimator_config = ESTIMATOR_REGISTRY[estimator_architecture]
 

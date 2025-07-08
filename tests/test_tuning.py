@@ -1,449 +1,366 @@
 import pytest
-from unittest.mock import MagicMock
+import numpy as np
+from typing import Dict
+from itertools import product
 
-from confopt.tuning import (
-    check_early_stopping,
-    ConformalTuner,
-    create_config_hash,
-)
-from confopt.utils.tracking import Trial
+from confopt.tuning import ConformalTuner, stop_search
+from confopt.wrapping import CategoricalRange
+from confopt.utils.tracking import RuntimeTracker
+from confopt.selection.acquisition import QuantileConformalSearcher, LowerBoundSampler
 
 
-@pytest.mark.parametrize(
-    "searchable_count,current_runtime,runtime_budget,current_iter,max_iter,expected",
-    [
-        (
-            0,
-            None,
-            None,
-            None,
-            None,
-            (True, "All configurations have been searched"),
-        ),  # Empty searchable indices
-        (
-            3,
-            11.0,
-            10.0,
-            None,
-            None,
-            (True, "Runtime budget (10.0) exceeded"),
-        ),  # Runtime budget exceeded
-        (
-            3,
-            None,
-            None,
-            20,
-            20,
-            (True, "Maximum iterations (20) reached"),
-        ),  # Max iterations reached (when current_iter >= max_iter)
-        (
-            3,
-            5.0,
-            10.0,
-            10,
-            30,
-            (False, "No stopping condition met"),
-        ),  # Normal operation (no stopping)
-    ],
-)
-def test_check_early_stopping(
-    searchable_count,
-    current_runtime,
-    runtime_budget,
-    current_iter,
-    max_iter,
-    expected,
-):
-    result = check_early_stopping(
-        searchable_count=searchable_count,
-        current_runtime=current_runtime,
-        runtime_budget=runtime_budget,
-        current_iter=current_iter,
-        max_iter=max_iter,
+def test_stop_search_no_remaining_configurations():
+    assert stop_search(
+        n_remaining_configurations=0,
+        current_iter=5,
+        current_runtime=10.0,
+        max_runtime=100.0,
+        max_iter=50,
     )
-    assert result == expected
 
 
-class TestConformalTuner:
-    def test_process_warm_start_configurations(
-        self, mock_constant_objective_function, dummy_parameter_grid
+@pytest.mark.parametrize("max_runtime", [10.0, 15.0, 20.0])
+def test_stop_search_runtime_exceeded(max_runtime):
+    current_runtime = 25.0
+    should_stop = current_runtime >= max_runtime
+    assert (
+        stop_search(
+            n_remaining_configurations=10,
+            current_iter=5,
+            current_runtime=current_runtime,
+            max_runtime=max_runtime,
+            max_iter=50,
+        )
+        == should_stop
+    )
+
+
+@pytest.mark.parametrize("max_iter", [10, 20, 30])
+def test_stop_search_iterations_exceeded(max_iter):
+    current_iter = 25
+    should_stop = current_iter >= max_iter
+    assert (
+        stop_search(
+            n_remaining_configurations=10,
+            current_iter=current_iter,
+            current_runtime=5.0,
+            max_runtime=100.0,
+            max_iter=max_iter,
+        )
+        == should_stop
+    )
+
+
+def test_stop_search_continue_search():
+    assert not stop_search(
+        n_remaining_configurations=10,
+        current_iter=5,
+        current_runtime=10.0,
+        max_runtime=100.0,
+        max_iter=50,
+    )
+
+
+def test_check_objective_function_wrong_argument_count(dummy_parameter_grid):
+    def invalid_objective(config1, config2):
+        return 1.0
+
+    with pytest.raises(
+        ValueError, match="Objective function must take exactly one argument"
     ):
-        """Test that warm start configurations are properly processed"""
-        warm_start_configs = [
-            ({"param_1": 0.5, "param_2": 5, "param_3": "option1"}, 0.8),
-            ({"param_1": 1.0, "param_2": 10, "param_3": "option2"}, 0.6),
-        ]
-
-        # Create a custom tuner with warm start configurations
-        tuner = ConformalTuner(
-            objective_function=mock_constant_objective_function,
+        ConformalTuner(
+            objective_function=invalid_objective,
             search_space=dummy_parameter_grid,
             metric_optimization="minimize",
-            n_candidate_configurations=100,
-            warm_start_configurations=warm_start_configs,
         )
 
-        # Initialize tuning resources which calls _process_warm_start_configurations
-        tuner._initialize_tuning_resources()
 
-        # Verify that warm start configs are properly processed
-        assert (
-            len(tuner.study.trials) == 2
-        ), "Should have added two trials from warm start"
+def test_check_objective_function_wrong_argument_name(dummy_parameter_grid):
+    def invalid_objective(config):
+        return 1.0
 
-        # Check that the configurations in trials match the warm start configs
-        for i, (config, _) in enumerate(warm_start_configs):
-            assert tuner.study.trials[i].configuration == config
-
-        # Check that searched configs and performances are updated
-        assert len(tuner.searched_configs) == 2
-        assert len(tuner.searched_performances) == 2
-
-        # Check that the configs are in the searched_configs_set
-        for config, _ in warm_start_configs:
-            config_hash = create_config_hash(config)
-            assert config_hash in tuner.searched_configs_set
-
-        # Check that warm start configs aren't in searchable configs (static mode)
-        if not tuner.dynamic_sampling:
-            for config, _ in warm_start_configs:
-                assert config not in tuner.searchable_configs
-
-    def test_update_search_state(self, tuner):
-        # Initialize tuning resources
-        tuner._initialize_tuning_resources()
-
-        # Save the initial state
-        initial_searchable_count = len(tuner.searchable_configs)
-        initial_searched_count = len(tuner.searched_configs)
-        initial_searched_performances = tuner.searched_performances.copy()
-
-        # Select a config to update
-        config = tuner.searchable_configs[0]
-        performance = 0.75
-
-        # Call the method under test
-        tuner._update_search_state(config=config, performance=performance)
-
-        # Verify that config was added to searched_configs
-        assert config in tuner.searched_configs
-        assert len(tuner.searched_configs) == initial_searched_count + 1
-
-        # Verify that performance was added to searched_performances
-        assert performance in tuner.searched_performances
-        assert (
-            len(tuner.searched_performances) == len(initial_searched_performances) + 1
+    with pytest.raises(
+        ValueError,
+        match="The objective function must take exactly one argument named 'configuration'",
+    ):
+        ConformalTuner(
+            objective_function=invalid_objective,
+            search_space=dummy_parameter_grid,
+            metric_optimization="minimize",
         )
 
-        # Verify that config was removed from searchable_configs
-        assert config not in tuner.searchable_configs
-        assert len(tuner.searchable_configs) == initial_searchable_count - 1
 
-    def test_random_search(self, tuner):
-        tuner._initialize_tuning_resources()
+def test_evaluate_configuration(tuner):
+    config = {"param_1": 0.5, "param_2": 10, "param_3": "option1"}
 
-        # Save the initial state
-        initial_searchable_count = len(tuner.searchable_configs)
-        initial_searched_count = len(tuner.searched_configs)
+    performance, runtime = tuner._evaluate_configuration(config)
 
-        # Call the method under test with a small number of searches
-        n_searches = 3
-        trials = tuner._random_search(n_searches=n_searches, verbose=False)
+    assert performance == 2
+    assert runtime >= 0
 
-        # Verify that the correct number of trials were returned
-        assert len(trials) == n_searches
 
-        # Verify that the search state was updated correctly
-        assert len(tuner.searched_configs) == initial_searched_count + n_searches
-        assert len(tuner.searchable_configs) == initial_searchable_count - n_searches
+def test_random_search_with_warm_start(
+    mock_constant_objective_function, dummy_parameter_grid
+):
+    warm_start_configs = [
+        ({"param_1": 0.5, "param_2": 10, "param_3": "option1"}, 0.8),
+    ]
 
-        # Verify that each trial has the correct metadata
-        for trial in trials:
-            assert isinstance(trial, Trial)
-            assert trial.acquisition_source == "rs"
-            assert trial.performance == 2
-
-    def test_random_search_early_stopping(self, tuner):
-        """Test that random search stops when runtime budget is exceeded."""
-        tuner._initialize_tuning_resources()
-
-        # Mock the search timer to return a runtime that exceeds the budget
-        tuner.search_timer = MagicMock()
-        tuner.search_timer.return_runtime = MagicMock(return_value=11.0)
-
-        # Verify that RuntimeError is raised when budget is exceeded
-        with pytest.raises(RuntimeError):
-            tuner._random_search(n_searches=5, verbose=False, max_runtime=10.0)
-
-    @pytest.mark.parametrize(
-        "searcher_tuning_framework", ["reward_cost", "fixed", None]
+    tuner = ConformalTuner(
+        objective_function=mock_constant_objective_function,
+        search_space=dummy_parameter_grid,
+        metric_optimization="minimize",
+        warm_start_configurations=warm_start_configs,
     )
-    def test_tune_with_default_searcher(self, tuner, searcher_tuning_framework):
-        tuner.tune(
-            n_random_searches=30,
-            max_iter=35,
-            verbose=False,
-            searcher_tuning_framework=searcher_tuning_framework,
+
+    tuner.initialize_tuning_resources()
+    tuner.search_timer = RuntimeTracker()
+
+    assert len(tuner.study.trials) == 1
+    assert tuner.study.trials[0].acquisition_source == "warm_start"
+
+    tuner.random_search(
+        max_random_iter=3,
+        verbose=False,
+    )
+
+    assert len(tuner.study.trials) == 4
+    assert tuner.study.trials[0].acquisition_source == "warm_start"
+    assert all(trial.acquisition_source == "rs" for trial in tuner.study.trials[1:])
+
+
+def test_random_search_with_nan_performance(dummy_parameter_grid):
+    def nan_objective(configuration: Dict) -> float:
+        return np.nan
+
+    tuner = ConformalTuner(
+        objective_function=nan_objective,
+        search_space=dummy_parameter_grid,
+        metric_optimization="minimize",
+    )
+
+    tuner.initialize_tuning_resources()
+    tuner.search_timer = RuntimeTracker()
+
+    tuner.random_search(
+        max_random_iter=3,
+        verbose=False,
+    )
+
+    # Should handle NaN gracefully and not crash
+    assert len(tuner.study.trials) == 0
+
+
+def test_prepare_searcher_data_shapes(tuner):
+    # Initialize with some data
+    tuner.initialize_tuning_resources()
+    tuner.config_manager.mark_as_searched(
+        {"param_1": 0.5, "param_2": 10, "param_3": "option1"}, 1.0
+    )
+    tuner.config_manager.mark_as_searched(
+        {"param_1": 0.3, "param_2": 20, "param_3": "option2"}, 2.0
+    )
+    tuner.config_manager.mark_as_searched(
+        {"param_1": 0.7, "param_2": 15, "param_3": "option3"}, 1.5
+    )
+
+    X_train, y_train, X_val, y_val = tuner.prepare_searcher_data(validation_split=0.33)
+
+    assert X_train.shape[0] == len(y_train)
+    assert X_val.shape[0] == len(y_val)
+    assert X_train.shape[0] + X_val.shape[0] == 3
+    assert X_train.shape[1] == X_val.shape[1]
+
+
+def test_fit_transform_searcher_data_shapes(tuner):
+    X_train = np.random.rand(10, 3)
+    X_val = np.random.rand(5, 3)
+
+    scaler, X_train_scaled, X_val_scaled = tuner.fit_transform_searcher_data(
+        X_train, X_val
+    )
+
+    assert X_train_scaled.shape == X_train.shape
+    assert X_val_scaled.shape == X_val.shape
+
+
+@pytest.mark.parametrize("random_state", [42, 123, 999])
+def test_tune_method_reproducibility(dummy_parameter_grid, random_state):
+    """Test that tune method produces identical results with same random seed"""
+
+    def complex_objective(configuration: Dict) -> float:
+        # Complex objective with multiple terms
+        x1 = configuration["param_1"]
+        x2 = configuration["param_2"]
+        x3_val = {"option1": 1, "option2": 2, "option3": 3}[configuration["param_3"]]
+        return x1**2 + np.sin(x2) + x3_val * 0.5
+
+    def run_tune_session():
+        # Create fresh searcher for each run to avoid state contamination
+        searcher = QuantileConformalSearcher(
+            quantile_estimator_architecture="ql",
+            sampler=LowerBoundSampler(
+                interval_width=0.1,
+                adapter="DtACI",
+                beta_decay="logarithmic_decay",
+                c=1,
+            ),
+            n_pre_conformal_trials=5,
         )
-
-        assert len(tuner.study.trials) == 35
-
-    def test_reproducibility_with_fixed_random_state(
-        self, mock_constant_objective_function, dummy_parameter_grid
-    ):
-        common_params = {
-            "objective_function": mock_constant_objective_function,
-            "search_space": dummy_parameter_grid,
-            "metric_optimization": "minimize",
-            "n_candidate_configurations": 100,
-        }
-        tune_params = {
-            "n_random_searches": 10,
-            "max_iter": 35,
-            "verbose": False,
-            "random_state": 42,
-        }
-
-        tuner1 = ConformalTuner(**common_params)
-        tuner1.tune(**tune_params)
-
-        tuner2 = ConformalTuner(**common_params)
-        tuner2.tune(**tune_params)
-
-        assert len(tuner1.study.trials) == len(tuner2.study.trials)
-        for trial1, trial2 in zip(tuner1.study.trials, tuner2.study.trials):
-            assert trial1.configuration == trial2.configuration
-            assert trial1.performance == trial2.performance
-
-    def test_primary_estimator_error_not_nan(self, tuner):
-        # Run a short tuning session
-        tuner.tune(n_random_searches=15, max_iter=30, verbose=False)
-        # Collect all primary_estimator_error values from trials
-        errors = [trial.primary_estimator_error for trial in tuner.study.trials]
-        # Check that at least one is not None and not NaN
-        assert any(
-            (e is not None and not (isinstance(e, float) and (e != e))) for e in errors
-        ), "At least one primary_estimator_error should be set and not NaN in the trials output."
-
-
-class TestDynamicSamplingIntegration:
-    """Integration tests for dynamic sampling using the main tune() method"""
-
-    def test_dynamic_sampling_no_duplicate_evaluations(self, dynamic_tuner):
-        """Integration test: Ensure no already-searched configurations are ever evaluated"""
-        # Run a short tuning session (need at least 5 random searches for conformal phase)
-        dynamic_tuner.tune(
-            n_random_searches=5,
-            max_iter=10,
-            verbose=False,
-        )
-
-        # Verify all evaluated configurations are unique
-        all_hashes = [
-            create_config_hash(config) for config in dynamic_tuner.searched_configs
-        ]
-        assert len(all_hashes) == len(
-            set(all_hashes)
-        ), "Duplicate configurations were evaluated"
-
-        # Verify we completed the expected number of trials
-        assert len(dynamic_tuner.study.trials) == 10
-        assert len(dynamic_tuner.searched_configs) == 10
-
-    def test_dynamic_sampling_state_consistency_during_tuning(self, dynamic_tuner):
-        """Integration test: Verify state consistency throughout the tuning process"""
-        # Run tuning (need at least 5 random searches for conformal phase)
-        dynamic_tuner.tune(
-            n_random_searches=5,
-            max_iter=8,
-            verbose=False,
-        )
-
-        # Verify final state consistency
-        assert len(dynamic_tuner.searched_configs) == len(
-            dynamic_tuner.searched_performances
-        )
-        assert len(dynamic_tuner.searched_configs) == len(
-            dynamic_tuner.searched_configs_set
-        )
-        assert len(dynamic_tuner.study.trials) == len(dynamic_tuner.searched_configs)
-
-        # Verify all searched configs are in the set
-        for config in dynamic_tuner.searched_configs:
-            config_hash = create_config_hash(config)
-            assert config_hash in dynamic_tuner.searched_configs_set
-
-    def test_dynamic_sampling_reaches_target_iterations(self, dynamic_tuner):
-        """Integration test: Verify dynamic sampling can reach target iterations beyond n_candidate_configurations"""
-        target_iterations = 12  # More than n_candidate_configurations (5)
-
-        dynamic_tuner.tune(
-            n_random_searches=5,  # Need at least 5 for conformal phase
-            max_iter=target_iterations,
-            verbose=False,
-        )
-
-        # Should reach target iterations despite small candidate count
-        assert len(dynamic_tuner.study.trials) == target_iterations
-        assert len(dynamic_tuner.searched_configs) == target_iterations
-
-
-class TestStaticSamplingIntegration:
-    """Integration tests for static sampling using the main tune() method"""
-
-    def test_static_sampling_no_duplicate_evaluations(self, static_tuner):
-        """Integration test: Ensure no already-searched configurations are ever evaluated in static mode"""
-        # Run tuning (need at least 5 random searches for conformal phase)
-        static_tuner.tune(
-            n_random_searches=5,
-            max_iter=10,
-            verbose=False,
-        )
-
-        # Verify all evaluated configurations are unique
-        all_hashes = [
-            create_config_hash(config) for config in static_tuner.searched_configs
-        ]
-        assert len(all_hashes) == len(
-            set(all_hashes)
-        ), "Duplicate configurations were evaluated"
-
-    def test_static_sampling_with_warm_start_integration(
-        self, mock_constant_objective_function, small_parameter_grid
-    ):
-        """Integration test: Verify static sampling with warm start configurations"""
-        warm_start_configs = [
-            ({"x": 0.5, "y": 2, "z": "A"}, 1.0),
-            ({"x": 0.8, "y": 1, "z": "B"}, 2.0),
-        ]
 
         tuner = ConformalTuner(
-            objective_function=mock_constant_objective_function,
-            search_space=small_parameter_grid,
+            objective_function=complex_objective,
+            search_space=dummy_parameter_grid,
             metric_optimization="minimize",
-            n_candidate_configurations=8,
-            dynamic_sampling=False,
-            warm_start_configurations=warm_start_configs,
+            n_candidate_configurations=200,
         )
 
-        # Run tuning (need at least 5 random searches for conformal phase)
         tuner.tune(
-            n_random_searches=5,
-            max_iter=8,
+            n_random_searches=10,
+            conformal_retraining_frequency=3,
+            searcher=searcher,
+            searcher_tuning_framework=None,
+            random_state=random_state,
+            max_iter=25,
+            max_runtime=None,
             verbose=False,
         )
 
-        # Verify warm start configs are included in final results
-        assert len(tuner.study.trials) == 8
-        assert len(tuner.searched_configs) == 8
+        return tuner.study
 
-        # Verify warm start configs are in the searched configs
-        warm_start_hashes = {
-            create_config_hash(config) for config, _ in warm_start_configs
-        }
-        searched_hashes = {
-            create_config_hash(config) for config in tuner.searched_configs
-        }
-        assert warm_start_hashes.issubset(
-            searched_hashes
-        ), "Warm start configs missing from results"
+    # Run twice with same seed
+    study1 = run_tune_session()
+    study2 = run_tune_session()
+
+    # Verify identical results
+    assert len(study1.trials) == len(study2.trials)
+
+    for trial1, trial2 in zip(study1.trials, study2.trials):
+        assert trial1.configuration == trial2.configuration
+        assert trial1.performance == trial2.performance
+        # Skip acquisition_source comparison as it contains object addresses
 
 
-class TestConfigurationSamplingIsolated:
-    """Isolated unit tests for individual configuration sampling methods"""
+@pytest.mark.parametrize("dynamic_sampling", [True, False])
+def test_tune_method_comprehensive_integration(
+    comprehensive_tuning_setup, dynamic_sampling
+):
+    """Comprehensive integration test for tune method (single run, logic only)"""
+    tuner, searcher, warm_start_configs, _ = comprehensive_tuning_setup(
+        dynamic_sampling
+    )
 
-    def test_sample_configurations_for_iteration_dynamic_count(self, dynamic_tuner):
-        """Isolated test: _sample_configurations_for_iteration returns correct count in dynamic mode"""
-        dynamic_tuner._initialize_tuning_resources()
+    tuner.tune(
+        n_random_searches=15,
+        conformal_retraining_frequency=1,
+        searcher=searcher,
+        searcher_tuning_framework=None,
+        random_state=42,
+        max_iter=50,
+        max_runtime=5 * 60,
+        verbose=False,
+    )
+    study = tuner.study
 
-        configs = dynamic_tuner._sample_configurations_for_iteration()
-        assert len(configs) == dynamic_tuner.n_candidate_configurations
+    # Test 1: Verify correct number of trials
+    assert len(study.trials) == 50
 
-    def test_sample_configurations_for_iteration_static_count(self, static_tuner):
-        """Isolated test: _sample_configurations_for_iteration returns correct count in static mode"""
-        static_tuner._initialize_tuning_resources()
+    # Test 2: Verify warm starts are present
+    warm_start_trials = [
+        t for t in study.trials if t.acquisition_source == "warm_start"
+    ]
+    assert len(warm_start_trials) == 3
+    warm_start_performances = [t.performance for t in warm_start_trials]
+    expected_performances = [perf for _, perf in warm_start_configs]
+    assert set(warm_start_performances) == set(expected_performances)
 
-        configs = static_tuner._sample_configurations_for_iteration()
-        # Should return all available configs (up to n_candidate_configurations)
-        assert len(configs) <= static_tuner.n_candidate_configurations
+    # Test 3: Verify trial sources
+    rs_trials = [t for t in study.trials if t.acquisition_source == "rs"]
+    conformal_trials = [
+        t for t in study.trials if t.acquisition_source not in ["warm_start", "rs"]
+    ]
+    assert len(rs_trials) == 12
+    assert len(conformal_trials) == 35
 
-    def test_update_search_state_isolated(self, dynamic_tuner):
-        """Isolated test: _update_search_state correctly updates all data structures"""
-        dynamic_tuner._initialize_tuning_resources()
+    # Test 4: Verify configurations are diverse
+    all_configs = [t.configuration for t in study.trials]
+    unique_configs = set(str(config) for config in all_configs)
+    assert len(unique_configs) == len(all_configs)
 
-        test_config = {"x": 0.5, "y": 2, "z": "A"}
-        test_performance = 1.5
+    # Test 5: Verify study methods work correctly
+    best_config = study.get_best_configuration()
+    best_value = study.get_best_performance()
+    assert best_config in all_configs
+    assert best_value == min(t.performance for t in study.trials)
 
-        initial_searched_count = len(dynamic_tuner.searched_configs)
 
-        dynamic_tuner._update_search_state(test_config, test_performance)
-
-        # Verify updates
-        assert len(dynamic_tuner.searched_configs) == initial_searched_count + 1
-        assert test_config in dynamic_tuner.searched_configs
-        assert test_performance in dynamic_tuner.searched_performances
-
-        config_hash = create_config_hash(test_config)
-        assert config_hash in dynamic_tuner.searched_configs_set
-
-    def test_get_tabularized_configs_isolated(self, dynamic_tuner):
-        """Isolated test: _get_tabularized_configs correctly transforms configurations"""
-        dynamic_tuner._initialize_tuning_resources()
-
-        test_configs = [
-            {"x": 0.5, "y": 2, "z": "A"},
-            {"x": 0.8, "y": 1, "z": "B"},
+@pytest.mark.parametrize("dynamic_sampling", [True, False])
+def test_conformal_vs_random_performance_averaged(
+    comprehensive_tuning_setup, dynamic_sampling
+):
+    """Compare conformal vs random search performance over multiple runs (averaged)."""
+    n_repeats = 20
+    min_conformal, min_random = [], []
+    avg_conformal, avg_random = [], []
+    for seed in range(n_repeats):
+        tuner, searcher, _, _ = comprehensive_tuning_setup(dynamic_sampling)
+        tuner.tune(
+            n_random_searches=15,
+            conformal_retraining_frequency=1,
+            searcher=searcher,
+            searcher_tuning_framework=None,
+            random_state=seed,
+            max_iter=50,
+            max_runtime=5 * 60,
+            verbose=False,
+        )
+        study = tuner.study
+        rs_trials = [t for t in study.trials if t.acquisition_source == "rs"]
+        conformal_trials = [
+            t for t in study.trials if t.acquisition_source not in ["warm_start", "rs"]
         ]
+        if len(rs_trials) == 0 or len(conformal_trials) == 0:
+            continue
+        min_random.append(min(t.performance for t in rs_trials))
+        min_conformal.append(min(t.performance for t in conformal_trials))
+        avg_random.append(np.mean([t.performance for t in rs_trials]))
+        avg_conformal.append(np.mean([t.performance for t in conformal_trials]))
 
-        tabularized = dynamic_tuner._get_tabularized_configs(test_configs)
-
-        # Should return numpy array with correct shape
-        assert tabularized.shape[0] == len(test_configs)
-        assert tabularized.shape[1] > 0  # Should have features
+    assert np.mean(avg_conformal) < np.mean(avg_random)
+    assert np.mean(min_conformal) <= np.mean(min_random)
 
 
-class TestConfigurationHashing:
-    """Isolated unit tests for configuration hashing functionality"""
+@pytest.mark.parametrize("metric_optimization", ["minimize", "maximize"])
+def test_best_fetcher_methods(metric_optimization):
+    grid = {
+        "x": CategoricalRange(choices=[0, 1]),
+        "y": CategoricalRange(choices=[0, 1, 2]),
+    }
 
-    def test_config_hash_consistency(self):
-        """Test that identical configurations produce identical hashes"""
-        config1 = {"x": 1.0, "y": 2, "z": "A"}
-        config2 = {"x": 1.0, "y": 2, "z": "A"}
-        config3 = {"z": "A", "y": 2, "x": 1.0}  # Different order
+    def objective(configuration):
+        return configuration["x"] + configuration["y"] * 10
 
-        hash1 = create_config_hash(config1)
-        hash2 = create_config_hash(config2)
-        hash3 = create_config_hash(config3)
+    tuner = ConformalTuner(
+        objective_function=objective,
+        search_space=grid,
+        metric_optimization=metric_optimization,
+        n_candidate_configurations=100,
+    )
+    tuner.initialize_tuning_resources()
+    tuner.search_timer = RuntimeTracker()
 
-        assert (
-            hash1 == hash2 == hash3
-        ), "Identical configurations should produce identical hashes"
+    total_configs = len(list(product([0, 1], [0, 1, 2])))
+    tuner.random_search(max_random_iter=total_configs, verbose=False)
 
-    def test_config_hash_uniqueness(self):
-        """Test that different configurations produce different hashes"""
-        configs = [
-            {"x": 1.0, "y": 2, "z": "A"},
-            {"x": 1.0, "y": 2, "z": "B"},
-            {"x": 1.0, "y": 3, "z": "A"},
-            {"x": 2.0, "y": 2, "z": "A"},
-        ]
+    # Use built-in methods to get best config and value
+    best_config = tuner.get_best_params()
+    best_value = tuner.get_best_value()
 
-        hashes = [create_config_hash(config) for config in configs]
+    if metric_optimization == "minimize":
+        expected_config = {"x": 0, "y": 0}
+    else:
+        expected_config = {"x": 1, "y": 2}
+    expected_value = objective(expected_config)
 
-        assert len(hashes) == len(
-            set(hashes)
-        ), "Different configurations should produce different hashes"
-
-    def test_config_hash_type_handling(self):
-        """Test that config hashing handles different data types correctly"""
-        config_with_types = {
-            "float_param": 1.5,
-            "int_param": 42,
-            "bool_param": True,
-            "str_param": "test",
-        }
-
-        # Should not raise an exception
-        hash_result = create_config_hash(config_with_types)
-        assert isinstance(hash_result, str)
-        assert len(hash_result) > 0
+    assert best_config == expected_config
+    assert best_value == expected_value

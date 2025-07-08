@@ -26,7 +26,7 @@ from confopt.selection.estimators.quantile_estimation import (
     BaseMultiFitQuantileEstimator,
 )
 from confopt.selection.estimators.ensembling import QuantileEnsembleEstimator
-from confopt.utils.encoding import get_tuning_configurations
+from confopt.utils.configurations.sampling import get_tuning_configurations
 
 logger = logging.getLogger(__name__)
 

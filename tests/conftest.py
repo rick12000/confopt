@@ -6,7 +6,8 @@ from typing import Dict
 from confopt.tuning import (
     ConformalTuner,
 )
-
+from confopt.utils.configurations.sampling import get_tuning_configurations
+from confopt.selection.acquisition import QuantileConformalSearcher, LowerBoundSampler
 from confopt.wrapping import FloatRange, IntRange, CategoricalRange, ConformalBounds
 from sklearn.base import BaseEstimator
 from confopt.selection.estimator_configuration import (
@@ -491,3 +492,48 @@ def monte_carlo_bounds_simple():
         ConformalBounds(lower_bounds=lower_bounds1, upper_bounds=upper_bounds1),
         ConformalBounds(lower_bounds=lower_bounds2, upper_bounds=upper_bounds2),
     ]
+
+
+@pytest.fixture
+def comprehensive_tuning_setup(dummy_parameter_grid):
+    """Fixture for comprehensive integration test setup (objective, warm starts, tuner, searcher)."""
+
+    def optimization_objective(configuration: Dict) -> float:
+        x1 = configuration["param_1"]
+        x2 = configuration["param_2"]
+        x3_val = {"option1": 0, "option2": 1, "option3": 2}[configuration["param_3"]]
+        return (x1 - 1) ** 2 + (x2 - 10) ** 2 * 0.01 + x3_val * 0.5
+
+    warm_start_configs_raw = get_tuning_configurations(
+        parameter_grid=dummy_parameter_grid,
+        n_configurations=3,
+        random_state=123,
+        sampling_method="uniform",
+    )
+    warm_start_configs = []
+    for config in warm_start_configs_raw:
+        performance = optimization_objective(config)
+        warm_start_configs.append((config, performance))
+
+    def make_tuner_and_searcher(dynamic_sampling):
+        tuner = ConformalTuner(
+            objective_function=optimization_objective,
+            search_space=dummy_parameter_grid,
+            metric_optimization="minimize",
+            n_candidate_configurations=500,
+            warm_start_configurations=warm_start_configs,
+            dynamic_sampling=dynamic_sampling,
+        )
+        searcher = QuantileConformalSearcher(
+            quantile_estimator_architecture="ql",
+            sampler=LowerBoundSampler(
+                interval_width=0.9,
+                adapter="DtACI",
+                beta_decay="logarithmic_decay",
+                c=1,
+            ),
+            n_pre_conformal_trials=20,
+        )
+        return tuner, searcher, warm_start_configs, optimization_objective
+
+    return make_tuner_and_searcher

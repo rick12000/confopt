@@ -1,12 +1,12 @@
 import pytest
 import numpy as np
-from confopt.utils.optimization import BayesianTuner, FixedSurrogateTuner
+from confopt.utils.optimization import BayesianSearcherOptimizer, FixedSearcherOptimizer
 
 
 @pytest.fixture
 def bayesian_tuner():
     """Fixture to create a BayesianTuner instance."""
-    return BayesianTuner(
+    return BayesianSearcherOptimizer(
         max_tuning_count=10,
         max_tuning_interval=10,
         conformal_retraining_frequency=2,
@@ -18,10 +18,14 @@ def bayesian_tuner():
 
 def test_bayesian_tuner_initialization():
     """Test that the BayesianTuner initializes correctly."""
-    tuner = BayesianTuner(max_tuning_interval=6, conformal_retraining_frequency=3)
+    tuner = BayesianSearcherOptimizer(
+        max_tuning_interval=6, conformal_retraining_frequency=3
+    )
     assert tuner.valid_intervals == [3, 6]
 
-    tuner = BayesianTuner(max_tuning_interval=2, conformal_retraining_frequency=3)
+    tuner = BayesianSearcherOptimizer(
+        max_tuning_interval=2, conformal_retraining_frequency=3
+    )
     assert tuner.valid_intervals == [3]
 
 
@@ -112,12 +116,12 @@ def test_bayesian_tuner_expected_improvement(bayesian_tuner):
 @pytest.fixture
 def fixed_surrogate_tuner():
     """Fixture to create a FixedSurrogateTuner instance."""
-    return FixedSurrogateTuner(n_tuning_episodes=8, tuning_interval=6)
+    return FixedSearcherOptimizer(n_tuning_episodes=8, tuning_interval=6)
 
 
 def test_fixed_surrogate_tuner_initialization():
     """Test initialization of FixedSurrogateTuner."""
-    tuner = FixedSurrogateTuner(tuning_interval=7, conformal_retraining_frequency=3)
+    tuner = FixedSearcherOptimizer(tuning_interval=7, conformal_retraining_frequency=3)
     assert tuner.fixed_interval == 6
 
 
