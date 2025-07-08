@@ -1,0 +1,259 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ '**' ]  # All branches
+  pull_request:
+    branches: [ '**' ]  # All branches
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    # Run on all pushes and pull requests
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+
+    - name: Run tests with pytest
+      run: |
+        pytest tests/ -v --tb=short --junitxml=test-results-${{ matrix.python-version }}.xml
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ matrix.python-version }}
+        path: test-results-${{ matrix.python-version }}.xml
+
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    # Run on all pushes and pull requests
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pre-commit
+
+    - name: Run pre-commit
+      run: |
+        pre-commit run --all-files
+
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    # Only run on pushes to main branch (not PRs)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+
+    - name: Build package
+      run: python -m build
+
+    - name: Check package
+      run: twine check dist/*
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: dist
+        path: dist/
+
+  version-check:
+    name: Version Check
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    # Only run on pushes to main branch (not PRs)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Check if version changed
+      run: |
+        python << 'EOF'
+        import re
+        import subprocess
+        import sys
+
+        def get_current_version():
+            with open('pyproject.toml', 'r') as f:
+                content = f.read()
+            match = re.search(r'version = "([^"]+)"', content)
+            return match.group(1) if match else "1.0.0"
+
+        def get_previous_version():
+            try:
+                # Get the version from the previous commit
+                result = subprocess.run(['git', 'show', 'HEAD~1:pyproject.toml'],
+                                      capture_output=True, text=True, check=True)
+                content = result.stdout
+                match = re.search(r'version = "([^"]+)"', content)
+                return match.group(1) if match else "1.0.0"
+            except subprocess.CalledProcessError:
+                return "1.0.0"
+
+        current_version = get_current_version()
+        previous_version = get_previous_version()
+
+        print(f"Current version: {current_version}")
+        print(f"Previous version: {previous_version}")
+
+        if current_version != previous_version:
+            print("✅ Version has been updated - ready for release")
+            sys.exit(0)
+        else:
+            print("❌ Version has not been updated - please bump version in pyproject.toml")
+            sys.exit(1)
+        EOF
+
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [build, version-check]
+    # Only run on pushes to main branch (not PRs) and after version check passes
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: release
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Get version for tagging and release
+      id: get_version
+      run: |
+        python << 'EOF'
+        import re
+        import os
+
+        with open('pyproject.toml', 'r') as f:
+            content = f.read()
+        match = re.search(r'version = "([^"]+)"', content)
+        version = match.group(1) if match else "1.0.0"
+
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"version={version}\n")
+        EOF
+
+    - name: Create and push tag
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git tag v${{ steps.get_version.outputs.version }}
+        git push origin v${{ steps.get_version.outputs.version }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+
+    - name: Build package
+      run: python -m build
+
+    - name: Publish to PyPI
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: twine upload dist/*
+
+    - name: Create draft GitHub Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ steps.get_version.outputs.version }}
+        release_name: Release v${{ steps.get_version.outputs.version }}
+        body: |
+          # Release v${{ steps.get_version.outputs.version }}
+
+          ## 📦 Package Information
+          - **Version**: ${{ steps.get_version.outputs.version }}
+          - **PyPI**: https://pypi.org/project/confopt/${{ steps.get_version.outputs.version }}/
+          - **Documentation**: https://confopt.readthedocs.io/en/latest/
+
+          ## 🔄 Changes
+          *Please update this section with detailed release notes before publishing.*
+
+          ## 📋 Installation
+          ```bash
+          pip install confopt==${{ steps.get_version.outputs.version }}
+          ```
+
+          ## 🏗️ Build Information
+          - **Commit**: ${{ github.sha }}
+          - **Build Date**: ${{ github.event.head_commit.timestamp }}
+          - **Workflow**: ${{ github.workflow }}
+
+          ---
+          *This is an automated draft release. Please review and update the release notes before publishing.*
+        draft: true
+        prerelease: false
+
+    - name: Upload source distribution
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./dist/confopt-${{ steps.get_version.outputs.version }}.tar.gz
+        asset_name: confopt-${{ steps.get_version.outputs.version }}.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload wheel distribution
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./dist/confopt-${{ steps.get_version.outputs.version }}-py3-none-any.whl
+        asset_name: confopt-${{ steps.get_version.outputs.version }}-py3-none-any.whl
+        asset_content_type: application/zip

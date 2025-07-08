@@ -5,7 +5,11 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath("../src"))
+sys.path.insert(0, os.path.abspath(".."))
+
+# RTD environment detection (optional, for any future customizations)
+on_rtd = os.environ.get("READTHEDOCS", None) == "True"
+rtd_version = os.environ.get("READTHEDOCS_VERSION", "latest")
 
 # -- Project information -----------------------------------------------------
 
