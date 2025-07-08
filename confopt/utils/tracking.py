@@ -77,7 +77,7 @@ class ProgressBarManager:
     def create_progress_bar(
         self,
         max_runtime: Optional[int] = None,
-        max_iter: Optional[int] = None,
+        max_searches: Optional[int] = None,
         current_trials: int = 0,
         description: str = "Search progress",
     ) -> None:
@@ -86,7 +86,7 @@ class ProgressBarManager:
 
         Args:
             max_runtime: Maximum allowed runtime in seconds.
-            max_iter: Maximum number of iterations.
+            max_searches: Maximum number of iterations.
             current_trials: Number of completed trials (for offsetting
                 iteration progress).
             description: Description for the progress bar.
@@ -94,8 +94,8 @@ class ProgressBarManager:
         if self.verbose:
             if max_runtime is not None:
                 self.progress_bar = tqdm(total=max_runtime, desc=f"{description}: ")
-            elif max_iter is not None:
-                remaining_iter = max_iter - current_trials
+            elif max_searches is not None:
+                remaining_iter = max_searches - current_trials
                 if remaining_iter > 0:
                     self.progress_bar = tqdm(
                         total=remaining_iter, desc=f"{description}: "

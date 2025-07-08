@@ -34,7 +34,7 @@ def stop_search(
     current_iter: int,
     current_runtime: float,
     max_runtime: Optional[float] = None,
-    max_iter: Optional[int] = None,
+    max_searches: Optional[int] = None,
 ) -> bool:
     """Determine whether to terminate the hyperparameter search process.
 
@@ -47,7 +47,7 @@ def stop_search(
         current_iter: Current iteration count in the search process
         current_runtime: Elapsed time since search initiation in seconds
         max_runtime: Maximum allowed runtime in seconds, None for no limit
-        max_iter: Maximum allowed iterations, None for no limit
+        max_searches: Maximum allowed iterations, None for no limit
 
     Returns:
         True if any stopping criterion is met, False otherwise
@@ -59,8 +59,8 @@ def stop_search(
         if current_runtime >= max_runtime:
             return True
 
-    if max_iter is not None:
-        if current_iter >= max_iter:
+    if max_searches is not None:
+        if current_iter >= max_searches:
             return True
 
     return False
@@ -239,7 +239,7 @@ class ConformalTuner:
         self,
         max_random_iter: int,
         max_runtime: Optional[int] = None,
-        max_iter: Optional[int] = None,
+        max_searches: Optional[int] = None,
         verbose: bool = True,
     ) -> None:
         """Execute random search phase to initialize optimization with baseline data.
@@ -252,7 +252,7 @@ class ConformalTuner:
         Args:
             max_random_iter: Maximum number of random configurations to evaluate
             max_runtime: Optional runtime budget in seconds
-            max_iter: Optional total iteration limit
+            max_searches: Optional total iteration limit
             verbose: Whether to display progress information
         """
         available_configs = self.config_manager.get_searchable_configurations()
@@ -301,7 +301,7 @@ class ConformalTuner:
                 current_runtime=current_runtime,
                 max_runtime=max_runtime,
                 current_iter=len(self.study.trials),
-                max_iter=max_iter,
+                max_searches=max_searches,
             )
             if stop:
                 break
@@ -310,7 +310,7 @@ class ConformalTuner:
         self,
         verbose: bool,
         max_runtime: Optional[int],
-        max_iter: Optional[int],
+        max_searches: Optional[int],
     ) -> Tuple[ProgressBarManager, float]:
         """Initialize progress tracking and iteration limits for conformal search.
 
@@ -321,24 +321,26 @@ class ConformalTuner:
         Args:
             verbose: Whether to display progress information
             max_runtime: Optional maximum runtime in seconds
-            max_iter: Optional maximum total iterations
+            max_searches: Optional maximum total iterations
 
         Returns:
-            Tuple of (progress_manager, conformal_max_iter)
+            Tuple of (progress_manager, conformal_max_searches)
         """
         progress_manager = ProgressBarManager(verbose=verbose)
         progress_manager.create_progress_bar(
             max_runtime=max_runtime,
-            max_iter=max_iter,
+            max_searches=max_searches,
             current_trials=len(self.study.trials),
             description="Conformal search",
         )
 
-        conformal_max_iter = (
-            max_iter - len(self.study.trials) if max_iter is not None else float("inf")
+        conformal_max_searches = (
+            max_searches - len(self.study.trials)
+            if max_searches is not None
+            else float("inf")
         )
 
-        return progress_manager, conformal_max_iter
+        return progress_manager, conformal_max_searches
 
     def initialize_searcher_optimizer(
         self,
@@ -607,7 +609,7 @@ class ConformalTuner:
         searcher: BaseConformalSearcher,
         conformal_retraining_frequency: int,
         verbose: bool,
-        max_iter: Optional[int],
+        max_searches: Optional[int],
         max_runtime: Optional[int],
         optimizer_framework: Optional[str] = None,
     ) -> None:
@@ -622,13 +624,14 @@ class ConformalTuner:
             searcher: Conformal prediction searcher for configuration selection
             conformal_retraining_frequency: Base frequency for model retraining
             verbose: Whether to display search progress
-            max_iter: Maximum total iterations including previous phases
+            max_searches: Maximum total iterations including previous phases
             max_runtime: Maximum total runtime budget in seconds
             optimizer_framework: Parameter tuning strategy
         """
-        progress_manager, conformal_max_iter = self.setup_conformal_search_resources(
-            verbose, max_runtime, max_iter
-        )
+        (
+            progress_manager,
+            conformal_max_searches,
+        ) = self.setup_conformal_search_resources(verbose, max_runtime, max_searches)
         optimizer = self.initialize_searcher_optimizer(
             optimizer_framework=optimizer_framework,
             conformal_retraining_frequency=conformal_retraining_frequency,
@@ -637,12 +640,12 @@ class ConformalTuner:
         tuning_count = 0
         searcher_retuning_frequency = conformal_retraining_frequency
         self.error_history = []
-        for search_iter in range(conformal_max_iter):
+        for search_iter in range(conformal_max_searches):
             progress_manager.update_progress(
                 current_runtime=(
                     self.search_timer.return_runtime() if max_runtime else None
                 ),
-                iteration_count=1 if max_iter else 0,
+                iteration_count=1 if max_searches else 0,
             )
 
             tabularized_searched_configs = self.config_manager.tabularize_configs(
@@ -721,7 +724,7 @@ class ConformalTuner:
                 current_runtime=self.search_timer.return_runtime(),
                 max_runtime=max_runtime,
                 current_iter=len(self.study.trials),
-                max_iter=max_iter,
+                max_searches=max_searches,
             )
             if should_stop:
                 break
@@ -802,7 +805,7 @@ class ConformalTuner:
                 metric_optimization='maximize'
             )
 
-            tuner.tune(n_random_searches=25, max_iter=100)
+            tuner.tune(n_random_searches=25, max_searches=100)
 
             best_config = tuner.get_best_params()
             best_score = tuner.get_best_value()
@@ -836,7 +839,7 @@ class ConformalTuner:
             self.random_search(
                 max_random_iter=remaining_random_searches,
                 max_runtime=max_runtime,
-                max_iter=max_searches,
+                max_searches=max_searches,
                 verbose=verbose,
             )
 
@@ -844,7 +847,7 @@ class ConformalTuner:
             searcher=searcher,
             conformal_retraining_frequency=conformal_retraining_frequency,
             verbose=verbose,
-            max_iter=max_searches,
+            max_searches=max_searches,
             max_runtime=max_runtime,
             optimizer_framework=optimizer_framework,
         )

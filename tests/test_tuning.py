@@ -15,7 +15,7 @@ def test_stop_search_no_remaining_configurations():
         current_iter=5,
         current_runtime=10.0,
         max_runtime=100.0,
-        max_iter=50,
+        max_searches=50,
     )
 
 
@@ -29,23 +29,23 @@ def test_stop_search_runtime_exceeded(max_runtime):
             current_iter=5,
             current_runtime=current_runtime,
             max_runtime=max_runtime,
-            max_iter=50,
+            max_searches=50,
         )
         == should_stop
     )
 
 
-@pytest.mark.parametrize("max_iter", [10, 20, 30])
-def test_stop_search_iterations_exceeded(max_iter):
+@pytest.mark.parametrize("max_searches", [10, 20, 30])
+def test_stop_search_iterations_exceeded(max_searches):
     current_iter = 25
-    should_stop = current_iter >= max_iter
+    should_stop = current_iter >= max_searches
     assert (
         stop_search(
             n_remaining_configurations=10,
             current_iter=current_iter,
             current_runtime=5.0,
             max_runtime=100.0,
-            max_iter=max_iter,
+            max_searches=max_searches,
         )
         == should_stop
     )
@@ -57,7 +57,7 @@ def test_stop_search_continue_search():
         current_iter=5,
         current_runtime=10.0,
         max_runtime=100.0,
-        max_iter=50,
+        max_searches=50,
     )
 
 
@@ -256,7 +256,7 @@ def test_tune_method_comprehensive_integration(
         searcher=searcher,
         optimizer_framework=None,
         random_state=42,
-        max_iter=50,
+        max_searches=50,
         max_runtime=5 * 60,
         verbose=False,
     )
@@ -310,7 +310,7 @@ def test_conformal_vs_random_performance_averaged(
             searcher=searcher,
             optimizer_framework=None,
             random_state=seed,
-            max_iter=50,
+            max_searches=50,
             max_runtime=5 * 60,
             verbose=False,
         )
