@@ -13,24 +13,7 @@ Add or update detailed and informative Google-style docstrings following these g
 - Key methodological approaches or architectural patterns used
 - Integration context within the broader framework
 - Focus on salient aspects, avoid trivial descriptions
-
-### Class docstrings:
-- Clear purpose statement and intended use cases
-- Key algorithmic or methodological details
-- Parameter descriptions that focus on methodology rather than obvious descriptions
-- Computational trade-offs and performance characteristics where relevant
-
-### Method docstrings:
-- Purpose and methodology explanation
-- Args section with parameter shapes where applicable
-- Returns section with output shapes and descriptions
-- Raises section for error conditions
-- Implementation details for complex algorithms
-
-### Coding style compliance:
-- Be informative but brief and to the point
-- Only keep the most salient aspects of methodology or approach
-- Base understanding on contextual analysis of the module and its usage in the codebase
+- Do not add any type hints in the doc strings.
 
 ---
 
@@ -95,23 +78,6 @@ See Also
 ## 3. Index Update
 
 Update `docs/developer/components/index.rst` to include the new module documentation in the appropriate section.
-
----
-
-## 4. Example Prompt
-
-```
-I need comprehensive documentation for the [MODULE_NAME].py module. Please follow these specific requirements:
-
-1. Add detailed and informative Google-style docstrings at the module, class, and method level, focusing on methodology, purpose, and integration context. Avoid trivial descriptions.
-2. Create a detailed `.rst` documentation file in `docs/developer/components/[module_name].rst` with:
-   - Overview, key features, architecture, methodology, usage examples, performance considerations, integration points, common pitfalls, and see also sections.
-   - Technical depth, mathematical foundations, and practical code examples.
-3. Update `docs/developer/components/index.rst` to reference the new documentation file.
-4. Ensure all documentation is contextually relevant, technically accurate, and consistent with the style and structure of the rest of the project.
-
-Start by analyzing the module structure and usage patterns, then proceed with the documentation following this template.
-```
 
 ---
 

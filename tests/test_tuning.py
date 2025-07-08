@@ -219,9 +219,9 @@ def test_tune_method_reproducibility(dummy_parameter_grid, random_state):
             n_random_searches=10,
             conformal_retraining_frequency=3,
             searcher=searcher,
-            searcher_tuning_framework=None,
+            optimizer=None,
             random_state=random_state,
-            max_iter=25,
+            max_searches=25,
             max_runtime=None,
             verbose=False,
         )

@@ -15,21 +15,46 @@ logger = logging.getLogger(__name__)
 
 
 class RuntimeTracker:
+    """
+    Tracks wall-clock runtime for iterative search or training processes.
+
+    Used to measure elapsed time for optimization or model training, supporting
+    pause/resume semantics for accurate accounting in multi-stage workflows.
+    """
+
     def __init__(self):
         self.start_time = time.time()
         self.runtime = 0
 
     def _elapsed_runtime(self):
+        """
+        Returns the elapsed time since the last start or resume.
+
+        Returns:
+            Elapsed time in seconds.
+        """
         take_time = time.time()
         return abs(take_time - self.start_time)
 
     def pause_runtime(self):
+        """
+        Accumulates elapsed time into the runtime counter and pauses tracking.
+        """
         self.runtime = self.runtime + self._elapsed_runtime()
 
     def resume_runtime(self):
+        """
+        Resumes runtime tracking from the current time.
+        """
         self.start_time = time.time()
 
     def return_runtime(self):
+        """
+        Returns the total accumulated runtime, including the current interval.
+
+        Returns:
+            Total runtime in seconds.
+        """
         self.pause_runtime()
         taken_runtime = self.runtime
         self.resume_runtime()
@@ -37,7 +62,13 @@ class RuntimeTracker:
 
 
 class ProgressBarManager:
-    """Manages progress bar creation, updates, and closure for search operations"""
+    """
+    Manages progress bar creation, updates, and closure for search operations.
+
+    Integrates with tqdm to provide runtime- or iteration-based progress feedback
+    during optimization or training loops. Used in tuning workflows to visualize
+    progress and support user feedback.
+    """
 
     def __init__(self, verbose: bool = True):
         self.verbose = verbose
@@ -50,7 +81,16 @@ class ProgressBarManager:
         current_trials: int = 0,
         description: str = "Search progress",
     ) -> None:
-        """Create appropriate progress bar based on constraints"""
+        """
+        Initializes a progress bar based on runtime or iteration constraints.
+
+        Args:
+            max_runtime: Maximum allowed runtime in seconds.
+            max_iter: Maximum number of iterations.
+            current_trials: Number of completed trials (for offsetting
+                iteration progress).
+            description: Description for the progress bar.
+        """
         if self.verbose:
             if max_runtime is not None:
                 self.progress_bar = tqdm(total=max_runtime, desc=f"{description}: ")
@@ -64,7 +104,14 @@ class ProgressBarManager:
     def update_progress(
         self, current_runtime: Optional[float] = None, iteration_count: int = 1
     ) -> None:
-        """Update progress bar based on available metrics"""
+        """
+        Updates the progress bar based on runtime or iteration increments.
+
+        Args:
+            current_runtime: Current elapsed runtime in seconds.
+            iteration_count: Number of iterations to increment (if not
+                runtime-based).
+        """
         if self.progress_bar:
             if current_runtime is not None:
                 # Runtime-based progress
@@ -76,13 +123,22 @@ class ProgressBarManager:
                 self.progress_bar.update(iteration_count)
 
     def close_progress_bar(self) -> None:
-        """Close progress bar and cleanup"""
+        """
+        Closes and cleans up the progress bar.
+        """
         if self.progress_bar:
             self.progress_bar.close()
             self.progress_bar = None
 
 
 class Trial(BaseModel):
+    """
+    Represents a single experiment trial in a hyperparameter search.
+
+    Captures configuration, performance, timing, and metadata for each evaluation.
+    Used for experiment logging, analysis, and reproducibility.
+    """
+
     iteration: int
     timestamp: datetime
     configuration: dict
@@ -95,6 +151,14 @@ class Trial(BaseModel):
 
 
 class Study:
+    """
+    Aggregates and manages a collection of experiment trials.
+
+    Provides methods for appending, querying, and analyzing trials, including best
+    configuration selection and runtime statistics. Used as the main experiment
+    log in tuning workflows.
+    """
+
     def __init__(
         self, metric_optimization: Literal["minimize", "maximize"] = "minimize"
     ):
@@ -102,24 +166,55 @@ class Study:
         self.metric_optimization = metric_optimization
 
     def append_trial(self, trial: Trial):
+        """
+        Appends a single trial to the study log.
+
+        Args:
+            trial: Trial object to append.
+        """
         self.trials.append(trial)
 
     def batch_append_trials(self, trials: list[Trial]):
+        """
+        Appends multiple trials to the study log.
+
+        Args:
+            trials: List of Trial objects to append.
+        """
         self.trials.extend(trials)
 
     def get_searched_configurations(self) -> list[dict]:
+        """
+        Returns a list of all configurations evaluated in the study.
+
+        Returns:
+            List of configuration dictionaries.
+        """
         searched_configurations = []
         for trial in self.trials:
             searched_configurations.append(trial.configuration)
         return searched_configurations
 
     def get_searched_performances(self) -> list[dict]:
+        """
+        Returns a list of all performance values from the study.
+
+        Returns:
+            List of performance values.
+        """
         searched_performances = []
         for trial in self.trials:
             searched_performances.append(trial.performance)
         return searched_performances
 
     def get_best_configuration(self) -> dict:
+        """
+        Returns the configuration with the best performance according to the
+        optimization direction.
+
+        Returns:
+            Best configuration dictionary.
+        """
         searched_configurations = []
         for trial in self.trials:
             searched_configurations.append((trial.configuration, trial.performance))
@@ -131,6 +226,13 @@ class Study:
         return best_config
 
     def get_best_performance(self) -> float:
+        """
+        Returns the best performance value according to the optimization
+        direction.
+
+        Returns:
+            Best performance value.
+        """
         searched_performances = []
         for trial in self.trials:
             searched_performances.append(trial.performance)
@@ -141,6 +243,12 @@ class Study:
             return max(searched_performances)
 
     def get_average_target_model_runtime(self) -> float:
+        """
+        Returns the average runtime of the target model across all trials.
+
+        Returns:
+            Average runtime in seconds.
+        """
         target_model_runtimes = []
         for trial in self.trials:
             if trial.target_model_runtime is not None:
@@ -149,6 +257,14 @@ class Study:
 
 
 class BaseConfigurationManager:
+    """
+    Abstract base class for configuration management in search workflows.
+
+    Handles tracking of searched, banned, and candidate configurations, and
+    provides tabularization for model input. Used as a base for static and
+    dynamic configuration managers.
+    """
+
     def __init__(
         self,
         search_space: dict[str, ParameterRange],
@@ -163,21 +279,45 @@ class BaseConfigurationManager:
         self.banned_configurations = []
 
     def _setup_encoder(self) -> None:
+        """
+        Initializes the configuration encoder for tabularization.
+        """
         self.encoder = ConfigurationEncoder(search_space=self.search_space)
 
     def mark_as_searched(self, config: dict, performance: float) -> None:
+        """
+        Marks a configuration as searched and records its performance.
+
+        Args:
+            config: Configuration dictionary.
+            performance: Observed performance value.
+        """
         config_hash = create_config_hash(config)
         self.searched_configs.append(config)
         self.searched_performances.append(performance)
         self.searched_config_hashes.add(config_hash)
 
     def tabularize_configs(self, configs: list[dict]) -> np.array:
+        """
+        Converts a list of configuration dictionaries to a tabular numpy array for
+        model input.
+
+        Args:
+            configs: List of configuration dictionaries.
+        Returns:
+            Tabularized configuration array.
+        """
         if not configs:
             return np.array([])
         return self.encoder.transform(configs).to_numpy()
 
     def add_to_banned_configurations(self, config: dict) -> None:
-        # Add configuration to banned list if not already present
+        """
+        Adds a configuration to the banned list if not already present.
+
+        Args:
+            config: Configuration dictionary to ban.
+        """
         config_hash = create_config_hash(config)
         if config_hash not in [
             create_config_hash(c) for c in self.banned_configurations
@@ -186,6 +326,13 @@ class BaseConfigurationManager:
 
 
 class StaticConfigurationManager(BaseConfigurationManager):
+    """
+    Manages a static set of candidate configurations for search.
+
+    Precomputes and caches candidate configurations, filtering out searched and
+    banned ones. Used for search strategies where the candidate pool is fixed.
+    """
+
     def __init__(
         self,
         search_space: dict[str, ParameterRange],
@@ -196,8 +343,12 @@ class StaticConfigurationManager(BaseConfigurationManager):
         self._initialize_static_configs_and_encoder()
 
     def _initialize_static_configs_and_encoder(self) -> None:
+        """
+        Initializes the static candidate configuration pool and encoder.
+        """
         # NOTE: Overfill n_configurations to avoid losing configurations during
-        # searched config filtering, then filter down to actual n_configurations at the end:
+        # searched config filtering, then filter down to actual n_configurations
+        # at the end:
         candidate_configurations = get_tuning_configurations(
             parameter_grid=self.search_space,
             n_configurations=self.n_candidate_configurations
@@ -214,6 +365,12 @@ class StaticConfigurationManager(BaseConfigurationManager):
         self._setup_encoder()
 
     def get_searchable_configurations(self) -> list[dict]:
+        """
+        Returns the list of candidate configurations not yet searched or banned.
+
+        Returns:
+            List of configuration dictionaries.
+        """
         # Remove already searched and banned configs from cache
         banned_hashes = set(create_config_hash(c) for c in self.banned_configurations)
         self.cached_searchable_configs = [
@@ -225,6 +382,13 @@ class StaticConfigurationManager(BaseConfigurationManager):
         return self.cached_searchable_configs.copy()
 
     def mark_as_searched(self, config: dict, performance: float) -> None:
+        """
+        Marks a configuration as searched and removes it from the static cache.
+
+        Args:
+            config: Configuration dictionary.
+            performance: Observed performance value.
+        """
         super().mark_as_searched(config, performance)
         # Remove from cache if present
         config_hash = create_config_hash(config)
@@ -236,6 +400,14 @@ class StaticConfigurationManager(BaseConfigurationManager):
 
 
 class DynamicConfigurationManager(BaseConfigurationManager):
+    """
+    Dynamically generates candidate configurations for each search iteration.
+
+    Used for search strategies where the candidate pool is not fixed and can
+    adapt to search history. Integrates with configuration sampling utilities for
+    on-the-fly candidate generation.
+    """
+
     def __init__(
         self,
         search_space: dict[str, ParameterRange],
@@ -245,6 +417,13 @@ class DynamicConfigurationManager(BaseConfigurationManager):
         self._setup_encoder()
 
     def get_searchable_configurations(self) -> list[dict]:
+        """
+        Generates and returns a list of candidate configurations not yet searched
+        or banned.
+
+        Returns:
+            List of configuration dictionaries.
+        """
         candidate_configurations = get_tuning_configurations(
             parameter_grid=self.search_space,
             n_configurations=self.n_candidate_configurations

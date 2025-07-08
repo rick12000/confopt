@@ -29,7 +29,10 @@ Estimation Components
 Optimization Components
 ~~~~~~~~~~~~~~~~~~~~~
 
-*Coming soon: Tuning and optimization modules documentation*
+.. toctree::
+   :maxdepth: 2
+
+   tuning
 
 Configuration Components
 ~~~~~~~~~~~~~~~~~~~~~~~
