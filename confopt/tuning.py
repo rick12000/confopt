@@ -342,7 +342,7 @@ class ConformalTuner:
 
     def initialize_searcher_optimizer(
         self,
-        searcher_tuning_framework: Optional[str],
+        optimizer_framework: Optional[str],
         conformal_retraining_frequency: int,
     ):
         """Initialize multi-armed bandit optimizer for searcher parameter tuning.
@@ -353,13 +353,13 @@ class ConformalTuner:
         computational overhead.
 
         Args:
-            searcher_tuning_framework: Tuning strategy ('reward_cost', 'fixed', None)
+            optimizer_framework: Tuning strategy ('reward_cost', 'fixed', None)
             conformal_retraining_frequency: Base retraining frequency for validation
 
         Returns:
             Configured optimizer instance
         """
-        if searcher_tuning_framework == "reward_cost":
+        if optimizer_framework == "reward_cost":
             optimizer = BayesianSearcherOptimizer(
                 max_tuning_count=20,
                 max_tuning_interval=15,
@@ -368,13 +368,13 @@ class ConformalTuner:
                 exploration_weight=0.1,
                 random_state=42,
             )
-        elif searcher_tuning_framework == "fixed":
+        elif optimizer_framework == "fixed":
             optimizer = FixedSearcherOptimizer(
                 n_tuning_episodes=10,
                 tuning_interval=3 * conformal_retraining_frequency,
                 conformal_retraining_frequency=conformal_retraining_frequency,
             )
-        elif searcher_tuning_framework is None:
+        elif optimizer_framework is None:
             optimizer = FixedSearcherOptimizer(
                 n_tuning_episodes=0,
                 tuning_interval=conformal_retraining_frequency,
@@ -382,7 +382,7 @@ class ConformalTuner:
             )
         else:
             raise ValueError(
-                "searcher_tuning_framework must be either 'reward_cost', 'fixed', or None."
+                "optimizer_framework must be either 'reward_cost', 'fixed', or None."
             )
         return optimizer
 
@@ -609,7 +609,7 @@ class ConformalTuner:
         verbose: bool,
         max_iter: Optional[int],
         max_runtime: Optional[int],
-        searcher_tuning_framework: Optional[str] = None,
+        optimizer_framework: Optional[str] = None,
     ) -> None:
         """Execute conformal prediction-guided hyperparameter search.
 
@@ -624,13 +624,13 @@ class ConformalTuner:
             verbose: Whether to display search progress
             max_iter: Maximum total iterations including previous phases
             max_runtime: Maximum total runtime budget in seconds
-            searcher_tuning_framework: Parameter tuning strategy
+            optimizer_framework: Parameter tuning strategy
         """
         progress_manager, conformal_max_iter = self.setup_conformal_search_resources(
             verbose, max_runtime, max_iter
         )
         optimizer = self.initialize_searcher_optimizer(
-            searcher_tuning_framework=searcher_tuning_framework,
+            optimizer_framework=optimizer_framework,
             conformal_retraining_frequency=conformal_retraining_frequency,
         )
 
@@ -737,7 +737,7 @@ class ConformalTuner:
         ] = None,
         n_random_searches: int = 15,
         conformal_retraining_frequency: int = 1,
-        optimizer: Optional[Literal["reward_cost", "fixed"]] = None,
+        optimizer_framework: Optional[Literal["reward_cost", "fixed"]] = None,
         random_state: Optional[int] = None,
         verbose: bool = True,
     ) -> None:
@@ -770,7 +770,7 @@ class ConformalTuner:
                 (the model will retrain every `conformal_retraining_frequency`-th search iteration).
                 Recommended values are `1`: if your target model takes >1 min to train. `2`-`5`: if your target model is very
                 small, to reduce computational overhead.
-            optimizer (Optional[str], default=None): Controls how and when the surrogate model tunes its own parameters
+            optimizer_framework (Optional[str], default=None): Controls how and when the surrogate model tunes its own parameters
                 (this is different from tuning your target model).
                 Options are (1) `reward_cost`: Bayesian selection balancing prediction improvement vs cost.
                 (2) `fixed`: Deterministic tuning at fixed intervals. (3) `None`: No tuning. Surrogate tuning
@@ -846,7 +846,7 @@ class ConformalTuner:
             verbose=verbose,
             max_iter=max_searches,
             max_runtime=max_runtime,
-            searcher_tuning_framework=optimizer,
+            optimizer_framework=optimizer_framework,
         )
 
     def get_best_params(self) -> Dict:
