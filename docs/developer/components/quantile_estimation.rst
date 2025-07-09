@@ -236,13 +236,13 @@ Performance Considerations
 ========================== =============== =============== =================
 Estimator                  Training        Prediction      Memory
 ========================== =============== =============== =================
-QuantileGBM               O(nkd log n)     O(kd)           O(kd)
-QuantileLightGBM          O(nkd log n)     O(kd)           O(kd)
-QuantileForest            O(nd log n)      O(d)            O(nd)
-QuantileLeaf              O(nd log n)      O(Bd)           O(nd + By)
-QuantileKNN               O(n log n)       O(k log n)      O(nd)
-GaussianProcess (full)    O(n³)            O(n)            O(n²)
-GaussianProcess (sparse)  O(nm²)           O(m)            O(nm)
+QuantileGBM                O(nkd log n)    O(kd)           O(kd)
+QuantileLightGBM           O(nkd log n)    O(kd)           O(kd)
+QuantileForest             O(nd log n)     O(d)            O(nd)
+QuantileLeaf               O(nd log n)     O(Bd)           O(nd + By)
+QuantileKNN                O(n log n)      O(k log n)      O(nd)
+GaussianProcess (full)     O(n³)           O(n)            O(n²)
+GaussianProcess (sparse)   O(nm²)          O(m)            O(nm)
 ========================== =============== =============== =================
 
 Where n=samples, d=features, k=trees/quantiles, m=inducing points, B=trees, y=targets per leaf.

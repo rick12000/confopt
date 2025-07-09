@@ -24,12 +24,30 @@ if errorlevel 9009 (
 )
 
 if "%1" == "" goto help
+if "%1" == "livehtml" goto livehtml
 
 %SPHINXBUILD% -M %1 %SOURCEDIR% %BUILDDIR% %SPHINXOPTS% %O%
 goto end
 
 :help
 %SPHINXBUILD% -M help %SOURCEDIR% %BUILDDIR% %SPHINXOPTS% %O%
+echo.
+echo.Additional targets:
+echo.  livehtml   Start live rebuild server using sphinx-autobuild
+goto end
+
+:livehtml
+echo Starting live documentation server...
+echo Open http://localhost:8000 in your browser
+echo Press Ctrl+C to stop the server
+sphinx-autobuild %SOURCEDIR% %BUILDDIR%\html %SPHINXOPTS% %O% --host 0.0.0.0 --port 8000
+if errorlevel 1 (
+	echo.
+	echo.sphinx-autobuild not found. Install with: pip install sphinx-autobuild
+	echo.Or use: build_docs.bat live
+	exit /b 1
+)
+goto end
 
 :end
 popd
