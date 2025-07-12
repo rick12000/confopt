@@ -1,16 +1,28 @@
-.. ConfOpt documentation master file
+ConfOpt Documentation
+=====================
 
-ConfOpt - Voice Command Assistant
-===============================
-
-Welcome to ConfOpt's documentation! ConfOpt is an accessibility software with minimal system permissions and on-device processing for users with limited mobility.
+ConfOpt is a Python library for hyperparameter optimization using conformal prediction. It provides a statistically principled approach to hyperparameter tuning that combines the efficiency of guided search with the reliability of uncertainty quantification.
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
+   :caption: User Guide
+
+   installation
+   getting_started
+   advanced_usage
+
+.. toctree::
+   :maxdepth: 1
+   :caption: API Reference
+
+   api_reference
+
+.. toctree::
+   :maxdepth: 1
    :caption: Developer Guide
 
-   developer/architecture
-   developer/components/index
+   architecture
+   components
 
 .. toctree::
    :maxdepth: 1
@@ -19,24 +31,40 @@ Welcome to ConfOpt's documentation! ConfOpt is an accessibility software with mi
    roadmap
    contact
 
-About ConfOpt
-===========
+Quick Start
+-----------
 
-ConfOpt...
+Install ConfOpt:
 
-Key Features
-------------
+.. code-block:: bash
 
+   pip install confopt
 
+Basic usage:
 
-License
-=======
+.. code-block:: python
 
-ConfOpt is released under the Apache License 2.0. See the `LICENSE <https://github.com/rick12000/confopt/blob/main/LICENSE>`_ file for details.
+   from confopt.tuning import ConformalTuner
+   from confopt.wrapping import IntRange, FloatRange
 
-Indices and Tables
-==================
+   # Define search space
+   search_space = {
+       'n_estimators': IntRange(50, 200),
+       'max_depth': IntRange(3, 20)
+   }
 
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+   # Create tuner
+   tuner = ConformalTuner(
+       objective_function=your_objective_function,
+       search_space=search_space,
+       metric_optimization='maximize'
+   )
+
+   # Run optimization
+   tuner.tune(max_searches=100)
+
+   # Get results
+   best_params = tuner.get_best_params()
+   best_score = tuner.get_best_value()
+
+For detailed examples and usage patterns, see the :doc:`basic_usage` section.

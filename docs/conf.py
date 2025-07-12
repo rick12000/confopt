@@ -59,6 +59,7 @@ napoleon_use_param = True
 napoleon_use_rtype = True
 
 # Autodoc settings
+
 autodoc_default_options = {
     "members": True,
     "member-order": "bysource",
@@ -67,6 +68,7 @@ autodoc_default_options = {
     "exclude-members": "__weakref__",
 }
 autodoc_typehints = "description"
+autodoc_class_attributes = False
 
 # Autosummary settings
 autosummary_generate = True
@@ -77,6 +79,7 @@ intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
     "scipy": ("https://docs.scipy.org/doc/scipy/", None),
+    "sklearn": ("https://scikit-learn.org/stable/", None),
 }
 
 templates_path = ["_templates"]
@@ -87,14 +90,14 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 html_theme = "sphinx_rtd_theme"
 html_theme_options = {
     "canonical_url": "https://confopt.readthedocs.io/",
-    "logo_only": False,
+    "logo_only": True,
     "prev_next_buttons_location": "bottom",
     "style_external_links": False,
-    "style_nav_header_background": "#2980B9",
-    # Toc options
-    "collapse_navigation": True,
+    "style_nav_header_background": "#2563eb",
+    # Toc options - optimized for better navigation
+    "collapse_navigation": False,
     "sticky_navigation": True,
-    "navigation_depth": 4,
+    "navigation_depth": 3,
     "includehidden": True,
     "titles_only": False,
 }
@@ -111,8 +114,8 @@ html_context = {
     "conf_py_path": "/docs/",
 }
 
-# Custom logo and favicon (if they exist)
-html_logo = None  # RTD will handle this
+# Custom logo and favicon
+html_logo = "../assets/logo.png"
 html_favicon = None  # RTD will handle this
 
 # The root toctree document (updated from deprecated master_doc)
@@ -139,6 +142,20 @@ nitpicky = True
 nitpick_ignore = [
     ("py:class", "type"),
     ("py:class", "object"),
+    ("py:class", "callable"),
+    ("py:class", "default=100"),
+    ("py:class", "default=None"),
+    ("py:class", "default=15"),
+    ("py:class", "default=1"),
+    ("py:class", "default=True"),
+    ("py:class", "confopt.wrapping.IntRange"),
+    ("py:class", "confopt.wrapping.FloatRange"),
+    ("py:class", "confopt.wrapping.CategoricalRange"),
+    ("py:class", "BaseConformalSearcher"),
+    ("py:class", "numpy.array"),
+    ("py:class", "sklearn.preprocessing._data.StandardScaler"),
+    ("py:class", "confopt.selection.acquisition.BaseConformalSearcher"),
+    ("py:class", "confopt.utils.tracking.ProgressBarManager"),
 ]
 
 # -- Options for LaTeX output ------------------------------------------------
