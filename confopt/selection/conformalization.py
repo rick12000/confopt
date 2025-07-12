@@ -453,7 +453,7 @@ class QuantileConformalEstimator:
         self,
         quantile_estimator_architecture: str,
         alphas: List[float],
-        n_pre_conformal_trials: int = 20,
+        n_pre_conformal_trials: int = 32,
     ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
         self.alphas = alphas

@@ -740,7 +740,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             EntropySearchSampler,
             MaxValueEntropySearchSampler,
         ],
-        n_pre_conformal_trials: int = 20,
+        n_pre_conformal_trials: int = 32,
     ):
         super().__init__(sampler)
         self.quantile_estimator_architecture = quantile_estimator_architecture

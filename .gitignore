@@ -26,6 +26,5 @@ var/
 *.egg
 
 # Dev
-examples/
 cache/
 _build/

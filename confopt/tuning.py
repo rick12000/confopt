@@ -744,72 +744,67 @@ class ConformalTuner:
         random_state: Optional[int] = None,
         verbose: bool = True,
     ) -> None:
-        """
-        Execute hyperparameter optimization using conformal prediction surrogate models.
+        """Execute hyperparameter optimization using conformal prediction surrogate models.
 
         Performs intelligent hyperparameter search through two phases: random exploration
         for baseline data, then conformal prediction-guided optimization using uncertainty
         quantification to select promising configurations.
 
         Args:
-            max_searches (Optional[int], default=100): Maximum total configurations to search (random + conformal searches).
-            max_runtime (Optional[int], default=None): Maximum search time in seconds. Search will terminate after this time, regardless of iterations.
-            searcher (Optional[object], default=None): Conformal acquisition function. Defaults to `QuantileConformalSearcher`
-                with `LowerBoundSampler`. You should not need to change this, as the default searcher performs
-                best across most tasks in offline benchmarks. Should you want to use a different searcher, you can pass any subclass of `BaseConformalSearcher`.
-                See `confopt.selection.acquisition` for all available searchers and
-                `confopt.selection.acquisition.samplers` to set the searcher's sampler.
-
-                Example of a searcher initialization to pass to this argument:
-                ```python
-                searcher = QuantileConformalSearcher(
-                    quantile_estimator_architecture='qrf',
-                    sampler=LowerBoundSampler(interval_width=0.1)
-                )
-                ```
-            n_random_searches (int, default=15): Number of random configurations to evaluate before conformal search.
-                Provides initial training data for the surrogate model.
-            conformal_retraining_frequency (int, default=1): How often the conformal surrogate model retrains
-                (the model will retrain every `conformal_retraining_frequency`-th search iteration).
-                Recommended values are `1`: if your target model takes >1 min to train. `2`-`5`: if your target model is very
-                small, to reduce computational overhead.
-            optimizer_framework (Optional[str], default=None): Controls how and when the surrogate model tunes its own parameters
-                (this is different from tuning your target model).
-                Options are (1) `reward_cost`: Bayesian selection balancing prediction improvement vs cost.
-                (2) `fixed`: Deterministic tuning at fixed intervals. (3) `None`: No tuning. Surrogate tuning
-                adds computational cost and is recommended only if your target
-                model takes more than 1–5 minutes to train.
-            random_state (Optional[int], default=None): Random seed for reproducible results.
-            verbose (bool, default=True): Whether to enable progress display.
+            max_searches: Maximum total configurations to search (random + conformal searches).
+                Default: 100.
+            max_runtime: Maximum search time in seconds. Search will terminate after this time,
+                regardless of iterations. Default: None (no time limit).
+            searcher: Conformal acquisition function. Defaults to QuantileConformalSearcher
+                with LowerBoundSampler. You should not need to change this, as the default
+                searcher performs best across most tasks in offline benchmarks. Should you want
+                to use a different searcher, you can pass any subclass of BaseConformalSearcher.
+                See confopt.selection.acquisition for all available searchers and
+                confopt.selection.acquisition.samplers to set the searcher's sampler.
+                Default: None.
+            n_random_searches: Number of random configurations to evaluate before conformal search.
+                Provides initial training data for the surrogate model. Default: 15.
+            conformal_retraining_frequency: How often the conformal surrogate model retrains
+                (the model will retrain every conformal_retraining_frequency-th search iteration).
+                Recommended values are 1 if your target model takes >1 min to train, 2-5 if your
+                target model is very small to reduce computational overhead. Default: 1.
+            optimizer_framework: Controls how and when the surrogate model tunes its own parameters
+                (this is different from tuning your target model). Options are 'reward_cost' for
+                Bayesian selection balancing prediction improvement vs cost, 'fixed' for
+                deterministic tuning at fixed intervals, or None for no tuning. Surrogate tuning
+                adds computational cost and is recommended only if your target model takes more
+                than 1-5 minutes to train. Default: None.
+            random_state: Random seed for reproducible results. Default: None.
+            verbose: Whether to enable progress display. Default: True.
 
         Example:
-            ```python
-            from confopt.tuning import ConformalTuner
-            from confopt.wrapping import ParameterRange
+            Basic usage::
 
-            def objective(configuration):
-                model = SomeModel(
-                    learning_rate=configuration['lr'],
-                    hidden_units=configuration['units']
+                from confopt.tuning import ConformalTuner
+                from confopt.wrapping import IntRange, FloatRange
+
+                def objective(configuration):
+                    model = SomeModel(
+                        learning_rate=configuration['lr'],
+                        hidden_units=configuration['units']
+                    )
+                    return model.evaluate()
+
+                search_space = {
+                    'lr': FloatRange(0.001, 0.1, log_scale=True),
+                    'units': IntRange(32, 512)
+                }
+
+                tuner = ConformalTuner(
+                    objective_function=objective,
+                    search_space=search_space,
+                    metric_optimization='maximize'
                 )
-                return model.evaluate()  # validation accuracy
 
-            search_space = {
-                'lr': ParameterRange(0.001, 0.1, log_scale=True),
-                'units': ParameterRange(32, 512, integer=True)
-            }
+                tuner.tune(n_random_searches=25, max_searches=100)
 
-            tuner = ConformalTuner(
-                objective_function=objective,
-                search_space=search_space,
-                metric_optimization='maximize'
-            )
-
-            tuner.tune(n_random_searches=25, max_searches=100)
-
-            best_config = tuner.get_best_params()
-            best_score = tuner.get_best_value()
-            ```
+                best_config = tuner.get_best_params()
+                best_score = tuner.get_best_value()
         """
 
         if random_state is not None:
@@ -825,7 +820,6 @@ class ConformalTuner:
                     beta_decay="logarithmic_decay",
                     c=1,
                 ),
-                n_pre_conformal_trials=20,
             )
 
         self.initialize_tuning_resources()
