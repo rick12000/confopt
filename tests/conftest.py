@@ -22,6 +22,7 @@ from confopt.selection.estimators.ensembling import (
     PointEnsembleEstimator,
 )
 from unittest.mock import Mock
+from confopt.selection.adaptation import DtACI
 
 DEFAULT_SEED = 1234
 
@@ -537,3 +538,44 @@ def comprehensive_tuning_setup(dummy_parameter_grid):
         return tuner, searcher, warm_start_configs, optimization_objective
 
     return make_tuner_and_searcher
+
+
+@pytest.fixture
+def moderate_shift_data():
+    """Create data with moderate distribution shift (0.1 -> 0.5 noise)."""
+    np.random.seed(42)
+    n_points = 200
+    shift_point = 100
+
+    X1 = np.random.randn(shift_point, 2)
+    y1 = X1.sum(axis=1) + 0.1 * np.random.randn(shift_point)
+
+    X2 = np.random.randn(n_points - shift_point, 2)
+    y2 = X2.sum(axis=1) + 0.5 * np.random.randn(n_points - shift_point)
+
+    return np.vstack([X1, X2]), np.hstack([y1, y2])
+
+
+@pytest.fixture
+def high_shift_data():
+    """Create data with high distribution shift (0.1 -> 0.8 -> 0.1 noise)."""
+    np.random.seed(42)
+    n_points = 300
+    shift_points = [100, 200]
+
+    X1 = np.random.randn(shift_points[0], 2)
+    y1 = X1.sum(axis=1) + 0.1 * np.random.randn(shift_points[0])
+
+    X2 = np.random.randn(shift_points[1] - shift_points[0], 2)
+    y2 = X2.sum(axis=1) + 0.8 * np.random.randn(shift_points[1] - shift_points[0])
+
+    X3 = np.random.randn(n_points - shift_points[1], 2)
+    y3 = X3.sum(axis=1) + 0.1 * np.random.randn(n_points - shift_points[1])
+
+    return np.vstack([X1, X2, X3]), np.hstack([y1, y2, y3])
+
+
+@pytest.fixture
+def dtaci_instance():
+    """Standard DtACI instance for testing."""
+    return DtACI(alpha=0.1, gamma_values=[0.01, 0.05, 0.1])

@@ -105,7 +105,10 @@ def initialize_multi_adapters(
     if adapter is None:
         return None
     elif adapter == "DtACI":
-        return [DtACI(alpha=alpha, gamma_values=[0.05, 0.01, 0.1]) for alpha in alphas]
+        return [
+            DtACI(alpha=alpha, gamma_values=[0.001, 0.005, 0.01, 0.05])
+            for alpha in alphas
+        ]
     elif adapter == "ACI":
         return [DtACI(alpha=alpha, gamma_values=[0.005]) for alpha in alphas]
     else:
@@ -140,7 +143,7 @@ def initialize_single_adapter(
     if adapter is None:
         return None
     elif adapter == "DtACI":
-        return DtACI(alpha=alpha, gamma_values=[0.05, 0.01, 0.1])
+        return DtACI(alpha=alpha, gamma_values=[0.001, 0.005, 0.01, 0.05])
     elif adapter == "ACI":
         return DtACI(alpha=alpha, gamma_values=[0.005])
     else:
