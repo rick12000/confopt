@@ -662,9 +662,9 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
             List of beta values, one per alpha level, representing coverage feedback.
 
         Beta Calculation:
-            For each alpha level, beta represents the empirical coverage rate
-            based on the new observation's nonconformity relative to calibration
-            scores. Used for adaptive alpha adjustment in coverage control.
+            For each alpha level, beta represents the quantile position of the
+            new observation's nonconformity in the calibration distribution.
+            Used for adaptive alpha adjustment in coverage control.
         """
         return self.conformal_estimator.calculate_betas(X, y_true)
 
@@ -1006,7 +1006,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         Quantile-Based Beta Calculation:
             For each alpha level, computes nonconformity as the maximum
             deviation from the corresponding quantile interval, then
-            calculates the proportion of calibration scores exceeding
+            calculates the proportion of calibration scores at or below
             this nonconformity for adaptive alpha adjustment.
         """
         return self.conformal_estimator.calculate_betas(X, y_true)

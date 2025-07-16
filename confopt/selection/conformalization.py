@@ -306,8 +306,9 @@ class LocallyWeightedConformalEstimator:
 
         Usage:
             Beta values close to 0 indicate the observation is an outlier
-            relative to the calibration distribution. Beta values close to 1
-            indicate the observation is typical of the calibration distribution.
+            (high nonconformity) relative to the calibration distribution.
+            Beta values close to 1 indicate the observation is typical
+            (low nonconformity) relative to the calibration distribution.
         """
         if self.pe_estimator is None or self.ve_estimator is None:
             raise ValueError("Estimators must be fitted before calculating beta")
@@ -318,6 +319,9 @@ class LocallyWeightedConformalEstimator:
 
         nonconformity = abs(y_true - y_pred) / var_pred
 
+        # According to the DTACI paper: β_t := sup {β : Y_t ∈ Ĉ_t(β)}
+        # This means β_t is the proportion of calibration scores >= test nonconformity
+        # (i.e., the empirical coverage probability)
         beta = np.mean(self.nonconformity_scores >= nonconformity)
         betas = [beta] * len(self.alphas)
 
@@ -731,6 +735,9 @@ class QuantileConformalEstimator:
             upper_deviation = y_true - upper_bound
             nonconformity = max(lower_deviation, upper_deviation)
 
+            # According to the DTACI paper: β_t := sup {β : Y_t ∈ Ĉ_t(β)}
+            # This means β_t is the proportion of calibration scores >= test nonconformity
+            # (i.e., the empirical coverage probability)
             beta = np.mean(self.nonconformity_scores[i] >= nonconformity)
 
             betas.append(beta)

@@ -9,7 +9,7 @@ def pinball_loss(beta: float, theta: float, alpha: float) -> float:
     """Calculate pinball loss for conformal prediction adaptation.
 
     Args:
-        beta: Empirical coverage (proportion of calibration scores >= test score)
+        beta: Empirical coverage probability (proportion of calibration scores >= test score)
         theta: Parameter (in DtACI context, this is α_t^i, the expert's alpha value)
         alpha: Global target miscoverage level
 
@@ -21,6 +21,11 @@ def pinball_loss(beta: float, theta: float, alpha: float) -> float:
 
         This is the theoretical pinball loss used in the DtACI algorithm.
         In the algorithm, θ = α_t^i (expert's alpha value) and α is the global target.
+
+        Beta represents the empirical coverage probability of the new observation.
+        High beta (> α) means the observation is "easy" (low nonconformity relative to
+        calibration) and intervals should be tightened. Low beta (< α) means the
+        observation is "hard" (high nonconformity) and intervals should be widened.
     """
     return alpha * (beta - theta) - min(0, beta - theta)
 

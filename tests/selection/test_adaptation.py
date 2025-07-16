@@ -82,6 +82,9 @@ def run_dtaci_performance_test(X, y, target_alpha, gamma_values=None):
         y_test_pred = model.predict(X_test)[0]
 
         test_residual = abs(y_test - y_test_pred)
+        # According to the DTACI paper: β_t := sup {β : Y_t ∈ Ĉ_t(β)}
+        # This means β_t is the proportion of calibration scores >= test nonconformity
+        # (i.e., the empirical coverage probability)
         beta = np.mean(cal_residuals >= test_residual)
 
         current_alpha = dtaci.update(beta=beta)
@@ -232,6 +235,8 @@ def test_dtaci_simple_aci_comprehensive_equivalence():
         test_residual = abs(y_test - y_test_pred)
 
         # Compute beta (empirical coverage)
+        # According to the DTACI paper: β_t := sup {β : Y_t ∈ Ĉ_t(β)}
+        # This means β_t is the proportion of calibration scores >= test nonconformity
         beta = np.mean(cal_residuals >= test_residual)
 
         # Update both algorithms
