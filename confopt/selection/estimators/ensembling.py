@@ -13,7 +13,7 @@ from copy import deepcopy
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import KFold
 from sklearn.metrics import mean_pinball_loss
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import Lasso
 from confopt.selection.estimators.quantile_estimation import (
     BaseMultiFitQuantileEstimator,
     BaseSingleFitQuantileEstimator,
@@ -49,7 +49,7 @@ class BaseEnsembleEstimator(ABC):
 
     Provides common initialization and interface for combining multiple estimators
     using either uniform averaging or cross-validation based linear stacking. The
-    stacking approach trains a linear meta-learner on out-of-fold predictions to
+    stacking approach trains a Lasso meta-learner on out-of-fold predictions to
     learn optimal weights for each base estimator.
 
     Args:
@@ -58,8 +58,11 @@ class BaseEnsembleEstimator(ABC):
         cv: Number of cross-validation folds for stacking meta-learner training.
         weighting_strategy: Method for combining estimator predictions. "uniform"
             applies equal weights, "linear_stack" learns optimal weights via
-            cross-validation and linear regression.
+            cross-validation and Lasso regression.
         random_state: Seed for reproducible cross-validation splits.
+        alpha: Regularization strength for Lasso regression. Higher values
+            produce more sparse solutions, allowing bad estimators to be
+            completely turned off with zero weights.
 
     Raises:
         ValueError: If fewer than 2 estimators provided.
@@ -74,9 +77,10 @@ class BaseEnsembleEstimator(ABC):
                 BaseSingleFitQuantileEstimator,
             ]
         ],
-        cv: int = 3,
+        cv: int = 5,
         weighting_strategy: Literal["uniform", "linear_stack"] = "linear_stack",
         random_state: Optional[int] = None,
+        alpha: float = 0.01,
     ):
         if len(estimators) < 2:
             raise ValueError("At least two estimators are required")
@@ -85,6 +89,7 @@ class BaseEnsembleEstimator(ABC):
         self.cv = cv
         self.weighting_strategy = weighting_strategy
         self.random_state = random_state
+        self.alpha = alpha
 
     @abstractmethod
     def predict(self, X: np.ndarray) -> np.ndarray:
@@ -96,25 +101,27 @@ class PointEnsembleEstimator(BaseEnsembleEstimator):
 
     Combines multiple regression estimators using either uniform weighting or
     learned weights from cross-validation stacking. The stacking approach trains
-    a constrained linear regression meta-learner on out-of-fold predictions to
-    determine optimal combination weights.
+    a constrained Lasso meta-learner on out-of-fold predictions to determine
+    optimal combination weights, allowing bad estimators to be turned off.
 
     Args:
         estimators: List of scikit-learn compatible regression estimators.
         cv: Number of cross-validation folds for weight learning.
         weighting_strategy: Combination method - "uniform" for equal weights,
-            "linear_stack" for learned weights via constrained linear regression.
+            "linear_stack" for learned weights via constrained Lasso regression.
         random_state: Seed for reproducible cross-validation splits.
+        alpha: Regularization strength for Lasso regression.
     """
 
     def __init__(
         self,
         estimators: List[BaseEstimator],
-        cv: int = 3,
+        cv: int = 5,
         weighting_strategy: Literal["uniform", "linear_stack"] = "linear_stack",
         random_state: Optional[int] = None,
+        alpha: float = 0.01,
     ):
-        super().__init__(estimators, cv, weighting_strategy, random_state)
+        super().__init__(estimators, cv, weighting_strategy, random_state, alpha)
 
     def _get_stacking_training_data(self, X: np.ndarray, y: np.ndarray) -> Tuple:
         """Generate out-of-fold predictions for stacking meta-learner training.
@@ -135,28 +142,27 @@ class PointEnsembleEstimator(BaseEnsembleEstimator):
                   (n_samples, n_estimators).
         """
         kf = KFold(n_splits=self.cv, shuffle=True, random_state=self.random_state)
+        cv_splits = list(kf.split(X))
 
         val_indices = np.array([], dtype=int)
         val_targets = np.array([])
         val_predictions = np.zeros((len(y), len(self.estimators)))
 
-        for i, estimator in enumerate(self.estimators):
-            for fold_idx, (train_idx, val_idx) in enumerate(kf.split(X)):
-                X_train, X_val = X[train_idx], X[val_idx]
-                y_train, y_val = y[train_idx], y[val_idx]
+        for fold_idx, (train_idx, val_idx) in enumerate(cv_splits):
+            X_train, X_val = X[train_idx], X[val_idx]
+            y_train, y_val = y[train_idx], y[val_idx]
 
+            if fold_idx == 0:
+                val_indices = val_idx
+                val_targets = y_val
+            else:
+                val_indices = np.concatenate([val_indices, val_idx])
+                val_targets = np.concatenate([val_targets, y_val])
+
+            for i, estimator in enumerate(self.estimators):
                 model = deepcopy(estimator)
                 model.fit(X_train, y_train)
                 y_pred = model.predict(X_val)
-
-                if i == 0:
-                    if fold_idx == 0:
-                        val_indices = val_idx
-                        val_targets = y_val
-                    else:
-                        val_indices = np.concatenate([val_indices, val_idx])
-                        val_targets = np.concatenate([val_targets, y_val])
-
                 val_predictions[val_idx, i] = y_pred.reshape(-1)
 
         return val_indices, val_targets, val_predictions
@@ -165,9 +171,9 @@ class PointEnsembleEstimator(BaseEnsembleEstimator):
         """Compute ensemble weights based on the selected weighting strategy.
 
         For uniform weighting, assigns equal weights to all estimators. For linear
-        stacking, learns optimal weights by training a constrained linear regression
+        stacking, learns optimal weights by training a constrained Lasso regression
         on out-of-fold predictions. Weights are constrained to be non-negative and
-        sum to 1.
+        sum to 1, with Lasso regularization allowing bad estimators to be zeroed out.
 
         Args:
             X: Training features with shape (n_samples, n_features).
@@ -192,9 +198,16 @@ class PointEnsembleEstimator(BaseEnsembleEstimator):
             val_predictions = val_predictions[val_indices[sorted_indices]]
             val_targets = val_targets[sorted_indices]
 
-            self.stacker = LinearRegression(fit_intercept=False, positive=True)
+            self.stacker = Lasso(alpha=self.alpha, fit_intercept=False, positive=True)
             self.stacker.fit(val_predictions, val_targets)
-            weights = np.maximum(self.stacker.coef_, 1e-6)
+            weights = np.maximum(self.stacker.coef_, 0.0)
+
+            # Handle case where all weights are zero
+            if np.sum(weights) == 0:
+                logger.warning(
+                    "All Lasso weights are zero, falling back to uniform weighting"
+                )
+                weights = np.ones(len(self.estimators))
 
             return weights / np.sum(weights)
 
@@ -243,15 +256,16 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
     Combines multiple quantile regression estimators using either uniform weighting
     or learned weights from cross-validation stacking. Supports separate weight
     learning for each quantile level, allowing the ensemble to adapt differently
-    across the prediction distribution.
+    across the prediction distribution and turn off bad estimators per quantile.
 
     Args:
         estimators: List of quantile regression estimators (BaseMultiFitQuantileEstimator
             or BaseSingleFitQuantileEstimator instances).
         cv: Number of cross-validation folds for weight learning.
         weighting_strategy: Combination method - "uniform" for equal weights,
-            "linear_stack" for quantile-specific learned weights.
+            "linear_stack" for quantile-specific learned weights via Lasso regression.
         random_state: Seed for reproducible cross-validation splits.
+        alpha: Regularization strength for Lasso regression.
     """
 
     def __init__(
@@ -259,11 +273,12 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
         estimators: List[
             Union[BaseMultiFitQuantileEstimator, BaseSingleFitQuantileEstimator]
         ],
-        cv: int = 3,
+        cv: int = 5,
         weighting_strategy: Literal["uniform", "linear_stack"] = "linear_stack",
         random_state: Optional[int] = None,
+        alpha: float = 0.01,
     ):
-        super().__init__(estimators, cv, weighting_strategy, random_state)
+        super().__init__(estimators, cv, weighting_strategy, random_state, alpha)
 
     def _get_stacking_training_data(
         self, X: np.ndarray, y: np.ndarray, quantiles: List[float]
@@ -287,6 +302,7 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
                   quantile level, each with shape (n_samples, n_estimators).
         """
         kf = KFold(n_splits=self.cv, shuffle=True, random_state=self.random_state)
+        cv_splits = list(kf.split(X))
         n_quantiles = len(quantiles)
 
         val_predictions_by_quantile = [
@@ -295,22 +311,21 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
         val_indices = np.array([], dtype=int)
         val_targets = np.array([])
 
-        for i, estimator in enumerate(self.estimators):
-            for fold_idx, (train_idx, val_idx) in enumerate(kf.split(X)):
-                X_train, X_val = X[train_idx], X[val_idx]
-                y_train, y_val = y[train_idx], y[val_idx]
+        for fold_idx, (train_idx, val_idx) in enumerate(cv_splits):
+            X_train, X_val = X[train_idx], X[val_idx]
+            y_train, y_val = y[train_idx], y[val_idx]
 
+            if fold_idx == 0:
+                val_indices = val_idx
+                val_targets = y_val
+            else:
+                val_indices = np.concatenate([val_indices, val_idx])
+                val_targets = np.concatenate([val_targets, y_val])
+
+            for i, estimator in enumerate(self.estimators):
                 model = deepcopy(estimator)
                 model.fit(X_train, y_train, quantiles=quantiles)
                 y_pred = model.predict(X_val)
-
-                if i == 0:
-                    if fold_idx == 0:
-                        val_indices = val_idx
-                        val_targets = y_val
-                    else:
-                        val_indices = np.concatenate([val_indices, val_idx])
-                        val_targets = np.concatenate([val_targets, y_val])
 
                 for q_idx in range(n_quantiles):
                     val_predictions_by_quantile[q_idx][val_idx, i] = y_pred[:, q_idx]
@@ -324,8 +339,9 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
 
         For uniform weighting, assigns equal weights across all quantiles. For linear
         stacking, learns separate optimal weights for each quantile using constrained
-        linear regression on out-of-fold predictions. This allows the ensemble to
-        weight estimators differently across the prediction distribution.
+        Lasso regression on out-of-fold predictions. This allows the ensemble to
+        weight estimators differently across the prediction distribution and turn
+        off bad estimators for specific quantiles.
 
         Args:
             X: Training features with shape (n_samples, n_features).
@@ -355,13 +371,21 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
             sorted_targets = val_targets[sorted_indices]
 
             for q_idx in range(len(quantiles)):
-                sorted_predictions = val_predictions_by_quantile[q_idx][
-                    val_indices[sorted_indices]
-                ]
+                sorted_predictions = val_predictions_by_quantile[q_idx][sorted_indices]
 
-                meta_learner = LinearRegression(fit_intercept=False, positive=True)
+                meta_learner = Lasso(
+                    alpha=self.alpha, fit_intercept=False, positive=True
+                )
                 meta_learner.fit(sorted_predictions, sorted_targets)
-                weights = np.maximum(meta_learner.coef_, 1e-6)
+                weights = np.maximum(meta_learner.coef_, 0.0)
+
+                # Handle case where all weights are zero
+                if np.sum(weights) == 0:
+                    logger.warning(
+                        f"All Lasso weights are zero for quantile {quantiles[q_idx]}, falling back to uniform weighting"
+                    )
+                    weights = np.ones(len(self.estimators))
+
                 weights_per_quantile.append(weights / np.sum(weights))
 
             return weights_per_quantile

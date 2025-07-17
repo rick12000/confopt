@@ -27,7 +27,7 @@ class TestPointEnsembleEstimator:
         X, y = toy_dataset
 
         model = PointEnsembleEstimator(
-            estimators=[estimator1, estimator2], cv=2, random_state=42
+            estimators=[estimator1, estimator2], cv=2, random_state=42, alpha=0.01
         )
 
         val_indices, val_targets, val_predictions = model._get_stacking_training_data(
@@ -51,6 +51,7 @@ class TestPointEnsembleEstimator:
             cv=2,
             weighting_strategy=weighting_strategy,
             random_state=42,
+            alpha=0.01,
         )
 
         weights = model._compute_weights(X, y)
@@ -68,6 +69,7 @@ class TestPointEnsembleEstimator:
         model = PointEnsembleEstimator(
             estimators=[estimator1, estimator2],
             weighting_strategy="uniform",
+            alpha=0.01,
         )
         model.weights = np.array([0.5, 0.5])
 
@@ -88,7 +90,10 @@ class TestQuantileEnsembleEstimator:
         X, y = toy_dataset
 
         model = QuantileEnsembleEstimator(
-            estimators=[quantile_estimator1, quantile_estimator2], cv=2, random_state=42
+            estimators=[quantile_estimator1, quantile_estimator2],
+            cv=2,
+            random_state=42,
+            alpha=0.01,
         )
 
         (
@@ -118,6 +123,7 @@ class TestQuantileEnsembleEstimator:
             cv=2,
             weighting_strategy=weighting_strategy,
             random_state=42,
+            alpha=0.01,
         )
 
         weights = model_uniform._compute_quantile_weights(X, y, quantiles)
@@ -140,6 +146,7 @@ class TestQuantileEnsembleEstimator:
         model = QuantileEnsembleEstimator(
             estimators=[quantile_estimator1, quantile_estimator2],
             weighting_strategy="uniform",
+            alpha=0.01,
         )
         model.quantiles = quantiles
         model.quantile_weights = [np.array([0.5, 0.5]) for _ in quantiles]

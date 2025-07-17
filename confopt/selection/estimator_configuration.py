@@ -290,10 +290,12 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileEnsembleEstimator,
         default_params={
             "weighting_strategy": "linear_stack",
-            "cv": 3,
+            "cv": 5,
+            "alpha": 0.01,
         },
         estimator_parameter_space={
             "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
+            "alpha": FloatRange(min_value=0.001, max_value=0.1, log_scale=True),
         },
         ensemble_components=[
             {
@@ -327,10 +329,12 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileEnsembleEstimator,
         default_params={
             "weighting_strategy": "linear_stack",
-            "cv": 3,
+            "cv": 5,
+            "alpha": 0.01,
         },
         estimator_parameter_space={
             "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
+            "alpha": FloatRange(min_value=0.001, max_value=0.1, log_scale=True),
         },
         ensemble_components=[
             {
@@ -366,10 +370,12 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileEnsembleEstimator,
         default_params={
             "weighting_strategy": "linear_stack",
-            "cv": 3,
+            "cv": 5,
+            "alpha": 0.01,
         },
         estimator_parameter_space={
             "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
+            "alpha": FloatRange(min_value=0.001, max_value=0.1, log_scale=True),
         },
         ensemble_components=[
             {
@@ -397,10 +403,12 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileEnsembleEstimator,
         default_params={
             "weighting_strategy": "linear_stack",
-            "cv": 3,
+            "cv": 5,
+            "alpha": 0.01,
         },
         estimator_parameter_space={
             "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
+            "alpha": FloatRange(min_value=0.001, max_value=0.1, log_scale=True),
         },
         ensemble_components=[
             {
@@ -429,10 +437,12 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileEnsembleEstimator,
         default_params={
             "weighting_strategy": "linear_stack",
-            "cv": 3,
+            "cv": 5,
+            "alpha": 0.01,
         },
         estimator_parameter_space={
             "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
+            "alpha": FloatRange(min_value=0.001, max_value=0.1, log_scale=True),
         },
         ensemble_components=[
             {
