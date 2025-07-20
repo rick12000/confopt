@@ -5,9 +5,10 @@
 /* CSS Custom Properties (Design System) */
 :root {
   /* Primary Color Palette - Vibrant Modern Tech */
-  --primary-600: #0066ff;
-  --primary-700: #0052cc;
-  --primary-800: #003d99;
+  --primary-nav-header: #ffffff;
+  --primary-600: #6c88de;
+  --primary-700: #2d6ed1;
+  --primary-800: #5084d2;
   --primary-50: #e6f3ff;
   --primary-100: #b3d9ff;
   --primary-200: #80bfff;
@@ -101,7 +102,7 @@
   left: 0 !important;
   width: var(--sidebar-width) !important;
   z-index: 300 !important;
-  background: var(--primary-600);
+  background: var(--primary-nav-header) !important;
   text-align: center;
   padding: 1rem;
   color: white;
@@ -133,8 +134,8 @@
 .wy-side-nav-search .wy-dropdown > a img.logo,
 .wy-side-nav-search > a img.logo {
   width: auto;
-  height: 67px;
-  max-height: 67px;
+  height: 60px;
+  max-height: 60px;
   margin: 0;
   transition: var(--transition);
 }

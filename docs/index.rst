@@ -22,7 +22,6 @@ ConfOpt is a Python library for hyperparameter optimization using conformal pred
    :caption: Developer Guide
 
    architecture
-   components
 
 .. toctree::
    :maxdepth: 1
