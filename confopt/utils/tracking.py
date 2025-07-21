@@ -144,7 +144,8 @@ class Trial(BaseModel):
     configuration: dict
     performance: float
     acquisition_source: Optional[str] = None
-    breached_interval: Optional[bool] = None
+    lower_bound: Optional[float] = None
+    upper_bound: Optional[float] = None
     searcher_runtime: Optional[float] = None
     target_model_runtime: Optional[float] = None
     primary_estimator_error: Optional[float] = None

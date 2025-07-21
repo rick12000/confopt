@@ -22,7 +22,7 @@ Integration Context:
 """
 
 import logging
-from typing import Optional, Union, Literal
+from typing import Optional, Union, Literal, Tuple
 import numpy as np
 from abc import ABC, abstractmethod
 
@@ -248,37 +248,32 @@ class BaseConformalSearcher(ABC):
             List of beta values, one per alpha level, representing coverage feedback.
         """
 
-    def calculate_breach(self, X: np.array, y_true: float) -> int:
-        """Calculate whether y_true breaches the predicted interval.
+    def get_interval(self, X: np.array) -> Tuple[float, float]:
+        """Get prediction interval bounds for a given configuration.
 
-        Determines if the observed value falls outside the prediction interval,
-        providing feedback for coverage assessment. This method is specifically
-        designed for interval-based samplers that provide single coverage levels.
+        Returns the lower and upper bounds of the prediction interval for
+        interval-based samplers. This method is specifically designed for
+        samplers that provide single coverage levels.
 
         Args:
             X: Input configuration, shape (n_features,).
-            y_true: Observed performance value for the configuration.
 
         Returns:
-            1 if y_true is outside the interval (breach), 0 if inside (coverage).
+            Tuple of (lower_bound, upper_bound) for the prediction interval.
 
         Raises:
             ValueError: If conformal estimator is not fitted or if sampler type
-                does not support breach calculation.
+                does not support interval retrieval.
 
-        Coverage Feedback:
+        Coverage Information:
             Only works for LowerBoundSampler and PessimisticLowerBoundSampler as
             these samplers use single intervals. Multi-alpha samplers require
-            more complex coverage tracking through the adaptive alpha mechanism.
-
-        Mathematical Definition:
-            breach = 1 if y_true < lower_bound OR y_true > upper_bound
-            breach = 0 if lower_bound ≤ y_true ≤ upper_bound
+            more complex interval handling through the adaptive alpha mechanism.
         """
         if isinstance(self.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)):
             if self.conformal_estimator is None:
                 raise ValueError(
-                    "Conformal estimator not initialized. Call fit() before calculating breach."
+                    "Conformal estimator not initialized. Call fit() before getting interval."
                 )
 
             predictions_per_interval = self.conformal_estimator.predict_intervals(
@@ -291,14 +286,12 @@ class BaseConformalSearcher(ABC):
             lower_bound = interval.lower_bounds[0]
             upper_bound = interval.upper_bounds[0]
 
-            breach_status = int(y_true < lower_bound or y_true > upper_bound)
+            return lower_bound, upper_bound
 
         else:
             raise ValueError(
-                "Breach calculation only supported for LowerBoundSampler and PessimisticLowerBoundSampler"
+                "Interval retrieval only supported for LowerBoundSampler and PessimisticLowerBoundSampler"
             )
-
-        return breach_status
 
     def update(self, X: np.array, y_true: float) -> None:
         """Update searcher state with new observation and adapt coverage levels.

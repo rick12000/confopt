@@ -166,7 +166,7 @@ The following diagram shows the complete end-to-end flow with class and method i
        end
 
        subgraph "Acquisition Layer"
-           BCS["BaseConformalSearcher<br/>predict()<br/>update()<br/>calculate_breach()"]
+           BCS["BaseConformalSearcher<br/>predict()<br/>update()<br/>get_interval()"]
            LWCS["LocallyWeightedConformalSearcher<br/>fit()<br/>_predict_with_*()"]
            QCS["QuantileConformalSearcher<br/>fit()<br/>_predict_with_*()"]
        end
@@ -363,7 +363,7 @@ The system selects between two main acquisition approaches:
 * ``LocallyWeightedConformalSearcher`` - uses variance-adaptive prediction intervals
 * ``QuantileConformalSearcher`` - uses direct quantile estimation
 
-Both inherit from ``BaseConformalSearcher`` which provides the common interface for ``predict()``, ``update()``, and ``calculate_breach()`` methods.
+Both inherit from ``BaseConformalSearcher`` which provides the common interface for ``predict()``, ``update()``, and ``get_interval()`` methods.
 
 **Conformal Estimator Initialization:**
 
@@ -473,7 +473,7 @@ The conformal estimators generate prediction intervals:
 
 After each evaluation, the system updates:
 
-1. ``calculate_breach()`` determines if prediction intervals covered the true value
+1. ``get_interval()`` retrieves prediction interval bounds for storage and analysis
 2. ``_calculate_betas()`` computes coverage statistics
 3. ``DtACI.update_alpha()`` adjusts significance levels based on coverage feedback
 4. ``_calculate_pinball_loss()`` provides loss-based adaptation signals

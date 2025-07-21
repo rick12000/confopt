@@ -528,34 +528,31 @@ class ConformalTuner:
         next_config = searchable_configs[next_idx]
         return next_config
 
-    def calculate_breach_if_applicable(
+    def get_interval_if_applicable(
         self,
         searcher: BaseConformalSearcher,
         transformed_config: np.array,
-        performance: float,
-    ) -> Optional[float]:
-        """Calculate prediction interval breach if supported by searcher.
+    ) -> Tuple[Optional[float], Optional[float]]:
+        """Get prediction interval bounds if supported by searcher.
 
-        Computes how much the observed performance violates the predicted confidence
-        interval for configurations using lower bound samplers. This metric helps
-        assess conformal model calibration and prediction quality.
+        Returns the lower and upper bounds of the prediction interval for
+        configurations using lower bound samplers. This provides the raw
+        interval information for storage and analysis.
 
         Args:
             searcher: Conformal searcher instance
             transformed_config: Scaled configuration features
-            performance: Observed performance value (sign-adjusted)
 
         Returns:
-            Breach amount if applicable, None otherwise
+            Tuple of (lower_bound, upper_bound) if applicable, (None, None) otherwise
         """
         if isinstance(
             searcher.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)
         ):
-            breach = searcher.calculate_breach(X=transformed_config, y_true=performance)
+            lower_bound, upper_bound = searcher.get_interval(X=transformed_config)
+            return lower_bound, upper_bound
         else:
-            breach = None
-
-        return breach
+            return None, None
 
     def update_optimizer_parameters(
         self,
@@ -701,8 +698,8 @@ class ConformalTuner:
             signed_performance = self.metric_sign * performance
             searcher.update(X=transformed_config, y_true=signed_performance)
 
-            breach = self.calculate_breach_if_applicable(
-                searcher, transformed_config, signed_performance
+            lower_bound, upper_bound = self.get_interval_if_applicable(
+                searcher, transformed_config
             )
 
             self.config_manager.mark_as_searched(next_config, performance)
@@ -713,7 +710,8 @@ class ConformalTuner:
                 performance=performance,
                 acquisition_source=str(searcher),
                 searcher_runtime=training_runtime,
-                breached_interval=breach,
+                lower_bound=lower_bound,
+                upper_bound=upper_bound,
                 primary_estimator_error=estimator_error,
             )
             self.study.append_trial(trial)
