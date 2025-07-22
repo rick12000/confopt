@@ -153,7 +153,7 @@ class BaseConformalSearcher(ABC):
     def _predict_with_ucb(self, X: np.array):
         """Generate upper confidence bound acquisition values.
 
-        Subclasses must implement UCB acquisition strategy using their
+        Subclasses must implement UCB acquisition using their
         specific conformal prediction approach.
 
         Args:
@@ -758,7 +758,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         Trains the quantile estimator and sets up conformal calibration,
         with automatic mode selection based on data availability. Handles
         sampler-specific configurations and point estimator setup for
-        optimistic Thompson sampling.
+        optimistic Thompson sampling and median estimation for bound samplers.
 
         Args:
             X_train: Training features for estimator fitting, shape (n_train, n_features).
@@ -770,13 +770,13 @@ class QuantileConformalSearcher(BaseConformalSearcher):
 
         Implementation Process:
             1. Store training and validation data for access by acquisition strategies
-            2. Configure sampler-specific quantile estimation (upper caps, point estimators)
+            2. Configure sampler-specific quantile estimation and point estimators
             3. Set default random state for Information Gain Sampler if not provided
             4. Fit QuantileConformalEstimator with appropriate quantile configuration
             5. Store estimator performance metrics for quality assessment
 
         Sampler-Specific Setup:
-            - Conservative samplers: Upper quantile capping at 0.5
+            - Bound samplers: Median (0.5 quantile) estimator for UCB point estimates
             - Optimistic Thompson: Additional point estimator training
             - Information-based: Full quantile range support
         """
@@ -787,13 +787,24 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         random_state = random_state
         if isinstance(self.sampler, EntropySearchSampler) and random_state is None:
             random_state = DEFAULT_IG_SAMPLER_RANDOM_STATE
-        if isinstance(self.sampler, (PessimisticLowerBoundSampler, LowerBoundSampler)):
-            upper_quantile_cap = 0.5
-        elif isinstance(
+
+        # Create median estimator for bound samplers (UCB point estimates)
+        if isinstance(self.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)):
+            self.median_estimator = initialize_estimator(
+                estimator_architecture=self.quantile_estimator_architecture,
+                random_state=random_state,
+            )
+            self.median_estimator.fit(
+                X=np.vstack((X_train, X_val)),
+                y=np.concatenate((y_train, y_val)),
+                quantiles=[0.5],  # Only estimate the median
+            )
+
+        # Create point estimator for optimistic Thompson sampling
+        if isinstance(
             self.sampler,
             (ThompsonSampler),
         ):
-            upper_quantile_cap = None
             if (
                 hasattr(self.sampler, "enable_optimistic_sampling")
                 and self.sampler.enable_optimistic_sampling
@@ -806,17 +817,6 @@ class QuantileConformalSearcher(BaseConformalSearcher):
                     X=np.vstack((X_train, X_val)),
                     y=np.concatenate((y_train, y_val)),
                 )
-        elif isinstance(
-            self.sampler,
-            (
-                ExpectedImprovementSampler,
-                EntropySearchSampler,
-                MaxValueEntropySearchSampler,
-            ),
-        ):
-            upper_quantile_cap = None
-        else:
-            raise ValueError(f"Unsupported sampler type: {type(self.sampler)}")
 
         self.conformal_estimator.fit(
             X_train=X_train,
@@ -825,7 +825,6 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             y_val=y_val,
             tuning_iterations=tuning_iterations,
             random_state=random_state,
-            upper_quantile_cap=upper_quantile_cap,
         )
         self.primary_estimator_error = self.conformal_estimator.primary_estimator_error
 
@@ -854,7 +853,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         """Generate upper confidence bound acquisition values.
 
         Implements UCB acquisition using quantile-based intervals with
-        upper bounds as point estimates and interval widths for exploration.
+        median estimator predictions as point estimates and symmetric variance assumption.
         Adapts automatically to conformalized or non-conformalized mode.
 
         Args:
@@ -864,15 +863,20 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             UCB acquisition values, shape (n_candidates,).
 
         Mathematical Formulation:
-            UCB(x) = upper_bound(x) - β × interval_width(x)
-            Where interval bounds come from quantile estimation with
-            optional conformal adjustment.
+            UCB(x) = median_estimate(x) - β × (interval_width(x) / 2)
+            Where median_estimate comes from dedicated 0.5 quantile estimator and
+            interval bounds come from quantile estimation with symmetric variance assumption.
         """
         self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
         interval = self.predictions_per_interval[0]
-        width = interval.upper_bounds - interval.lower_bounds
+
+        # Use dedicated median estimator for point estimates (index 0 since we only fit quantile 0.5)
+        point_estimates = self.median_estimator.predict(X)[:, 0]
+
+        # Use half the interval width for symmetric variance assumption
+        width = (interval.upper_bounds - interval.lower_bounds) / 2
         return self.sampler.calculate_ucb_predictions(
-            point_estimates=interval.upper_bounds,
+            point_estimates=point_estimates,
             interval_width=width,
         )
 

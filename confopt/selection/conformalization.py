@@ -363,47 +363,27 @@ class LocallyWeightedConformalEstimator:
         return self.alphas
 
 
-def alpha_to_quantiles(
-    alpha: float, upper_quantile_cap: Optional[float] = None
-) -> Tuple[float, float]:
-    """Convert alpha level to symmetric quantile pair with optional upper bound.
+def alpha_to_quantiles(alpha: float) -> Tuple[float, float]:
+    """Convert alpha level to symmetric quantile pair.
 
     Transforms a miscoverage level alpha into corresponding lower and upper
-    quantiles for symmetric prediction intervals, with support for capped
-    upper quantiles to handle extreme coverage requirements.
+    quantiles for symmetric prediction intervals.
 
     Args:
         alpha: Miscoverage level in (0, 1). Coverage = 1 - alpha.
-        upper_quantile_cap: Optional upper bound for the upper quantile.
-            Useful when dealing with limited training data or extreme alphas.
 
     Returns:
         Tuple of (lower_quantile, upper_quantile) where:
             - lower_quantile = alpha / 2
-            - upper_quantile = min(1 - alpha/2, upper_quantile_cap)
-
-    Raises:
-        ValueError: If upper_quantile_cap results in upper_quantile < lower_quantile.
+            - upper_quantile = 1 - alpha / 2
 
     Mathematical Details:
         For symmetric intervals with coverage 1-α:
         - Lower quantile: α/2 (captures α/2 probability in left tail)
         - Upper quantile: 1-α/2 (captures α/2 probability in right tail)
-
-        When upper_quantile_cap is applied, intervals become asymmetric
-        but maintain the desired coverage level through conformal adjustment.
     """
     lower_quantile = alpha / 2
     upper_quantile = 1 - lower_quantile
-    if upper_quantile_cap is not None:
-        upper_quantile = min(upper_quantile, upper_quantile_cap)
-        if upper_quantile < lower_quantile:
-            raise ValueError(
-                f"Upper quantile cap {upper_quantile_cap} resulted in an upper quantile "
-                f"{upper_quantile} that is smaller than the lower quantile {lower_quantile} "
-                f"for alpha {alpha}."
-            )
-
     return lower_quantile, upper_quantile
 
 
@@ -435,7 +415,6 @@ class QuantileConformalEstimator:
         quantile_indices: Mapping from quantile values to prediction array indices.
         conformalize_predictions: Boolean flag indicating if conformal adjustment is used.
         primary_estimator_error: Mean pinball loss across all quantiles.
-        upper_quantile_cap: Maximum allowed upper quantile value.
 
     Mathematical Framework:
         For each alpha level α:
@@ -471,7 +450,6 @@ class QuantileConformalEstimator:
         self.conformalize_predictions = False
         self.primary_estimator_error = None
         self.last_best_params = None
-        self.upper_quantile_cap = None
 
     def fit(
         self,
@@ -481,7 +459,6 @@ class QuantileConformalEstimator:
         y_val: np.array,
         tuning_iterations: Optional[int] = 0,
         min_obs_for_tuning: int = 30,
-        upper_quantile_cap: Optional[float] = None,
         random_state: Optional[int] = None,
         last_best_params: Optional[dict] = None,
     ):
@@ -499,7 +476,6 @@ class QuantileConformalEstimator:
             y_val: Validation targets for conformal calibration, shape (n_val,).
             tuning_iterations: Hyperparameter search iterations (0 disables tuning).
             min_obs_for_tuning: Minimum samples required for hyperparameter tuning.
-            upper_quantile_cap: Maximum allowed upper quantile value.
             random_state: Random seed for reproducible initialization.
             last_best_params: Warm-start parameters from previous fitting.
 
@@ -518,17 +494,14 @@ class QuantileConformalEstimator:
 
         Side Effects:
             - Updates quantile_estimator, nonconformity_scores, conformalize_predictions
-            - Sets quantile_indices, upper_quantile_cap, last_best_params
+            - Sets quantile_indices, last_best_params
             - Computes primary_estimator_error for performance tracking
         """
         current_alphas = self._fetch_alphas()
-        self.upper_quantile_cap = upper_quantile_cap
 
         all_quantiles = []
         for alpha in current_alphas:
-            lower_quantile, upper_quantile = alpha_to_quantiles(
-                alpha, upper_quantile_cap
-            )
+            lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
             all_quantiles.append(lower_quantile)
             all_quantiles.append(upper_quantile)
         all_quantiles = sorted(all_quantiles)
@@ -572,9 +545,7 @@ class QuantileConformalEstimator:
             self.quantile_estimator.fit(X_train, y_train, quantiles=all_quantiles)
 
             for i, alpha in enumerate(current_alphas):
-                lower_quantile, upper_quantile = alpha_to_quantiles(
-                    alpha, upper_quantile_cap
-                )
+                lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
 
                 lower_idx = self.quantile_indices[lower_quantile]
                 upper_idx = self.quantile_indices[upper_quantile]
@@ -598,9 +569,7 @@ class QuantileConformalEstimator:
 
         scores = []
         for alpha in current_alphas:
-            lower_quantile, upper_quantile = alpha_to_quantiles(
-                alpha, upper_quantile_cap
-            )
+            lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
             lower_idx = self.quantile_indices[lower_quantile]
             upper_idx = self.quantile_indices[upper_quantile]
 
@@ -656,9 +625,7 @@ class QuantileConformalEstimator:
         prediction = self.quantile_estimator.predict(X)
 
         for i, alpha in enumerate(self.alphas):
-            lower_quantile, upper_quantile = alpha_to_quantiles(
-                alpha, self.upper_quantile_cap
-            )
+            lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
 
             lower_idx = self.quantile_indices[lower_quantile]
             upper_idx = self.quantile_indices[upper_quantile]
@@ -721,9 +688,7 @@ class QuantileConformalEstimator:
 
         betas = []
         for i, alpha in enumerate(self.alphas):
-            lower_quantile, upper_quantile = alpha_to_quantiles(
-                alpha, self.upper_quantile_cap
-            )
+            lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
             lower_idx = self.quantile_indices[lower_quantile]
             upper_idx = self.quantile_indices[upper_quantile]
 

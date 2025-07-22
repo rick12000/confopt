@@ -118,26 +118,11 @@ def calculate_monotonicity_violations(
 
 
 @pytest.mark.parametrize("alpha", [0.1, 0.2, 0.3])
-def test_alpha_to_quantiles(alpha):
+def test_alpha_to_quantiles_without_cap(alpha):
     lower, upper = alpha_to_quantiles(alpha)
     assert lower == alpha / 2
     assert upper == 1 - alpha / 2
-    assert lower < upper
-
-
-@pytest.mark.parametrize("alpha,cap", [(0.2, 0.85), (0.1, 0.95), (0.3, 0.8)])
-def test_alpha_to_quantiles_with_cap(alpha, cap):
-    lower, upper = alpha_to_quantiles(alpha, upper_quantile_cap=cap)
-    assert lower == alpha / 2
-    assert upper == min(1 - alpha / 2, cap)
     assert lower <= upper
-
-
-def test_alpha_to_quantiles_invalid_cap():
-    with pytest.raises(
-        ValueError, match="Upper quantile cap.*resulted in an upper quantile"
-    ):
-        alpha_to_quantiles(0.9, upper_quantile_cap=0.1)
 
 
 # LocallyWeightedConformalEstimator tests as standalone functions
@@ -233,13 +218,11 @@ def test_locally_weighted_prediction_errors_before_fitting():
 # QuantileConformalEstimator tests as standalone functions
 @pytest.mark.parametrize("estimator_architecture", QUANTILE_ESTIMATOR_ARCHITECTURES)
 @pytest.mark.parametrize("tuning_iterations", [0, 1])
-@pytest.mark.parametrize("alphas", [[0.5], [0.1, 0.9]])
-@pytest.mark.parametrize("upper_quantile_cap", [None, 0.95])
+@pytest.mark.parametrize("alphas", [[0.1], [0.1, 0.3, 0.9]])
 def test_quantile_fit_and_predict_intervals_shape_and_coverage(
     estimator_architecture,
     tuning_iterations,
     alphas,
-    upper_quantile_cap,
     dummy_expanding_quantile_gaussian_dataset,
 ):
     estimator = QuantileConformalEstimator(
@@ -257,7 +240,6 @@ def test_quantile_fit_and_predict_intervals_shape_and_coverage(
         X_val=X_val,
         y_val=y_val,
         tuning_iterations=tuning_iterations,
-        upper_quantile_cap=upper_quantile_cap,
         random_state=42,
     )
     assert len(estimator.nonconformity_scores) == len(alphas)
@@ -341,35 +323,6 @@ def test_quantile_prediction_errors_before_fitting():
         ValueError, match="Estimator must be fitted before calculating beta"
     ):
         estimator.calculate_betas(X_test[0], 1.0)
-
-
-@pytest.mark.parametrize(
-    "alpha,cap",
-    [
-        (0.2, 0.85),
-        (0.1, 0.95),
-        (0.3, None),
-    ],
-)
-def test_quantile_upper_quantile_cap_behavior(
-    alpha, cap, dummy_expanding_quantile_gaussian_dataset
-):
-    estimator = QuantileConformalEstimator(
-        quantile_estimator_architecture=QUANTILE_ESTIMATOR_ARCHITECTURES[0],
-        alphas=[alpha],
-        n_pre_conformal_trials=15,
-    )
-    X, y = dummy_expanding_quantile_gaussian_dataset
-    X_train, y_train, X_val, y_val = create_train_val_split(
-        X, y, train_split=0.8, random_state=42
-    )
-    estimator.fit(
-        X_train, y_train, X_val, y_val, upper_quantile_cap=cap, random_state=42
-    )
-    assert estimator.upper_quantile_cap == cap
-    expected_lower, expected_upper = alpha_to_quantiles(alpha, cap)
-    assert expected_lower in estimator.quantile_indices
-    assert expected_upper in estimator.quantile_indices
 
 
 @pytest.mark.parametrize("estimator_architecture", QUANTILE_ESTIMATOR_ARCHITECTURES)
