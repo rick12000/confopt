@@ -177,7 +177,7 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QRF_NAME,
         estimator_class=QuantileForest,
         default_params={
-            "n_estimators": 15,
+            "n_estimators": 25,
             "max_depth": 4,
             "max_features": 0.8,
             "min_samples_split": 5,
@@ -206,7 +206,7 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QLEAF_NAME,
         estimator_class=QuantileLeaf,
         default_params={
-            "n_estimators": 15,
+            "n_estimators": 25,
             "max_depth": 4,
             "max_features": 0.8,
             "min_samples_split": 5,
@@ -312,7 +312,7 @@ ESTIMATOR_REGISTRY = {
             {
                 "class": QuantileForest,
                 "params": {
-                    "n_estimators": 15,
+                    "n_estimators": 25,
                     "max_depth": 4,
                     "max_features": 0.8,
                     "min_samples_split": 5,
@@ -379,7 +379,7 @@ ESTIMATOR_REGISTRY = {
             {
                 "class": QuantileForest,
                 "params": {
-                    "n_estimators": 15,
+                    "n_estimators": 25,
                     "max_depth": 4,
                     "max_features": 0.8,
                     "min_samples_split": 5,
@@ -412,7 +412,7 @@ ESTIMATOR_REGISTRY = {
             {
                 "class": QuantileForest,
                 "params": {
-                    "n_estimators": 15,
+                    "n_estimators": 25,
                     "max_depth": 4,
                     "max_features": 0.8,
                     "min_samples_split": 5,
@@ -454,7 +454,7 @@ ESTIMATOR_REGISTRY = {
             {
                 "class": QuantileForest,
                 "params": {
-                    "n_estimators": 15,
+                    "n_estimators": 25,
                     "max_depth": 4,
                     "max_features": 0.8,
                     "min_samples_split": 5,
