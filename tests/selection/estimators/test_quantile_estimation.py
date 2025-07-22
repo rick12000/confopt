@@ -41,6 +41,212 @@ class MockSingleFitEstimator(BaseSingleFitQuantileEstimator):
         return np.random.uniform(0, 1, size=(n_samples, n_candidates))
 
 
+def calculate_breach_status(predictions, quantiles, tolerance=1e-6):
+    """Calculate hard and soft monotonicity violations.
+
+    Args:
+        predictions: Array of shape (n_samples, n_quantiles) with quantile predictions
+        quantiles: List of quantile levels (should be sorted)
+        tolerance: Tolerance for floating-point comparisons
+
+    Returns:
+        tuple: (hard_violations, soft_violations, hard_rate, soft_rate)
+    """
+    n_samples, n_quantiles = predictions.shape
+    hard_violations = 0
+    soft_violations = 0
+
+    for i in range(n_samples):
+        pred_row = predictions[i, :]
+
+        for j in range(n_quantiles - 1):
+            diff = pred_row[j + 1] - pred_row[j]
+            if diff < -tolerance:  # Hard violation: lower > upper
+                hard_violations += 1
+            elif abs(diff) <= tolerance:  # Soft violation: approximately equal
+                soft_violations += 1
+
+    total_comparisons = n_samples * (n_quantiles - 1)
+    hard_rate = hard_violations / total_comparisons
+    soft_rate = soft_violations / total_comparisons
+
+    return hard_violations, soft_violations, hard_rate, soft_rate
+
+
+def calculate_winkler_components(predictions, quantiles):
+    """Calculate Winkler score components for interval quality assessment.
+
+    Args:
+        predictions: Array of shape (n_samples, n_quantiles) with quantile predictions
+        quantiles: List of quantile levels (should be sorted)
+
+    Returns:
+        dict: Dictionary with interval width statistics
+    """
+    n_samples, n_quantiles = predictions.shape
+    components = {"mean_widths": [], "negative_widths": 0, "total_intervals": 0}
+
+    for j in range(n_quantiles - 1):
+        widths = predictions[:, j + 1] - predictions[:, j]
+        components["mean_widths"].append(np.mean(widths))
+        components["negative_widths"] += np.sum(widths < 0)
+        components["total_intervals"] += len(widths)
+
+    return components
+
+
+# Tolerance lookup for estimators that perform poorly on specific data
+VIOLATION_TOLERANCES = {
+    # Single-fit estimators should have perfect monotonicity
+    "GaussianProcessQuantileEstimator": {"hard": 0.0, "soft": 0.05},
+    "QuantileForest": {
+        "hard": 0.0,
+        "soft": 0.30,
+    },  # Can have many soft violations due to discrete nature
+    "QuantileLeaf": {"hard": 0.0, "soft": 0.25},
+    "QuantileKNN": {"hard": 0.0, "soft": 0.20},
+    # Multi-fit estimators can have violations but should be limited
+    "QuantileGBM": {"hard": 0.15, "soft": 0.25},
+    "QuantileLightGBM": {"hard": 0.15, "soft": 0.25},
+    "QuantileLasso": {
+        "hard": 0.30,
+        "soft": 0.40,
+    },  # Higher tolerance for linear methods
+}
+
+# Data-specific tolerance adjustments
+DATA_SPECIFIC_ADJUSTMENTS = {
+    "challenging_monotonicity_data": {
+        "QuantileLasso": {"hard": 0.45, "soft": 0.55},
+        "QuantileGBM": {"hard": 0.20, "soft": 0.30},
+    },
+    "skewed_regression_data": {
+        "QuantileLasso": {"hard": 0.25, "soft": 0.35},
+    },
+}
+
+
+@pytest.mark.parametrize(
+    "data_fixture_name",
+    [
+        "heteroscedastic_regression_data",
+        "multimodal_regression_data",
+        "skewed_regression_data",
+        "high_dimensional_regression_data",
+        "sparse_regression_data",
+        "challenging_monotonicity_data",
+        "quantile_test_data",
+    ],
+)
+@pytest.mark.parametrize(
+    "estimator_class,init_params",
+    [
+        # Single-fit estimators
+        (GaussianProcessQuantileEstimator, {"random_state": 42}),
+        (QuantileForest, {"n_estimators": 10, "random_state": 42}),
+        (QuantileLeaf, {"n_estimators": 10, "random_state": 42}),
+        (QuantileKNN, {"n_neighbors": 5}),
+        # Multi-fit estimators
+        (
+            QuantileGBM,
+            {
+                "learning_rate": 0.1,
+                "n_estimators": 15,
+                "min_samples_split": 5,
+                "min_samples_leaf": 2,
+                "max_depth": 3,
+                "random_state": 42,
+            },
+        ),
+        (
+            QuantileLightGBM,
+            {"learning_rate": 0.1, "n_estimators": 15, "random_state": 42},
+        ),
+        (QuantileLasso, {"max_iter": 200, "random_state": 42}),
+    ],
+)
+def test_monotonicity_across_data_distributions(
+    request,
+    data_fixture_name,
+    estimator_class,
+    init_params,
+    monotonicity_test_quantiles,
+):
+    """Test monotonicity behavior across all estimators and data distributions."""
+    # Get the data fixture - handle quantile_test_data specially
+    data_fixture = request.getfixturevalue(data_fixture_name)
+    if data_fixture_name == "quantile_test_data":
+        X, y, _ = data_fixture  # Unpack the true_quantiles
+    else:
+        X, y = data_fixture
+
+    # Use subset for testing to keep tests fast
+    n_test = min(50, len(X))
+    X_train, y_train = X[:-n_test], y[:-n_test]
+    X_test = X[-n_test:]
+
+    quantiles = monotonicity_test_quantiles
+
+    estimator = estimator_class(**init_params)
+    estimator.fit(X_train, y_train, quantiles)
+    predictions = estimator.predict(X_test)
+
+    # Calculate violation statistics
+    hard_violations, soft_violations, hard_rate, soft_rate = calculate_breach_status(
+        predictions, quantiles
+    )
+
+    # Calculate interval quality
+    winkler_components = calculate_winkler_components(predictions, quantiles)
+
+    # Get tolerances for this estimator and data combination
+    estimator_name = estimator_class.__name__
+    base_tolerances = VIOLATION_TOLERANCES[estimator_name]
+
+    # Apply data-specific adjustments if they exist
+    if data_fixture_name in DATA_SPECIFIC_ADJUSTMENTS:
+        if estimator_name in DATA_SPECIFIC_ADJUSTMENTS[data_fixture_name]:
+            adjusted_tolerances = DATA_SPECIFIC_ADJUSTMENTS[data_fixture_name][
+                estimator_name
+            ]
+            hard_tolerance = adjusted_tolerances["hard"]
+            soft_tolerance = adjusted_tolerances["soft"]
+        else:
+            hard_tolerance = base_tolerances["hard"]
+            soft_tolerance = base_tolerances["soft"]
+    else:
+        hard_tolerance = base_tolerances["hard"]
+        soft_tolerance = base_tolerances["soft"]
+
+    # Basic shape and validity checks
+    assert predictions.shape == (len(X_test), len(quantiles))
+    assert not np.any(np.isnan(predictions))
+    assert not np.any(np.isinf(predictions))
+
+    # Hard violation checks (lower bound > upper bound)
+    assert hard_rate <= hard_tolerance
+
+    # Soft violation checks (bounds approximately equal)
+    assert soft_rate <= soft_tolerance
+
+    # Interval quality checks
+    negative_rate = (
+        winkler_components["negative_widths"] / winkler_components["total_intervals"]
+    )
+
+    # Single-fit estimators should have no negative intervals
+    if estimator_name in [
+        "GaussianProcessQuantileEstimator",
+        "QuantileForest",
+        "QuantileLeaf",
+        "QuantileKNN",
+    ]:
+        assert negative_rate <= 0.01
+    else:
+        # Multi-fit estimators can have some negative intervals
+        assert negative_rate <= 0.40
+
+
 @pytest.mark.parametrize("n_samples", [1, 10, 1000])
 @pytest.mark.parametrize("n_features", [1, 5, 20])
 @pytest.mark.parametrize("n_quantiles", [1, 3, 9])

@@ -69,6 +69,54 @@ def calculate_coverage(
     return coverages
 
 
+def calculate_interval_properties(intervals: list[ConformalBounds]) -> dict:
+    """Calculate comprehensive interval properties for analysis.
+
+    Args:
+        intervals: List of ConformalBounds objects
+
+    Returns:
+        Dictionary with interval statistics
+    """
+    properties = {
+        "negative_widths": [],
+        "mean_widths": [],
+        "min_widths": [],
+        "max_widths": [],
+        "width_std": [],
+    }
+
+    for interval in intervals:
+        widths = interval.upper_bounds - interval.lower_bounds
+        properties["negative_widths"].append(np.sum(widths < 0))
+        properties["mean_widths"].append(np.mean(widths))
+        properties["min_widths"].append(np.min(widths))
+        properties["max_widths"].append(np.max(widths))
+        properties["width_std"].append(np.std(widths))
+
+    return properties
+
+
+def calculate_monotonicity_violations(
+    intervals: list[ConformalBounds],
+) -> tuple[int, int]:
+    """Calculate hard and soft monotonicity violations in intervals.
+
+    Returns:
+        tuple: (hard_violations, soft_violations) where hard = lower > upper, soft = lower ≈ upper
+    """
+    hard_violations = 0
+    soft_violations = 0
+    tolerance = 1e-6
+
+    for interval in intervals:
+        widths = interval.upper_bounds - interval.lower_bounds
+        hard_violations += np.sum(widths < -tolerance)
+        soft_violations += np.sum(np.abs(widths) <= tolerance)
+
+    return hard_violations, soft_violations
+
+
 @pytest.mark.parametrize("alpha", [0.1, 0.2, 0.3])
 def test_alpha_to_quantiles(alpha):
     lower, upper = alpha_to_quantiles(alpha)
@@ -392,3 +440,20 @@ def test_conformalized_vs_non_conformalized_quantile_estimator_coverage(
 
         # Assert that conformalized estimator performs better or equal
         assert conformalized_error <= non_conformalized_error
+
+    # Check monotonicity properties
+    conf_hard_violations, conf_soft_violations = calculate_monotonicity_violations(
+        conformalized_intervals
+    )
+    (
+        non_conf_hard_violations,
+        non_conf_soft_violations,
+    ) = calculate_monotonicity_violations(non_conformalized_intervals)
+
+    # Conformalized should have better monotonicity than non-conformalized
+    assert conf_hard_violations <= non_conf_hard_violations
+
+    # Single-fit estimators should have perfect hard monotonicity
+    if estimator_architecture in ["qgp", "qrf"]:
+        assert conf_hard_violations == 0
+        assert non_conf_hard_violations == 0

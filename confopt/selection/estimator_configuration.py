@@ -227,12 +227,10 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileGBM,
         default_params={
             "learning_rate": 0.1,
-            "n_estimators": 50,
-            "min_samples_split": 3,
-            "min_samples_leaf": 2,
+            "n_estimators": 25,
+            "min_samples_split": 8,
+            "min_samples_leaf": 4,
             "max_depth": 4,
-            "subsample": 0.9,
-            "max_features": "sqrt",
             "random_state": None,  # added
         },
         estimator_parameter_space={

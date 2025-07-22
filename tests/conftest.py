@@ -302,20 +302,6 @@ def static_tuner(mock_constant_objective_function, small_parameter_grid):
 
 
 @pytest.fixture
-def toy_regression_data():
-    """Generate simple regression data for basic testing."""
-
-    def _generate(n_samples=100, n_features=3, noise_level=0.1, random_state=42):
-        np.random.seed(random_state)
-        X = np.random.randn(n_samples, n_features)
-        # Simple linear relationship with noise
-        y = np.sum(X, axis=1) + noise_level * np.random.randn(n_samples)
-        return X, y
-
-    return _generate
-
-
-@pytest.fixture
 def uniform_regression_data():
     """Generate uniform regression data for quantile testing."""
     np.random.seed(42)
@@ -330,17 +316,158 @@ def uniform_regression_data():
 
 @pytest.fixture
 def heteroscedastic_regression_data():
-    """Generate heteroscedastic regression data for robust quantile testing."""
+    """Generate heteroscedastic regression data where variance changes with X."""
     np.random.seed(42)
     n_samples = 200
-    n_features = 2
+    X = np.linspace(-3, 3, n_samples).reshape(-1, 1)
 
-    X = np.random.uniform(-2, 2, size=(n_samples, n_features))
-    # Create heteroscedastic noise (variance depends on X)
-    noise_scale = 0.1 + 0.5 * np.abs(X[:, 0])
-    y = 2 * X[:, 0] + X[:, 1] + noise_scale * np.random.randn(n_samples)
+    # Heteroscedastic noise: variance increases with |X|
+    noise_std = 0.5 + 1.5 * np.abs(X.flatten())
+    noise = np.random.normal(0, 1, n_samples) * noise_std
+
+    # True function: quadratic with heteroscedastic noise
+    y = 2 * X.flatten() ** 2 + 1.5 * X.flatten() + noise
 
     return X, y
+
+
+@pytest.fixture
+def multimodal_regression_data():
+    """Generate multimodal regression data with multiple peaks and valleys."""
+    np.random.seed(42)
+    n_samples = 300
+    X = np.linspace(-4, 4, n_samples).reshape(-1, 1)
+
+    # Multimodal function: mixture of Gaussians
+    y = (
+        2 * np.exp(-0.5 * (X.flatten() + 2) ** 2)
+        + 1.5 * np.exp(-0.5 * (X.flatten() - 1) ** 2)
+        + np.exp(-0.5 * (X.flatten() - 3) ** 2)
+        + np.random.normal(0, 0.3, n_samples)
+    )
+
+    return X, y
+
+
+@pytest.fixture
+def skewed_regression_data():
+    """Generate regression data with skewed noise distribution."""
+    np.random.seed(42)
+    n_samples = 250
+    X = np.linspace(0, 5, n_samples).reshape(-1, 1)
+
+    # Skewed noise using exponential distribution
+    skewed_noise = np.random.exponential(0.5, n_samples) - 0.5
+
+    # True function with skewed residuals
+    y = np.sin(X.flatten()) + 0.5 * X.flatten() + skewed_noise
+
+    return X, y
+
+
+@pytest.fixture
+def high_dimensional_regression_data():
+    """Generate high-dimensional regression data for testing scalability."""
+    np.random.seed(42)
+    n_samples = 150
+    n_features = 8
+    X = np.random.randn(n_samples, n_features)
+
+    # Linear combination with interaction terms
+    true_coef = np.array([2, -1, 0.5, -0.5, 1, 0, -0.3, 0.8])
+    y = X @ true_coef + 0.5 * X[:, 0] * X[:, 1] + np.random.normal(0, 0.5, n_samples)
+
+    return X, y
+
+
+@pytest.fixture
+def sparse_regression_data():
+    """Generate sparse regression data with few informative features."""
+    np.random.seed(42)
+    n_samples = 100
+    n_features = 10
+    X = np.random.randn(n_samples, n_features)
+
+    # Only first 3 features are informative
+    true_coef = np.zeros(n_features)
+    true_coef[:3] = [3, -2, 1.5]
+    y = X @ true_coef + np.random.normal(0, 0.3, n_samples)
+
+    return X, y
+
+
+@pytest.fixture
+def challenging_monotonicity_data():
+    """Generate data specifically designed to challenge quantile monotonicity."""
+    np.random.seed(42)
+    n_samples = 200
+    X = np.linspace(-2, 2, n_samples).reshape(-1, 1)
+
+    # Complex function with varying conditional distributions
+    base_function = 2 * X.flatten() ** 3 - X.flatten()
+
+    # Create heteroscedastic noise that varies non-linearly
+    noise_std = 0.2 + 0.8 * np.abs(np.sin(2 * X.flatten()))
+    noise = np.random.normal(0, 1, n_samples) * noise_std
+
+    # Add occasional outliers to challenge robustness
+    outlier_mask = np.random.random(n_samples) < 0.05
+    outliers = np.random.normal(0, 5, n_samples) * outlier_mask
+
+    y = base_function + noise + outliers
+
+    return X, y
+
+
+@pytest.fixture
+def toy_regression_data():
+    """Generate simple toy regression data for basic testing."""
+
+    def _generate_data(n_samples=100, n_features=2, noise_std=0.1, random_state=42):
+        np.random.seed(random_state)
+        X = np.random.randn(n_samples, n_features)
+        true_coef = np.ones(n_features)
+        y = X @ true_coef + np.random.normal(0, noise_std, n_samples)
+        return X, y
+
+    return _generate_data
+
+
+@pytest.fixture
+def quantile_test_data():
+    """Generate data with known quantile structure for validation."""
+    np.random.seed(42)
+    n_samples = 500
+    X = np.linspace(-3, 3, n_samples).reshape(-1, 1)
+
+    # Create data where we know the true quantiles
+    # Use a location-scale model: Y = μ(X) + σ(X) * ε
+    mu = 2 * X.flatten()  # Mean function
+    sigma = 0.5 + 0.3 * np.abs(X.flatten())  # Scale function
+    epsilon = np.random.normal(0, 1, n_samples)  # Standard normal noise
+
+    y = mu + sigma * epsilon
+
+    # Store true quantiles for validation
+    true_quantiles = {}
+    for q in [0.1, 0.25, 0.5, 0.75, 0.9]:
+        from scipy.stats import norm
+
+        true_quantiles[q] = mu + sigma * norm.ppf(q)
+
+    return X, y, true_quantiles
+
+
+@pytest.fixture
+def monotonicity_test_quantiles():
+    """Standard quantiles for monotonicity testing."""
+    return [0.1, 0.25, 0.5, 0.75, 0.9]
+
+
+@pytest.fixture
+def alpha_levels_for_conformalization():
+    """Standard alpha levels for conformalization testing."""
+    return [0.1, 0.2, 0.3]  # Corresponding to 90%, 80%, 70% coverage
 
 
 @pytest.fixture
