@@ -604,19 +604,40 @@ class GaussianProcessQuantileEstimator(BaseSingleFitQuantileEstimator):
         """
         kernel_obj = None
 
-        # Default fallback to Matern kernel
+        # Default fallback to Matern kernel with proper bounds
         if kernel_spec is None:
-            kernel_obj = C(1.0) * Matern(length_scale=3, nu=1.5)
-        # If it's a string, look up predefined kernels
+            kernel_obj = C(1.0, (1e-3, 1e3)) * Matern(
+                length_scale=1.0,
+                length_scale_bounds=(
+                    1e-1,
+                    1e2,
+                ),  # Reasonable bounds to prevent collapse
+                nu=1.5,
+            )
+        # If it's a string, look up predefined kernels with proper bounds
         elif isinstance(kernel_spec, str):
             if kernel_spec == "rbf":
-                kernel_obj = C(1.0) * RBF(length_scale=1.0)
+                kernel_obj = C(1.0, (1e-3, 1e3)) * RBF(
+                    length_scale=1.0, length_scale_bounds=(1e-1, 1e2)
+                )
             elif kernel_spec == "matern":
-                kernel_obj = C(1.0) * Matern(length_scale=3, nu=1.5)
+                kernel_obj = C(1.0, (1e-3, 1e3)) * Matern(
+                    length_scale=1.0, length_scale_bounds=(1e-1, 1e2), nu=1.5
+                )
             elif kernel_spec == "rational_quadratic":
-                kernel_obj = C(1.0) * RationalQuadratic(length_scale=1.0, alpha=1.0)
+                kernel_obj = C(1.0, (1e-3, 1e3)) * RationalQuadratic(
+                    length_scale=1.0,
+                    length_scale_bounds=(1e-1, 1e2),
+                    alpha=1.0,
+                    alpha_bounds=(1e-3, 1e3),
+                )
             elif kernel_spec == "exp_sine_squared":
-                kernel_obj = C(1.0) * ExpSineSquared(length_scale=1.0, periodicity=1.0)
+                kernel_obj = C(1.0, (1e-3, 1e3)) * ExpSineSquared(
+                    length_scale=1.0,
+                    length_scale_bounds=(1e-1, 1e2),
+                    periodicity=1.0,
+                    periodicity_bounds=(1e-1, 1e2),
+                )
             else:
                 raise ValueError(f"Unknown kernel name: {kernel_spec}")
         # If it's already a kernel object, make a deep copy for safety

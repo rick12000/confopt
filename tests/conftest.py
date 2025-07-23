@@ -397,29 +397,6 @@ def sparse_regression_data():
 
 
 @pytest.fixture
-def challenging_monotonicity_data():
-    """Generate data specifically designed to challenge quantile monotonicity."""
-    np.random.seed(42)
-    n_samples = 200
-    X = np.linspace(-2, 2, n_samples).reshape(-1, 1)
-
-    # Complex function with varying conditional distributions
-    base_function = 2 * X.flatten() ** 3 - X.flatten()
-
-    # Create heteroscedastic noise that varies non-linearly
-    noise_std = 0.2 + 0.8 * np.abs(np.sin(2 * X.flatten()))
-    noise = np.random.normal(0, 1, n_samples) * noise_std
-
-    # Add occasional outliers to challenge robustness
-    outlier_mask = np.random.random(n_samples) < 0.05
-    outliers = np.random.normal(0, 5, n_samples) * outlier_mask
-
-    y = base_function + noise + outliers
-
-    return X, y
-
-
-@pytest.fixture
 def toy_regression_data():
     """Generate simple toy regression data for basic testing."""
 
@@ -706,3 +683,85 @@ def high_shift_data():
 def dtaci_instance():
     """Standard DtACI instance for testing."""
     return DtACI(alpha=0.1, gamma_values=[0.01, 0.05, 0.1])
+
+
+# Quantile Estimation Test Data Fixtures
+@pytest.fixture
+def linear_regression_data():
+    """Simple linear regression with homoscedastic noise."""
+    np.random.seed(42)
+    n_samples = 200
+    X = np.linspace(-2, 2, n_samples).reshape(-1, 1)
+    y = 2.5 * X.flatten() + 1.0 + np.random.normal(0, 0.5, n_samples)
+    return X, y
+
+
+@pytest.fixture
+def heteroscedastic_data():
+    """Heteroscedastic data where variance increases with |X|."""
+    np.random.seed(42)
+    n_samples = 300
+    X = np.linspace(-3, 3, n_samples).reshape(-1, 1)
+    noise_std = 0.3 + 1.2 * np.abs(X.flatten())
+    noise = np.random.normal(0, 1, n_samples) * noise_std
+    y = 1.5 * X.flatten() ** 2 + 0.5 * X.flatten() + noise
+    return X, y
+
+
+@pytest.fixture
+def multimodal_data():
+    """Multimodal target distribution."""
+    np.random.seed(42)
+    n_samples = 250
+    X = np.linspace(-4, 4, n_samples).reshape(-1, 1)
+    y = (
+        2.0 * np.exp(-0.5 * (X.flatten() + 1.5) ** 2)
+        + 1.5 * np.exp(-0.5 * (X.flatten() - 1.5) ** 2)
+        + np.random.normal(0, 0.25, n_samples)
+    )
+    return X, y
+
+
+@pytest.fixture
+def skewed_noise_data():
+    """Data with skewed noise distribution."""
+    np.random.seed(42)
+    n_samples = 200
+    X = np.linspace(0, 4, n_samples).reshape(-1, 1)
+    skewed_noise = np.random.exponential(0.4, n_samples) - 0.4
+    y = np.sin(X.flatten()) + 0.3 * X.flatten() + skewed_noise
+    return X, y
+
+
+@pytest.fixture
+def high_dimensional_sparse_data():
+    """High-dimensional data with sparse signal."""
+    np.random.seed(42)
+    n_samples = 150
+    n_features = 10
+    X = np.random.randn(n_samples, n_features)
+    true_coef = np.zeros(n_features)
+    true_coef[:3] = [2.5, -1.8, 1.2]
+    y = X @ true_coef + np.random.normal(0, 0.4, n_samples)
+    return X, y
+
+
+@pytest.fixture
+def challenging_monotonicity_data():
+    """Data specifically designed to challenge monotonicity."""
+    np.random.seed(42)
+    n_samples = 180
+    X = np.linspace(-2.5, 2.5, n_samples).reshape(-1, 1)
+    base_func = X.flatten() ** 3 - 1.5 * X.flatten()
+    noise_std = 0.2 + 0.8 * np.abs(np.sin(2.5 * X.flatten()))
+    noise = np.random.normal(0, 1, n_samples) * noise_std
+    outlier_mask = np.random.random(n_samples) < 0.04
+    outliers = np.random.normal(0, 4, n_samples) * outlier_mask
+    y = base_func + noise + outliers
+    return X, y
+
+
+@pytest.fixture
+def comprehensive_test_quantiles():
+    """Comprehensive set of quantiles for testing."""
+    return [0.05, 0.25, 0.5, 0.75, 0.95]
