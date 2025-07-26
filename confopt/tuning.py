@@ -698,8 +698,8 @@ class ConformalTuner:
             lower_bound, upper_bound = self.get_interval_if_applicable(
                 searcher, transformed_config
             )
-            signed_lower_bound = lower_bound * self.metric_sign
-            signed_upper_bound = upper_bound * self.metric_sign
+            signed_lower_bound = (lower_bound * self.metric_sign) if lower_bound is not None else None
+            signed_upper_bound = (upper_bound * self.metric_sign) if upper_bound is not None else None
 
             signed_performance = self.metric_sign * performance
             searcher.update(X=transformed_config, y_true=signed_performance)
