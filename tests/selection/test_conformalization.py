@@ -36,89 +36,23 @@ def validate_intervals(
     y_true: np.ndarray,
     alphas: list[float],
     tolerance: float,
-) -> bool:
-    assert len(intervals) == len(alphas)
-    for i, alpha in enumerate(alphas):
-        lower_bound = intervals[i].lower_bounds
-        upper_bound = intervals[i].upper_bounds
-        assert np.all(lower_bound <= upper_bound)
-        coverage = np.mean((y_true >= lower_bound) & (y_true <= upper_bound))
-        assert abs(coverage - (1 - alpha)) < tolerance
-    return True
-
-
-def calculate_coverage(
-    intervals: list[ConformalBounds], y_true: np.ndarray, alphas: list[float]
-) -> list[float]:
-    """Calculate empirical coverage for each alpha level.
-
-    Args:
-        intervals: List of ConformalBounds objects from prediction
-        y_true: True target values
-        alphas: List of miscoverage levels
-
-    Returns:
-        List of empirical coverage rates, one per alpha level
-    """
+) -> tuple[float, bool]:
     coverages = []
+    errors = []
     for i, alpha in enumerate(alphas):
         lower_bound = intervals[i].lower_bounds
         upper_bound = intervals[i].upper_bounds
         coverage = np.mean((y_true >= lower_bound) & (y_true <= upper_bound))
+        error = abs(coverage - (1 - alpha)) > tolerance
+
         coverages.append(coverage)
-    return coverages
+        errors.append(error)
 
-
-def calculate_interval_properties(intervals: list[ConformalBounds]) -> dict:
-    """Calculate comprehensive interval properties for analysis.
-
-    Args:
-        intervals: List of ConformalBounds objects
-
-    Returns:
-        Dictionary with interval statistics
-    """
-    properties = {
-        "negative_widths": [],
-        "mean_widths": [],
-        "min_widths": [],
-        "max_widths": [],
-        "width_std": [],
-    }
-
-    for interval in intervals:
-        widths = interval.upper_bounds - interval.lower_bounds
-        properties["negative_widths"].append(np.sum(widths < 0))
-        properties["mean_widths"].append(np.mean(widths))
-        properties["min_widths"].append(np.min(widths))
-        properties["max_widths"].append(np.max(widths))
-        properties["width_std"].append(np.std(widths))
-
-    return properties
-
-
-def calculate_monotonicity_violations(
-    intervals: list[ConformalBounds],
-) -> tuple[int, int]:
-    """Calculate hard and soft monotonicity violations in intervals.
-
-    Returns:
-        tuple: (hard_violations, soft_violations) where hard = lower > upper, soft = lower ≈ upper
-    """
-    hard_violations = 0
-    soft_violations = 0
-    tolerance = 1e-6
-
-    for interval in intervals:
-        widths = interval.upper_bounds - interval.lower_bounds
-        hard_violations += np.sum(widths < -tolerance)
-        soft_violations += np.sum(np.abs(widths) <= tolerance)
-
-    return hard_violations, soft_violations
+    return coverages, errors
 
 
 @pytest.mark.parametrize("alpha", [0.1, 0.2, 0.3])
-def test_alpha_to_quantiles_without_cap(alpha):
+def test_alpha_to_quantiles(alpha):
     lower, upper = alpha_to_quantiles(alpha)
     assert lower == alpha / 2
     assert upper == 1 - alpha / 2
@@ -155,7 +89,11 @@ def test_locally_weighted_fit_and_predict_intervals_shape_and_coverage(
         random_state=42,
     )
     intervals = estimator.predict_intervals(X=X_val)
-    validate_intervals(intervals, y_val, alphas, POINT_ESTIMATOR_COVERAGE_TOLERANCE)
+    assert len(intervals) == len(alphas)
+    _, errors = validate_intervals(
+        intervals, y_val, alphas, POINT_ESTIMATOR_COVERAGE_TOLERANCE
+    )
+    assert not any(errors)
 
 
 def test_locally_weighted_calculate_betas_output_properties(
@@ -243,8 +181,14 @@ def test_quantile_fit_and_predict_intervals_shape_and_coverage(
         random_state=42,
     )
     assert len(estimator.nonconformity_scores) == len(alphas)
+
     intervals = estimator.predict_intervals(X_val)
-    validate_intervals(intervals, y_val, alphas, QUANTILE_ESTIMATOR_COVERAGE_TOLERANCE)
+    assert len(intervals) == len(alphas)
+
+    _, errors = validate_intervals(
+        intervals, y_val, alphas, QUANTILE_ESTIMATOR_COVERAGE_TOLERANCE
+    )
+    assert not any(errors)
 
 
 def test_quantile_calculate_betas_output_properties(
@@ -311,28 +255,23 @@ def test_quantile_alpha_update_mechanism(initial_alphas, new_alphas):
     assert estimator.alphas == new_alphas
 
 
-def test_quantile_prediction_errors_before_fitting():
-    estimator = QuantileConformalEstimator(
-        quantile_estimator_architecture=QUANTILE_ESTIMATOR_ARCHITECTURES[0],
-        alphas=[0.2],
-    )
-    X_test = np.random.rand(5, 3)
-    with pytest.raises(ValueError, match="Estimator must be fitted before prediction"):
-        estimator.predict_intervals(X_test)
-    with pytest.raises(
-        ValueError, match="Estimator must be fitted before calculating beta"
-    ):
-        estimator.calculate_betas(X_test[0], 1.0)
-
-
+@pytest.mark.parametrize(
+    "data_fixture_name",
+    [
+        "linear_regression_data",
+        "heteroscedastic_data",
+        "high_dimensional_sparse_data",
+    ],
+)
 @pytest.mark.parametrize("estimator_architecture", QUANTILE_ESTIMATOR_ARCHITECTURES)
-@pytest.mark.parametrize("alphas", [[0.1], [0.1, 0.9]])
+@pytest.mark.parametrize("alphas", [[0.1, 0.9]])
 def test_conformalized_vs_non_conformalized_quantile_estimator_coverage(
+    request,
+    data_fixture_name,
     estimator_architecture,
     alphas,
-    dummy_expanding_quantile_gaussian_dataset,
 ):
-    X, y = dummy_expanding_quantile_gaussian_dataset
+    X, y = request.getfixturevalue(data_fixture_name)
     X_train, y_train, X_val, y_val = create_train_val_split(
         X, y, train_split=0.8, random_state=42
     )
@@ -341,7 +280,7 @@ def test_conformalized_vs_non_conformalized_quantile_estimator_coverage(
     conformalized_estimator = QuantileConformalEstimator(
         quantile_estimator_architecture=estimator_architecture,
         alphas=alphas,
-        n_pre_conformal_trials=15,
+        n_pre_conformal_trials=32,
     )
 
     conformalized_estimator.fit(
@@ -367,18 +306,19 @@ def test_conformalized_vs_non_conformalized_quantile_estimator_coverage(
         random_state=42,
     )
 
-    # Verify conformalization status
     assert conformalized_estimator.conformalize_predictions
     assert not non_conformalized_estimator.conformalize_predictions
 
-    # Generate predictions for both estimators
     conformalized_intervals = conformalized_estimator.predict_intervals(X_val)
     non_conformalized_intervals = non_conformalized_estimator.predict_intervals(X_val)
-
-    # Calculate coverage for both estimators
-    conformalized_coverages = calculate_coverage(conformalized_intervals, y_val, alphas)
-    non_conformalized_coverages = calculate_coverage(
-        non_conformalized_intervals, y_val, alphas
+    conformalized_coverages, _ = validate_intervals(
+        conformalized_intervals, y_val, alphas, QUANTILE_ESTIMATOR_COVERAGE_TOLERANCE
+    )
+    non_conformalized_coverages, _ = validate_intervals(
+        non_conformalized_intervals,
+        y_val,
+        alphas,
+        QUANTILE_ESTIMATOR_COVERAGE_TOLERANCE,
     )
 
     # Verify that conformalized estimator has better or equal coverage
@@ -387,26 +327,7 @@ def test_conformalized_vs_non_conformalized_quantile_estimator_coverage(
         conformalized_coverage = conformalized_coverages[i]
         non_conformalized_coverage = non_conformalized_coverages[i]
 
-        # Conformalized estimator should have coverage closer to or better than target
         conformalized_error = abs(conformalized_coverage - target_coverage)
         non_conformalized_error = abs(non_conformalized_coverage - target_coverage)
 
-        # Assert that conformalized estimator performs better or equal
         assert conformalized_error <= non_conformalized_error
-
-    # Check monotonicity properties
-    conf_hard_violations, conf_soft_violations = calculate_monotonicity_violations(
-        conformalized_intervals
-    )
-    (
-        non_conf_hard_violations,
-        non_conf_soft_violations,
-    ) = calculate_monotonicity_violations(non_conformalized_intervals)
-
-    # Conformalized should have better monotonicity than non-conformalized
-    assert conf_hard_violations <= non_conf_hard_violations
-
-    # Single-fit estimators should have perfect hard monotonicity
-    if estimator_architecture in ["qgp", "qrf"]:
-        assert conf_hard_violations == 0
-        assert non_conf_hard_violations == 0

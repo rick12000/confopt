@@ -429,7 +429,7 @@ class ConformalTuner:
             y=y,
             train_split=(1 - validation_split),
             normalize=False,
-            ordinal=False,
+            ordinal=True,
             random_state=random_state,
         )
 
@@ -695,12 +695,14 @@ class ConformalTuner:
             transformed_config = scaler.transform(
                 self.config_manager.tabularize_configs([next_config])
             )
-            signed_performance = self.metric_sign * performance
-            searcher.update(X=transformed_config, y_true=signed_performance)
-
             lower_bound, upper_bound = self.get_interval_if_applicable(
                 searcher, transformed_config
             )
+            signed_lower_bound = lower_bound * self.metric_sign
+            signed_upper_bound = upper_bound * self.metric_sign
+
+            signed_performance = self.metric_sign * performance
+            searcher.update(X=transformed_config, y_true=signed_performance)
 
             self.config_manager.mark_as_searched(next_config, performance)
             trial = Trial(
@@ -710,8 +712,8 @@ class ConformalTuner:
                 performance=performance,
                 acquisition_source=str(searcher),
                 searcher_runtime=training_runtime,
-                lower_bound=lower_bound,
-                upper_bound=upper_bound,
+                lower_bound=signed_lower_bound,
+                upper_bound=signed_upper_bound,
                 primary_estimator_error=estimator_error,
             )
             self.study.append_trial(trial)
