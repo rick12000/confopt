@@ -142,6 +142,7 @@ class Trial(BaseModel):
     iteration: int
     timestamp: datetime
     configuration: dict
+    tabularized_configuration: list[float]
     performance: float
     acquisition_source: Optional[str] = None
     lower_bound: Optional[float] = None
@@ -311,6 +312,23 @@ class BaseConfigurationManager:
         if not configs:
             return np.array([])
         return self.encoder.transform(configs).to_numpy()
+
+    def listify_configs(self, configs: list[dict]) -> list[list[float]]:
+        """
+        Converts a list of configuration dictionaries to lists of numerical values.
+
+        Args:
+            configs: List of configuration dictionaries to convert.
+        Returns:
+            List of lists, where each inner list contains numerical values
+            in the same order as DataFrame columns.
+        """
+        if not configs:
+            return []
+        if self.encoder is None:
+            self._setup_encoder()
+        tabularized = self.encoder.transform(configs).to_numpy()
+        return [row.tolist() for row in tabularized]
 
     def add_to_banned_configurations(self, config: dict) -> None:
         """
