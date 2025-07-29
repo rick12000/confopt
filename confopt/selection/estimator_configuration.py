@@ -83,11 +83,11 @@ ESTIMATOR_REGISTRY = {
         estimator_name=RF_NAME,
         estimator_class=RandomForestRegressor,
         default_params={
-            "n_estimators": 15,
+            "n_estimators": 100,
             "max_features": "sqrt",
-            "min_samples_split": 5,
-            "min_samples_leaf": 3,
-            "max_depth": 4,
+            "min_samples_split": 2,
+            "min_samples_leaf": 1,
+            "max_depth": 3,
             "bootstrap": True,
             "random_state": None,  # added to allow seeding
         },
@@ -118,9 +118,9 @@ ESTIMATOR_REGISTRY = {
         estimator_class=GradientBoostingRegressor,
         default_params={
             "learning_rate": 0.05,
-            "n_estimators": 15,
-            "min_samples_split": 5,
-            "min_samples_leaf": 4,
+            "n_estimators": 100,
+            "min_samples_split": 2,
+            "min_samples_leaf": 1,
             "max_depth": 3,
             "subsample": 0.8,
             "random_state": None,  # added
@@ -139,7 +139,7 @@ ESTIMATOR_REGISTRY = {
         estimator_class=LGBMRegressor,
         default_params={
             "learning_rate": 0.05,
-            "n_estimators": 15,
+            "n_estimators": 100,
             "max_depth": 3,
             "min_child_samples": 10,
             "subsample": 0.8,
@@ -177,10 +177,10 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QRF_NAME,
         estimator_class=QuantileForest,
         default_params={
-            "n_estimators": 25,
-            "max_depth": 4,
+            "n_estimators": 100,
+            "max_depth": 3,
             "max_features": 0.8,
-            "min_samples_split": 5,
+            "min_samples_split": 2,
             "bootstrap": True,
             "random_state": None,  # added
         },
@@ -206,10 +206,10 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QLEAF_NAME,
         estimator_class=QuantileLeaf,
         default_params={
-            "n_estimators": 25,
-            "max_depth": 4,
+            "n_estimators": 100,
+            "max_depth": 3,
             "max_features": 0.8,
-            "min_samples_split": 5,
+            "min_samples_split": 2,
             "bootstrap": True,
             "random_state": None,
         },
@@ -227,10 +227,10 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileGBM,
         default_params={
             "learning_rate": 0.1,
-            "n_estimators": 25,
-            "min_samples_split": 8,
-            "min_samples_leaf": 4,
-            "max_depth": 4,
+            "n_estimators": 100,
+            "min_samples_split": 2,
+            "min_samples_leaf": 1,
+            "max_depth": 3,
             "random_state": None,  # added
         },
         estimator_parameter_space={
@@ -248,7 +248,7 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileLightGBM,
         default_params={
             "learning_rate": 0.05,
-            "n_estimators": 50,
+            "n_estimators": 100,
             "max_depth": 3,
             "min_child_samples": 10,
             "subsample": 0.8,
@@ -312,11 +312,11 @@ ESTIMATOR_REGISTRY = {
             {
                 "class": QuantileForest,
                 "params": {
-                    "n_estimators": 25,
-                    "max_depth": 4,
+                    "n_estimators": 100,
+                    "max_depth": 3,
                     "max_features": 0.8,
-                    "min_samples_split": 5,
-                    "min_samples_leaf": 3,
+                    "min_samples_split": 2,
+                    "min_samples_leaf": 1,
                     "bootstrap": True,
                 },
             },
@@ -352,10 +352,10 @@ ESTIMATOR_REGISTRY = {
                 "class": QuantileGBM,
                 "params": {
                     "learning_rate": 0.1,
-                    "n_estimators": 50,
-                    "min_samples_split": 3,
-                    "min_samples_leaf": 2,
-                    "max_depth": 4,
+                    "n_estimators": 100,
+                    "min_samples_split": 2,
+                    "min_samples_leaf": 1,
+                    "max_depth": 3,
                     "subsample": 0.9,
                     "max_features": "sqrt",
                     "random_state": None,
@@ -379,11 +379,11 @@ ESTIMATOR_REGISTRY = {
             {
                 "class": QuantileForest,
                 "params": {
-                    "n_estimators": 25,
-                    "max_depth": 4,
+                    "n_estimators": 100,
+                    "max_depth": 3,
                     "max_features": 0.8,
-                    "min_samples_split": 5,
-                    "min_samples_leaf": 3,
+                    "min_samples_split": 2,
+                    "min_samples_leaf": 1,
                     "bootstrap": True,
                 },
             },
@@ -412,11 +412,11 @@ ESTIMATOR_REGISTRY = {
             {
                 "class": QuantileForest,
                 "params": {
-                    "n_estimators": 25,
-                    "max_depth": 4,
+                    "n_estimators": 100,
+                    "max_depth": 3,
                     "max_features": 0.8,
-                    "min_samples_split": 5,
-                    "min_samples_leaf": 3,
+                    "min_samples_split": 2,
+                    "min_samples_leaf": 1,
                     "bootstrap": True,
                 },
             },
@@ -454,11 +454,11 @@ ESTIMATOR_REGISTRY = {
             {
                 "class": QuantileForest,
                 "params": {
-                    "n_estimators": 25,
-                    "max_depth": 4,
+                    "n_estimators": 100,
+                    "max_depth": 3,
                     "max_features": 0.8,
-                    "min_samples_split": 5,
-                    "min_samples_leaf": 3,
+                    "min_samples_split": 2,
+                    "min_samples_leaf": 1,
                     "bootstrap": True,
                 },
             },

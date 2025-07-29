@@ -267,7 +267,7 @@ class LocallyWeightedConformalEstimator:
         intervals = []
         for alpha in self.alphas:
             non_conformity_score_quantile = np.quantile(
-                self.nonconformity_scores, 1 - alpha
+                self.nonconformity_scores, (1-alpha)/(1+1/len(self.nonconformity_scores))
             )
             scaled_score = non_conformity_score_quantile * var_pred
 
@@ -633,7 +633,7 @@ class QuantileConformalEstimator:
             if self.conformalize_predictions:
                 score = np.quantile(
                     self.nonconformity_scores[i],
-                    1 - alpha,
+                    (1-alpha)/(1+1/len(self.nonconformity_scores[i])),
                     interpolation="linear",
                 )
                 lower_interval_bound = np.array(prediction[:, lower_idx]) - score
