@@ -311,14 +311,15 @@ ESTIMATOR_REGISTRY = {
                 },
             },
             {
-                "class": QuantileForest,
+                "class": QuantileGBM,
                 "params": {
+                    "learning_rate": 0.1,
                     "n_estimators": 100,
-                    "max_depth": 3,
-                    "max_features": 0.8,
                     "min_samples_split": 2,
                     "min_samples_leaf": 1,
-                    "bootstrap": True,
+                    "max_depth": 3,
+                    "max_features": 0.8,
+                    "random_state": None,
                 },
             },
         ],
@@ -337,14 +338,15 @@ ESTIMATOR_REGISTRY = {
         },
         ensemble_components=[
             {
-                "class": QuantileForest,
+                "class": QuantileGBM,
                 "params": {
+                    "learning_rate": 0.1,
                     "n_estimators": 100,
-                    "max_depth": 3,
-                    "max_features": 0.8,
                     "min_samples_split": 2,
                     "min_samples_leaf": 1,
-                    "bootstrap": True,
+                    "max_depth": 3,
+                    "max_features": 0.8,
+                    "random_state": None,
                 },
             },
             {
@@ -369,14 +371,15 @@ ESTIMATOR_REGISTRY = {
         },
         ensemble_components=[
             {
-                "class": QuantileForest,
+                "class": QuantileGBM,
                 "params": {
+                    "learning_rate": 0.1,
                     "n_estimators": 100,
-                    "max_depth": 3,
-                    "max_features": 0.8,
                     "min_samples_split": 2,
                     "min_samples_leaf": 1,
-                    "bootstrap": True,
+                    "max_depth": 3,
+                    "max_features": 0.8,
+                    "random_state": None,
                 },
             },
             {
@@ -402,14 +405,15 @@ ESTIMATOR_REGISTRY = {
         },
         ensemble_components=[
             {
-                "class": QuantileForest,
+                "class": QuantileGBM,
                 "params": {
+                    "learning_rate": 0.1,
                     "n_estimators": 100,
-                    "max_depth": 3,
-                    "max_features": 0.8,
                     "min_samples_split": 2,
                     "min_samples_leaf": 1,
-                    "bootstrap": True,
+                    "max_depth": 3,
+                    "max_features": 0.8,
+                    "random_state": None,
                 },
             },
             {
@@ -444,14 +448,15 @@ ESTIMATOR_REGISTRY = {
                 },
             },
             {
-                "class": QuantileForest,
+                "class": QuantileGBM,
                 "params": {
+                    "learning_rate": 0.1,
                     "n_estimators": 100,
-                    "max_depth": 3,
-                    "max_features": 0.8,
                     "min_samples_split": 2,
                     "min_samples_leaf": 1,
-                    "bootstrap": True,
+                    "max_depth": 3,
+                    "max_features": 0.8,
+                    "random_state": None,
                 },
             },
             {

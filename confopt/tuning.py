@@ -131,7 +131,7 @@ class ConformalTuner:
         Returns:
             Validation split ratio between 0 and 1
         """
-        return 5 / len(X) if len(X) <=50 else 0.10
+        return 5 / len(X) if len(X) <= 50 else 0.10
 
     def check_objective_function(self) -> None:
         """Validate objective function signature and type annotations.
@@ -435,7 +435,7 @@ class ConformalTuner:
             y=y,
             train_split=(1 - validation_split),
             normalize=False,
-            ordinal=False,
+            ordinal=True,
             random_state=random_state,
         )
 
