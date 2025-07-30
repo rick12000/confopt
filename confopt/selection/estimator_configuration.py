@@ -92,11 +92,11 @@ ESTIMATOR_REGISTRY = {
             "random_state": None,  # added to allow seeding
         },
         estimator_parameter_space={
-            "n_estimators": IntRange(min_value=10, max_value=30),
+            "n_estimators": IntRange(min_value=25, max_value=200),
             "max_features": CategoricalRange(choices=[0.5, 0.7, "sqrt"]),
-            "min_samples_split": IntRange(min_value=3, max_value=8),
-            "min_samples_leaf": IntRange(min_value=2, max_value=5),
-            "max_depth": IntRange(min_value=3, max_value=6),
+            "min_samples_split": IntRange(min_value=2, max_value=6),
+            "min_samples_leaf": IntRange(min_value=1, max_value=4),
+            "max_depth": IntRange(min_value=2, max_value=6),
             "bootstrap": CategoricalRange(choices=[True, False]),
         },
     ),
@@ -104,11 +104,11 @@ ESTIMATOR_REGISTRY = {
         estimator_name=KNN_NAME,
         estimator_class=KNeighborsRegressor,
         default_params={
-            "n_neighbors": 3,
+            "n_neighbors": 10,
             "weights": "distance",
         },
         estimator_parameter_space={
-            "n_neighbors": IntRange(min_value=2, max_value=7),
+            "n_neighbors": IntRange(min_value=5, max_value=20),
             "weights": CategoricalRange(choices=["uniform", "distance"]),
             "p": CategoricalRange(choices=[1, 2]),
         },
@@ -185,10 +185,10 @@ ESTIMATOR_REGISTRY = {
             "random_state": None,  # added
         },
         estimator_parameter_space={
-            "n_estimators": IntRange(min_value=10, max_value=30),
-            "max_depth": IntRange(min_value=3, max_value=6),
-            "max_features": FloatRange(min_value=0.6, max_value=0.9),
-            "min_samples_split": IntRange(min_value=3, max_value=8),
+            "n_estimators": IntRange(min_value=25, max_value=200),
+            "max_depth": IntRange(min_value=2, max_value=6),
+            "max_features": FloatRange(min_value=0.7, max_value=1.0),
+            "min_samples_split": IntRange(min_value=2, max_value=6),
             "bootstrap": CategoricalRange(choices=[True, False]),
         },
     ),
@@ -196,10 +196,10 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QKNN_NAME,
         estimator_class=QuantileKNN,
         default_params={
-            "n_neighbors": 5,
+            "n_neighbors": 10,
         },
         estimator_parameter_space={
-            "n_neighbors": IntRange(min_value=5, max_value=10),
+            "n_neighbors": IntRange(min_value=5, max_value=20),
         },
     ),
     QLEAF_NAME: EstimatorConfig(
@@ -214,10 +214,10 @@ ESTIMATOR_REGISTRY = {
             "random_state": None,
         },
         estimator_parameter_space={
-            "n_estimators": IntRange(min_value=10, max_value=30),
-            "max_depth": IntRange(min_value=3, max_value=6),
-            "max_features": FloatRange(min_value=0.6, max_value=0.9),
-            "min_samples_split": IntRange(min_value=3, max_value=8),
+            "n_estimators": IntRange(min_value=25, max_value=200),
+            "max_depth": IntRange(min_value=2, max_value=6),
+            "max_features": FloatRange(min_value=0.7, max_value=1.0),
+            "min_samples_split": IntRange(min_value=1, max_value=8),
             "bootstrap": CategoricalRange(choices=[True, False]),
         },
     ),
@@ -231,16 +231,17 @@ ESTIMATOR_REGISTRY = {
             "min_samples_split": 2,
             "min_samples_leaf": 1,
             "max_depth": 3,
+            "max_features": 0.8,
             "random_state": None,  # added
         },
         estimator_parameter_space={
             "learning_rate": FloatRange(min_value=0.05, max_value=0.2),
-            "n_estimators": IntRange(min_value=30, max_value=100),
+            "n_estimators": IntRange(min_value=25, max_value=200),
             "min_samples_split": IntRange(min_value=2, max_value=6),
-            "min_samples_leaf": IntRange(min_value=1, max_value=4),
-            "max_depth": IntRange(min_value=3, max_value=6),
+            "min_samples_leaf": IntRange(min_value=1, max_value=3),
+            "max_depth": IntRange(min_value=2, max_value=6),
             "subsample": FloatRange(min_value=0.8, max_value=1.0),
-            "max_features": CategoricalRange(choices=["sqrt", 0.7, 0.8, 0.9]),
+            "max_features": FloatRange(min_value=0.7, max_value=1.0),
         },
     ),
     QLGBM_NAME: EstimatorConfig(
@@ -259,14 +260,14 @@ ESTIMATOR_REGISTRY = {
             "random_state": None,  # added
         },
         estimator_parameter_space={
-            "learning_rate": FloatRange(min_value=0.02, max_value=0.1),
-            "n_estimators": IntRange(min_value=10, max_value=50),
+            "learning_rate": FloatRange(min_value=0.05, max_value=0.2),
+            "n_estimators": IntRange(min_value=25, max_value=200),
             "max_depth": IntRange(min_value=2, max_value=4),
             "min_child_samples": IntRange(min_value=8, max_value=15),
             "subsample": FloatRange(min_value=0.7, max_value=0.9),
             "colsample_bytree": FloatRange(min_value=0.7, max_value=0.9),
-            "reg_alpha": FloatRange(min_value=0.1, max_value=1.0),
-            "reg_lambda": FloatRange(min_value=0.1, max_value=1.0),
+            "reg_alpha": FloatRange(min_value=0.2, max_value=0.5),
+            "reg_lambda": FloatRange(min_value=0.2, max_value=0.5),
         },
     ),
     QL_NAME: EstimatorConfig(
@@ -306,7 +307,7 @@ ESTIMATOR_REGISTRY = {
             {
                 "class": QuantileKNN,
                 "params": {
-                    "n_neighbors": 5,
+                    "n_neighbors": 10,
                 },
             },
             {
@@ -336,29 +337,20 @@ ESTIMATOR_REGISTRY = {
         },
         ensemble_components=[
             {
-                "class": QuantileLasso,
+                "class": QuantileForest,
                 "params": {
-                    "max_iter": 300,
-                    "p_tol": 1e-4,
+                    "n_estimators": 100,
+                    "max_depth": 3,
+                    "max_features": 0.8,
+                    "min_samples_split": 2,
+                    "min_samples_leaf": 1,
+                    "bootstrap": True,
                 },
             },
             {
                 "class": QuantileKNN,
                 "params": {
-                    "n_neighbors": 5,
-                },
-            },
-            {
-                "class": QuantileGBM,
-                "params": {
-                    "learning_rate": 0.1,
-                    "n_estimators": 100,
-                    "min_samples_split": 2,
-                    "min_samples_leaf": 1,
-                    "max_depth": 3,
-                    "subsample": 0.9,
-                    "max_features": "sqrt",
-                    "random_state": None,
+                    "n_neighbors": 10,
                 },
             },
         ],
@@ -465,7 +457,7 @@ ESTIMATOR_REGISTRY = {
             {
                 "class": QuantileKNN,
                 "params": {
-                    "n_neighbors": 5,
+                    "n_neighbors": 10,
                 },
             },
         ],
