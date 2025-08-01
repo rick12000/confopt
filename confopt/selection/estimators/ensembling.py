@@ -14,6 +14,7 @@ from sklearn.base import BaseEstimator
 from sklearn.model_selection import KFold
 from sklearn.metrics import mean_pinball_loss
 from sklearn.linear_model import Lasso
+from scipy.optimize import minimize
 from confopt.selection.estimators.quantile_estimation import (
     BaseMultiFitQuantileEstimator,
     BaseSingleFitQuantileEstimator,
@@ -21,6 +22,21 @@ from confopt.selection.estimators.quantile_estimation import (
 from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
+
+
+def quantile_loss(y_true: np.ndarray, y_pred: np.ndarray, quantile: float) -> float:
+    """Compute quantile loss for a specific quantile level.
+
+    Args:
+        y_true: True target values
+        y_pred: Predicted values
+        quantile: Quantile level in [0, 1]
+
+    Returns:
+        Mean quantile loss
+    """
+    errors = y_true - y_pred
+    return np.mean(np.maximum(quantile * errors, (quantile - 1) * errors))
 
 
 def calculate_quantile_error(
@@ -263,9 +279,12 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
             or BaseSingleFitQuantileEstimator instances).
         cv: Number of cross-validation folds for weight learning.
         weighting_strategy: Combination method - "uniform" for equal weights,
-            "linear_stack" for quantile-specific learned weights via Lasso regression.
+            "joint_shared" for joint optimization with shared weights across quantiles,
+            "joint_separate" for joint optimization with separate weights per quantile.
+        regularization_target: Regularization target - "uniform" biases toward equal weights,
+            "best_component" biases toward the best performing individual estimator.
         random_state: Seed for reproducible cross-validation splits.
-        alpha: Regularization strength for Lasso regression.
+        alpha: Regularization strength for optimization.
     """
 
     def __init__(
@@ -274,11 +293,15 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
             Union[BaseMultiFitQuantileEstimator, BaseSingleFitQuantileEstimator]
         ],
         cv: int = 5,
-        weighting_strategy: Literal["uniform", "linear_stack"] = "linear_stack",
+        weighting_strategy: Literal[
+            "uniform", "joint_shared", "joint_separate"
+        ] = "joint_shared",
+        regularization_target: Literal["uniform", "best_component"] = "uniform",
         random_state: Optional[int] = None,
-        alpha: float = 0.01,
+        alpha: float = 0.001,
     ):
         super().__init__(estimators, cv, weighting_strategy, random_state, alpha)
+        self.regularization_target = regularization_target
 
     def _get_stacking_training_data(
         self, X: np.ndarray, y: np.ndarray, quantiles: List[float]
@@ -332,16 +355,166 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
 
         return val_indices, val_targets, val_predictions_by_quantile
 
+    def _optimize_weights(self, objective_func, n_estimators: int) -> np.ndarray:
+        """Single solver weight optimization using SLSQP.
+
+        Args:
+            objective_func: Objective function to minimize
+            n_estimators: Number of estimators
+
+        Returns:
+            Optimal weights array
+        """
+        initial_weights = np.ones(n_estimators) / n_estimators
+        bounds = [(0, 1)] * n_estimators
+        constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
+
+        try:
+            result = minimize(
+                objective_func,
+                initial_weights,
+                method="SLSQP",
+                bounds=bounds,
+                constraints=constraints,
+                options={"maxiter": 1000, "ftol": 1e-9},
+            )
+
+            if result.success:
+                weights = np.maximum(result.x, 0.0)
+                return weights / np.sum(weights)
+            else:
+                logger.warning(f"SLSQP optimization failed: {result.message}")
+        except Exception as e:
+            logger.warning(f"Weight optimization failed: {e}")
+
+        logger.warning("Using uniform weights as fallback")
+        return initial_weights
+
+    def _compute_joint_shared_weights(
+        self,
+        val_predictions_by_quantile: List[np.ndarray],
+        val_targets: np.ndarray,
+        quantiles: List[float],
+    ) -> np.ndarray:
+        """Optimize single set of weights jointly across all quantiles.
+
+        Args:
+            val_predictions_by_quantile: List of prediction arrays per quantile
+            val_targets: True target values
+            quantiles: List of quantile levels
+
+        Returns:
+            Optimal shared weights array
+        """
+        n_estimators = val_predictions_by_quantile[0].shape[1]
+
+        # Determine regularization target
+        if self.regularization_target == "best_component":
+            # Identify best individual estimator based on CV performance
+            estimator_losses = []
+            for est_idx in range(n_estimators):
+                total_loss = 0.0
+                for q_idx, quantile in enumerate(quantiles):
+                    pred = val_predictions_by_quantile[q_idx][:, est_idx]
+                    loss = quantile_loss(val_targets, pred, quantile)
+                    total_loss += loss
+                estimator_losses.append(total_loss / len(quantiles))
+
+            best_estimator_idx = np.argmin(estimator_losses)
+            target_weights = np.zeros(n_estimators)
+            target_weights[best_estimator_idx] = 1.0
+            logger.info(
+                f"Best estimator: {best_estimator_idx} (loss: {estimator_losses[best_estimator_idx]:.4f})"
+            )
+        else:
+            # Uniform regularization target
+            target_weights = np.ones(n_estimators) / n_estimators
+
+        def multi_quantile_objective(weights):
+            weights = np.maximum(weights, 1e-8)
+            weights = weights / np.sum(weights)
+
+            total_loss = 0.0
+            for i, quantile in enumerate(quantiles):
+                ensemble_pred = np.dot(val_predictions_by_quantile[i], weights)
+                loss = quantile_loss(val_targets, ensemble_pred, quantile)
+                total_loss += loss
+
+            avg_loss = total_loss / len(quantiles)
+            regularization_penalty = self.alpha * np.sum(
+                np.abs(weights - target_weights)
+            )
+
+            return avg_loss + regularization_penalty
+
+        return self._optimize_weights(multi_quantile_objective, n_estimators)
+
+    def _compute_joint_separate_weights(
+        self,
+        val_predictions_by_quantile: List[np.ndarray],
+        val_targets: np.ndarray,
+        quantiles: List[float],
+    ) -> List[np.ndarray]:
+        """Optimize separate weights for each quantile independently.
+
+        Args:
+            val_predictions_by_quantile: List of prediction arrays per quantile
+            val_targets: True target values
+            quantiles: List of quantile levels
+
+        Returns:
+            List of optimal weights arrays, one per quantile
+        """
+        weights_per_quantile = []
+
+        # For separate weights, determine regularization target once for consistency
+        n_estimators = val_predictions_by_quantile[0].shape[1]
+
+        if self.regularization_target == "best_component":
+            # Identify best individual estimator based on overall CV performance
+            estimator_losses = []
+            for est_idx in range(n_estimators):
+                total_loss = 0.0
+                for q_idx, quantile in enumerate(quantiles):
+                    pred = val_predictions_by_quantile[q_idx][:, est_idx]
+                    loss = quantile_loss(val_targets, pred, quantile)
+                    total_loss += loss
+                estimator_losses.append(total_loss / len(quantiles))
+
+            best_estimator_idx = np.argmin(estimator_losses)
+            target_weights = np.zeros(n_estimators)
+            target_weights[best_estimator_idx] = 1.0
+            logger.info(f"Best estimator for separate weights: {best_estimator_idx}")
+        else:
+            # Uniform regularization target
+            target_weights = np.ones(n_estimators) / n_estimators
+
+        for i, quantile in enumerate(quantiles):
+            predictions = val_predictions_by_quantile[i]
+
+            def single_quantile_objective(weights):
+                weights = np.maximum(weights, 1e-8)
+                weights = weights / np.sum(weights)
+
+                ensemble_pred = np.dot(predictions, weights)
+                loss = quantile_loss(val_targets, ensemble_pred, quantile)
+                regularization_penalty = self.alpha * np.sum(
+                    np.abs(weights - target_weights)
+                )
+
+                return loss + regularization_penalty
+
+            optimal_weights = self._optimize_weights(
+                single_quantile_objective, n_estimators
+            )
+            weights_per_quantile.append(optimal_weights)
+
+        return weights_per_quantile
+
     def _compute_quantile_weights(
         self, X: np.ndarray, y: np.ndarray, quantiles: List[float]
-    ) -> List[np.ndarray]:
-        """Compute ensemble weights for each quantile level.
-
-        For uniform weighting, assigns equal weights across all quantiles. For linear
-        stacking, learns separate optimal weights for each quantile using constrained
-        Lasso regression on out-of-fold predictions. This allows the ensemble to
-        weight estimators differently across the prediction distribution and turn
-        off bad estimators for specific quantiles.
+    ) -> Union[np.ndarray, List[np.ndarray]]:
+        """Compute ensemble weights using the specified strategy.
 
         Args:
             X: Training features with shape (n_samples, n_features).
@@ -349,46 +522,37 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
             quantiles: List of quantile levels to compute weights for.
 
         Returns:
-            List of weight arrays, one per quantile, each with shape (n_estimators,).
+            For uniform and joint_shared: Single weight array with shape (n_estimators,).
+            For joint_separate: List of weight arrays, one per quantile.
 
         Raises:
             ValueError: If unknown weighting strategy specified.
         """
         if self.weighting_strategy == "uniform":
-            return [
-                np.ones(len(self.estimators)) / len(self.estimators)
-                for _ in range(len(quantiles))
-            ]
-        elif self.weighting_strategy == "linear_stack":
-            (
-                val_indices,
-                val_targets,
-                val_predictions_by_quantile,
-            ) = self._get_stacking_training_data(X, y, quantiles)
+            return np.ones(len(self.estimators)) / len(self.estimators)
 
-            weights_per_quantile = []
-            sorted_indices = np.argsort(val_indices)
-            sorted_targets = val_targets[sorted_indices]
+        # Get cross-validation predictions for optimization
+        (
+            val_indices,
+            val_targets,
+            val_predictions_by_quantile,
+        ) = self._get_stacking_training_data(X, y, quantiles)
 
-            for q_idx in range(len(quantiles)):
-                sorted_predictions = val_predictions_by_quantile[q_idx][sorted_indices]
+        # Sort by validation indices for consistent ordering
+        sorted_indices = np.argsort(val_indices)
+        sorted_targets = val_targets[sorted_indices]
+        sorted_predictions_by_quantile = [
+            pred_array[sorted_indices] for pred_array in val_predictions_by_quantile
+        ]
 
-                meta_learner = Lasso(
-                    alpha=self.alpha, fit_intercept=False, positive=True
-                )
-                meta_learner.fit(sorted_predictions, sorted_targets)
-                weights = np.maximum(meta_learner.coef_, 0.0)
-
-                # Handle case where all weights are zero
-                if np.sum(weights) == 0:
-                    logger.warning(
-                        f"All Lasso weights are zero for quantile {quantiles[q_idx]}, falling back to uniform weighting"
-                    )
-                    weights = np.ones(len(self.estimators))
-
-                weights_per_quantile.append(weights / np.sum(weights))
-
-            return weights_per_quantile
+        if self.weighting_strategy == "joint_shared":
+            return self._compute_joint_shared_weights(
+                sorted_predictions_by_quantile, sorted_targets, quantiles
+            )
+        elif self.weighting_strategy == "joint_separate":
+            return self._compute_joint_separate_weights(
+                sorted_predictions_by_quantile, sorted_targets, quantiles
+            )
         else:
             raise ValueError(f"Unknown weighting strategy: {self.weighting_strategy}")
 
@@ -420,11 +584,10 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
         self.quantile_weights = self._compute_quantile_weights(X, y, quantiles)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Generate ensemble quantile predictions using quantile-specific weights.
+        """Generate ensemble quantile predictions using learned weights.
 
-        Combines quantile predictions from all base estimators using the learned
-        or uniform weights. Each quantile level uses its own set of weights,
-        allowing the ensemble to adapt differently across the prediction distribution.
+        Combines quantile predictions from all base estimators using either shared
+        weights (uniform/joint_shared) or separate weights per quantile (joint_separate).
 
         Args:
             X: Features for prediction with shape (n_samples, n_features).
@@ -434,14 +597,32 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
         """
         n_samples = X.shape[0]
         n_quantiles = len(self.quantiles)
+
+        # Get predictions from all base estimators
+        base_predictions = []
+        for estimator in self.estimators:
+            base_predictions.append(estimator.predict(X))
+
+        # Stack predictions: [n_estimators, n_samples, n_quantiles]
+        base_predictions = np.array(base_predictions)
+
+        # Combine using appropriate weighting scheme
         weighted_predictions = np.zeros((n_samples, n_quantiles))
-        for q_idx in range(n_quantiles):
-            ensembled_preds = np.zeros(n_samples)
 
-            for i, estimator in enumerate(self.estimators):
-                preds = estimator.predict(X)[:, q_idx]
-                ensembled_preds += self.quantile_weights[q_idx][i] * preds
-
-            weighted_predictions[:, q_idx] = ensembled_preds
+        if isinstance(self.quantile_weights, np.ndarray):
+            # Shared weights across all quantiles (uniform or joint_shared)
+            for q_idx in range(n_quantiles):
+                for i, weight in enumerate(self.quantile_weights):
+                    weighted_predictions[:, q_idx] += (
+                        weight * base_predictions[i, :, q_idx]
+                    )
+        else:
+            # Separate weights per quantile (joint_separate)
+            for q_idx in range(n_quantiles):
+                weights = self.quantile_weights[q_idx]
+                for i, weight in enumerate(weights):
+                    weighted_predictions[:, q_idx] += (
+                        weight * base_predictions[i, :, q_idx]
+                    )
 
         return weighted_predictions
