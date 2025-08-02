@@ -435,7 +435,7 @@ class ConformalTuner:
             y=y,
             train_split=(1 - validation_split),
             normalize=False,
-            ordinal=True,
+            ordinal=False,
             random_state=random_state,
         )
 
