@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from sklearn.preprocessing import StandardScaler
 from confopt.selection.conformalization import (
     LocallyWeightedConformalEstimator,
     QuantileConformalEstimator,
@@ -28,6 +29,12 @@ def create_train_val_split(
     val_indices = indices[split_idx:]
     X_train, y_train = X[train_indices], y[train_indices]
     X_val, y_val = X[val_indices], y[val_indices]
+
+    # Standardize features to avoid penalizing scale-sensitive estimators
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_val = scaler.transform(X_val)
+
     return X_train, y_train, X_val, y_val
 
 
@@ -260,7 +267,7 @@ def test_quantile_alpha_update_mechanism(initial_alphas, new_alphas):
     [
         "linear_regression_data",
         "heteroscedastic_data",
-        "high_dimensional_sparse_data",
+        "diabetes_data",
     ],
 )
 @pytest.mark.parametrize("estimator_architecture", QUANTILE_ESTIMATOR_ARCHITECTURES)
