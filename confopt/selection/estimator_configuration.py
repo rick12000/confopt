@@ -288,16 +288,12 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QENS1_NAME,
         estimator_class=QuantileEnsembleEstimator,
         default_params={
-            "weighting_strategy": "joint_shared",
-            "regularization_target": "uniform",
-            "cv": 5,
-            "alpha": 0.001,
+            "weighting_strategy": "linear_stack",
+            "cv": 3,
+            "alpha": 0.0,
         },
         estimator_parameter_space={
-            "weighting_strategy": CategoricalRange(choices=["uniform", "joint_shared"]),
-            "regularization_target": CategoricalRange(
-                choices=["uniform", "best_component"]
-            ),
+            "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
             "alpha": FloatRange(min_value=0.001, max_value=0.1, log_scale=True),
         },
         ensemble_components=[
@@ -332,16 +328,12 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QENS2_NAME,
         estimator_class=QuantileEnsembleEstimator,
         default_params={
-            "weighting_strategy": "joint_shared",
-            "regularization_target": "uniform",
-            "cv": 5,
-            "alpha": 0.001,
+            "weighting_strategy": "linear_stack",
+            "cv": 3,
+            "alpha": 0.0,
         },
         estimator_parameter_space={
-            "weighting_strategy": CategoricalRange(choices=["uniform", "joint_shared"]),
-            "regularization_target": CategoricalRange(
-                choices=["uniform", "best_component"]
-            ),
+            "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
             "alpha": FloatRange(min_value=0.001, max_value=0.1, log_scale=True),
         },
         ensemble_components=[
@@ -369,16 +361,12 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QENS3_NAME,
         estimator_class=QuantileEnsembleEstimator,
         default_params={
-            "weighting_strategy": "uniform",
-            "regularization_target": "uniform",
-            "cv": 5,
-            "alpha": 0.001,
+            "weighting_strategy": "linear_stack",
+            "cv": 3,
+            "alpha": 0.0,
         },
         estimator_parameter_space={
-            "weighting_strategy": CategoricalRange(choices=["uniform", "joint_shared"]),
-            "regularization_target": CategoricalRange(
-                choices=["uniform", "best_component"]
-            ),
+            "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
             "alpha": FloatRange(min_value=0.001, max_value=0.1, log_scale=True),
         },
         ensemble_components=[
@@ -407,16 +395,12 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QENS4_NAME,
         estimator_class=QuantileEnsembleEstimator,
         default_params={
-            "weighting_strategy": "uniform",
-            "regularization_target": "uniform",
-            "cv": 5,
-            "alpha": 0.001,
+            "weighting_strategy": "linear_stack",
+            "cv": 3,
+            "alpha": 0.0,
         },
         estimator_parameter_space={
-            "weighting_strategy": CategoricalRange(choices=["uniform", "joint_shared"]),
-            "regularization_target": CategoricalRange(
-                choices=["uniform", "best_component"]
-            ),
+            "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
             "alpha": FloatRange(min_value=0.001, max_value=0.1, log_scale=True),
         },
         ensemble_components=[
@@ -446,16 +430,12 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QENS5_NAME,
         estimator_class=QuantileEnsembleEstimator,
         default_params={
-            "weighting_strategy": "joint_shared",
-            "regularization_target": "uniform",
-            "cv": 5,
-            "alpha": 0.001,
+            "weighting_strategy": "linear_stack",
+            "cv": 3,
+            "alpha": 0.0,
         },
         estimator_parameter_space={
-            "weighting_strategy": CategoricalRange(choices=["uniform", "joint_shared"]),
-            "regularization_target": CategoricalRange(
-                choices=["uniform", "best_component"]
-            ),
+            "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
             "alpha": FloatRange(min_value=0.001, max_value=0.1, log_scale=True),
         },
         ensemble_components=[

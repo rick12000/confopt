@@ -379,7 +379,7 @@ class ConformalTuner:
         elif optimizer_framework == "fixed":
             optimizer = FixedSearcherOptimizer(
                 n_tuning_episodes=10,
-                tuning_interval=3 * conformal_retraining_frequency,
+                tuning_interval=10 * conformal_retraining_frequency,
                 conformal_retraining_frequency=conformal_retraining_frequency,
             )
         elif optimizer_framework is None:
