@@ -17,7 +17,6 @@ from confopt.selection.estimators.quantile_estimation import (
 )
 
 
-
 def create_diverse_quantile_estimators(random_state=42):
     return [
         QuantileGBM(
@@ -36,6 +35,7 @@ def create_diverse_quantile_estimators(random_state=42):
         ),
     ]
 
+
 def create_diverse_point_estimators(random_state=42):
     return [
         LinearRegression(),
@@ -45,8 +45,6 @@ def create_diverse_point_estimators(random_state=42):
             random_state=random_state,
         ),
     ]
-
-
 
 
 def evaluate_quantile_performance(y_true, y_pred, quantiles):
@@ -59,9 +57,6 @@ def evaluate_quantile_performance(y_true, y_pred, quantiles):
 
 def evaluate_point_performance(y_true, y_pred):
     return np.mean((y_true - y_pred) ** 2)
-
-
-
 
 
 def test_point_ensemble_get_stacking_training_data(toy_dataset, estimator1, estimator2):
@@ -145,9 +140,7 @@ def test_quantile_ensemble_get_stacking_training_data(
     assert val_predictions.shape[1] == 2 * len(quantiles)
 
 
-@pytest.mark.parametrize(
-    "weighting_strategy", ["uniform", "linear_stack"]
-)
+@pytest.mark.parametrize("weighting_strategy", ["uniform", "linear_stack"])
 def test_quantile_ensemble_compute_quantile_weights(
     toy_dataset,
     quantiles,
@@ -199,7 +192,6 @@ def test_quantile_ensemble_predict_quantiles(
 
     quantile_estimator1.predict.assert_called_with(X)
     quantile_estimator2.predict.assert_called_with(X)
-
 
 
 @pytest.mark.parametrize(
