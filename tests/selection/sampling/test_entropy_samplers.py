@@ -11,7 +11,6 @@ from unittest.mock import patch
 from confopt.selection.sampling.entropy_samplers import (
     calculate_entropy,
     _run_parallel_or_sequential,
-    EntropySearchSampler,
     MaxValueEntropySearchSampler,
 )
 
@@ -115,110 +114,6 @@ def test_parallel_execution_utility():
     # Test edge cases
     assert _run_parallel_or_sequential(square, [], n_jobs=1) == []
     assert _run_parallel_or_sequential(lambda x: x, [42], n_jobs=1) == [42]
-
-
-@pytest.mark.parametrize("n_quantiles", [2, 4, 6, 8])
-def test_entropy_search_sampler_initialization_and_properties(n_quantiles):
-    # Test valid initialization
-    sampler = EntropySearchSampler(n_quantiles=n_quantiles)
-    assert sampler.n_quantiles == n_quantiles
-    assert len(sampler.alphas) == n_quantiles // 2
-    assert all(0 < alpha < 1 for alpha in sampler.alphas)
-
-    # Test alpha fetching
-    alphas = sampler.fetch_alphas()
-    assert isinstance(alphas, list)
-    assert len(alphas) == n_quantiles // 2
-    assert all(isinstance(alpha, float) for alpha in alphas)
-
-    # Test with adapter
-    sampler_with_adapter = EntropySearchSampler(n_quantiles=n_quantiles, adapter="ACI")
-    assert sampler_with_adapter.adapters is not None
-    assert len(sampler_with_adapter.adapters) == n_quantiles // 2
-
-
-@pytest.mark.parametrize("n_quantiles", [1, 3, 5, 7])
-def test_entropy_search_sampler_invalid_quantiles(n_quantiles):
-    with pytest.raises(ValueError, match="quantiles must be even"):
-        EntropySearchSampler(n_quantiles=n_quantiles)
-
-
-def test_entropy_search_sampler_functionality(simple_conformal_bounds):
-    sampler = EntropySearchSampler(
-        n_quantiles=4,
-        n_x_candidates=2,
-        n_y_candidates_per_x=3,
-        n_paths=10,
-        sampling_strategy="uniform",
-    )
-
-    # Test alpha update
-    original_alphas = sampler.alphas.copy()
-    betas = [0.85, 0.90]
-    sampler.update_interval_width(betas)
-    assert len(sampler.alphas) == len(original_alphas)
-    assert all(isinstance(alpha, float) for alpha in sampler.alphas)
-
-    # Test candidate selection
-    candidate_space = np.random.uniform(0, 1, (5, 2))
-    candidates = sampler.select_candidates(
-        predictions_per_interval=simple_conformal_bounds,
-        candidate_space=candidate_space,
-    )
-    assert isinstance(candidates, np.ndarray)
-    assert len(candidates) <= sampler.n_x_candidates
-    assert all(
-        0 <= idx < len(simple_conformal_bounds[0].lower_bounds) for idx in candidates
-    )
-
-
-def test_entropy_search_information_gain_computation(conformal_bounds_deterministic):
-    sampler = EntropySearchSampler(
-        n_quantiles=4,
-        n_x_candidates=2,
-        n_y_candidates_per_x=2,
-        n_paths=10,
-        sampling_strategy="uniform",
-    )
-
-    X_train = np.array([[0, 0], [1, 1]])
-    y_train = np.array([1.0, 2.0])
-    X_val = np.array([[2, 2]])
-    y_val = np.array([3.0])
-    X_space = np.array([[0, 0], [1, 1], [2, 2], [3, 3]])
-
-    # Create minimal mock estimator that only provides necessary interface
-    class MockEstimator:
-        def fit(
-            self, X_train, y_train, X_val, y_val, tuning_iterations=0, random_state=1234
-        ):
-            return self
-
-        def predict_intervals(self, X_space, alphas=None):
-            return conformal_bounds_deterministic
-
-    mock_estimator = MockEstimator()
-
-    info_gains = sampler.calculate_information_gain(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
-        X_space=X_space,
-        conformal_estimator=mock_estimator,
-        predictions_per_interval=conformal_bounds_deterministic,
-        n_jobs=1,
-    )
-
-    assert isinstance(info_gains, np.ndarray)
-    assert info_gains.shape == (len(conformal_bounds_deterministic[0].lower_bounds),)
-    assert all(np.isfinite(info_gain) for info_gain in info_gains)
-    assert np.max(np.abs(info_gains)) < 100.0  # Reasonable magnitude bound
-
-    # Information gains should be predominantly negative (uncertainty reduction)
-    # Allow up to 30% positive values due to Monte Carlo noise
-    positive_ratio = np.mean(info_gains > 0)
-    assert positive_ratio <= POS_TOL
 
 
 @pytest.mark.parametrize("n_quantiles", [2, 4, 6, 8])

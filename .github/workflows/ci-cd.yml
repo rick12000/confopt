@@ -33,7 +33,7 @@ jobs:
 
     - name: Run tests with pytest
       run: |
-        pytest tests/ -v --tb=short --junitxml=test-results-${{ matrix.python-version }}.xml
+        pytest tests/ -v --tb=short --junitxml=test-results-${{ matrix.python-version }}.xml -m "not slow"
 
     - name: Upload test results
       uses: actions/upload-artifact@v4

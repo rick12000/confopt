@@ -26,34 +26,113 @@ from confopt.selection.adaptation import DtACI
 
 DEFAULT_SEED = 1234
 
-POINT_ESTIMATOR_ARCHITECTURES = []
-SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES = []
-MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES = []
-QUANTILE_ESTIMATOR_ARCHITECTURES = []
-for estimator_name, estimator_config in ESTIMATOR_REGISTRY.items():
-    if issubclass(
-        estimator_config.estimator_class,
-        (
-            BaseMultiFitQuantileEstimator,
-            BaseSingleFitQuantileEstimator,
-            QuantileEnsembleEstimator,
-        ),
-    ):
-        QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
-    if issubclass(
-        estimator_config.estimator_class,
-        (BaseMultiFitQuantileEstimator),
-    ):
-        MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
-    elif issubclass(
-        estimator_config.estimator_class,
-        (BaseSingleFitQuantileEstimator),
-    ):
-        SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES.append(estimator_name)
-    elif issubclass(
-        estimator_config.estimator_class, (BaseEstimator, PointEnsembleEstimator)
-    ):
-        POINT_ESTIMATOR_ARCHITECTURES.append(estimator_name)
+
+def build_estimator_architectures(amended: bool = False):
+    """Build estimator architecture lists from ESTIMATOR_REGISTRY.
+
+    Args:
+        amended: If True, creates modified versions with n_estimators=25 for faster testing.
+                If False, creates standard architecture lists.
+
+    Returns:
+        Tuple containing:
+        - point_estimator_architectures: List of point estimator names
+        - single_fit_quantile_estimator_architectures: List of single-fit quantile estimator names
+        - multi_fit_quantile_estimator_architectures: List of multi-fit quantile estimator names
+        - quantile_estimator_architectures: List of all quantile estimator names
+        - estimator_registry: Registry of estimator configurations (amended if requested)
+    """
+    from copy import deepcopy
+
+    point_estimator_architectures = []
+    single_fit_quantile_estimator_architectures = []
+    multi_fit_quantile_estimator_architectures = []
+    quantile_estimator_architectures = []
+
+    # Create registry (amended if requested)
+    if amended:
+        estimator_registry = {}
+        for estimator_name, estimator_config in ESTIMATOR_REGISTRY.items():
+            amended_config = deepcopy(estimator_config)
+
+            # Check if the estimator has n_estimators parameter
+            if (
+                hasattr(amended_config, "default_params")
+                and "n_estimators" in amended_config.default_params
+            ):
+                amended_config.default_params["n_estimators"] = 15
+
+            # Also check ensemble components if it's an ensemble estimator
+            if (
+                hasattr(amended_config, "ensemble_components")
+                and amended_config.ensemble_components
+            ):
+                for component in amended_config.ensemble_components:
+                    if "params" in component and "n_estimators" in component["params"]:
+                        component["params"]["n_estimators"] = 15
+
+            if estimator_name in ["gp", "qgp"]:
+                continue
+
+            if "qens" in estimator_name:
+                continue
+
+            estimator_registry[estimator_name] = amended_config
+    else:
+        estimator_registry = ESTIMATOR_REGISTRY
+
+    # Build architecture lists
+    for estimator_name, estimator_config in estimator_registry.items():
+        if issubclass(
+            estimator_config.estimator_class,
+            (
+                BaseMultiFitQuantileEstimator,
+                BaseSingleFitQuantileEstimator,
+                QuantileEnsembleEstimator,
+            ),
+        ):
+            quantile_estimator_architectures.append(estimator_name)
+        if issubclass(
+            estimator_config.estimator_class,
+            (BaseMultiFitQuantileEstimator),
+        ):
+            multi_fit_quantile_estimator_architectures.append(estimator_name)
+        elif issubclass(
+            estimator_config.estimator_class,
+            (BaseSingleFitQuantileEstimator),
+        ):
+            single_fit_quantile_estimator_architectures.append(estimator_name)
+        elif issubclass(
+            estimator_config.estimator_class, (BaseEstimator, PointEnsembleEstimator)
+        ):
+            point_estimator_architectures.append(estimator_name)
+
+    return (
+        point_estimator_architectures,
+        single_fit_quantile_estimator_architectures,
+        multi_fit_quantile_estimator_architectures,
+        quantile_estimator_architectures,
+        estimator_registry,
+    )
+
+
+# Create original architecture lists
+(
+    POINT_ESTIMATOR_ARCHITECTURES,
+    SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
+    MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
+    QUANTILE_ESTIMATOR_ARCHITECTURES,
+    _,
+) = build_estimator_architectures(amended=False)
+
+# Create amended architecture lists for faster testing
+(
+    AMENDED_POINT_ESTIMATOR_ARCHITECTURES,
+    AMENDED_SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
+    AMENDED_MULTI_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
+    AMENDED_QUANTILE_ESTIMATOR_ARCHITECTURES,
+    AMENDED_ESTIMATOR_REGISTRY,
+) = build_estimator_architectures(amended=True)
 
 
 def rastrigin(x, A=20):

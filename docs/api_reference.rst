@@ -112,12 +112,6 @@ Entropy Sampling
 
 .. currentmodule:: confopt.selection.sampling.entropy_samplers
 
-EntropySearchSampler
-~~~~~~~~~~~~~~~~~~~~
-.. autoclass:: EntropySearchSampler
-   :members:
-   :exclude-members: __init__
-   :noindex:
 
 MaxValueEntropySearchSampler
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -13,7 +13,6 @@ from confopt.selection.sampling.expected_improvement_samplers import (
     ExpectedImprovementSampler,
 )
 from confopt.selection.sampling.entropy_samplers import (
-    EntropySearchSampler,
     MaxValueEntropySearchSampler,
 )
 from conftest import (
@@ -30,7 +29,6 @@ from conftest import (
         (LowerBoundSampler, {"interval_width": 0.8}),
         (ThompsonSampler, {"n_quantiles": 4}),
         (ExpectedImprovementSampler, {"n_quantiles": 4}),
-        (EntropySearchSampler, {"n_quantiles": 4}),
         (MaxValueEntropySearchSampler, {"n_quantiles": 4}),
     ],
 )
@@ -50,11 +48,12 @@ def test_locally_weighted_conformal_searcher(
         sampler=sampler,
     )
 
+    # Combine train and val data for new interface
+    X_combined = np.vstack((X_train, X_val))
+    y_combined = np.concatenate((y_train, y_val))
     searcher.fit(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
+        X=X_combined,
+        y=y_combined,
         tuning_iterations=0,
         random_state=42,
     )
@@ -80,7 +79,6 @@ def test_locally_weighted_conformal_searcher(
         (LowerBoundSampler, {"interval_width": 0.8}),
         (ThompsonSampler, {"n_quantiles": 4}),
         (ExpectedImprovementSampler, {"n_quantiles": 4}),
-        (EntropySearchSampler, {"n_quantiles": 4}),
         (MaxValueEntropySearchSampler, {"n_quantiles": 4}),
     ],
 )
@@ -105,11 +103,12 @@ def test_quantile_conformal_searcher(
         n_pre_conformal_trials=5,
     )
 
+    # Combine train and val data for new interface
+    X_combined = np.vstack((X_train, X_val))
+    y_combined = np.concatenate((y_train, y_val))
     searcher.fit(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
+        X=X_combined,
+        y=y_combined,
         tuning_iterations=0,
         random_state=42,
     )
@@ -141,11 +140,12 @@ def test_locally_weighted_searcher_prediction_methods(big_toy_dataset):
         variance_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
         sampler=lb_sampler,
     )
+    # Combine train and val data for new interface
+    X_combined = np.vstack((X_train, X_val))
+    y_combined = np.concatenate((y_train, y_val))
     lb_searcher.fit(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
+        X=X_combined,
+        y=y_combined,
         tuning_iterations=0,
         random_state=42,
     )
@@ -159,10 +159,8 @@ def test_locally_weighted_searcher_prediction_methods(big_toy_dataset):
         sampler=thompson_sampler,
     )
     thompson_searcher.fit(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
+        X=X_combined,
+        y=y_combined,
         tuning_iterations=0,
         random_state=42,
     )
@@ -176,10 +174,8 @@ def test_locally_weighted_searcher_prediction_methods(big_toy_dataset):
         sampler=ei_sampler,
     )
     ei_searcher.fit(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
+        X=X_combined,
+        y=y_combined,
         tuning_iterations=0,
         random_state=42,
     )
@@ -193,10 +189,8 @@ def test_locally_weighted_searcher_prediction_methods(big_toy_dataset):
         sampler=plb_sampler,
     )
     plb_searcher.fit(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
+        X=X_combined,
+        y=y_combined,
         tuning_iterations=0,
         random_state=42,
     )
@@ -214,28 +208,9 @@ def test_locally_weighted_searcher_with_advanced_samplers(big_toy_dataset):
     X_val, y_val = X[7:], y[7:]
     X_test = X_val[:2]
 
-    ig_sampler = EntropySearchSampler(
-        n_quantiles=4,
-        n_paths=10,
-        n_x_candidates=2,
-        n_y_candidates_per_x=2,
-        sampling_strategy="thompson",
-    )
-    ig_searcher = LocallyWeightedConformalSearcher(
-        point_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
-        variance_estimator_architecture=POINT_ESTIMATOR_ARCHITECTURES[0],
-        sampler=ig_sampler,
-    )
-    ig_searcher.fit(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
-        tuning_iterations=0,
-        random_state=42,
-    )
-    ig_predictions = ig_searcher.predict(X_test)
-    assert len(ig_predictions) == len(X_test)
+    # Combine train and val data for new interface
+    X_combined = np.vstack((X_train, X_val))
+    y_combined = np.concatenate((y_train, y_val))
 
     mes_sampler = MaxValueEntropySearchSampler(
         n_quantiles=4,
@@ -248,10 +223,8 @@ def test_locally_weighted_searcher_with_advanced_samplers(big_toy_dataset):
         sampler=mes_sampler,
     )
     mes_searcher.fit(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
+        X=X_combined,
+        y=y_combined,
         tuning_iterations=0,
         random_state=42,
     )
@@ -271,11 +244,12 @@ def test_quantile_searcher_prediction_methods(big_toy_dataset):
         sampler=lb_sampler,
         n_pre_conformal_trials=5,
     )
+    # Combine train and val data for new interface
+    X_combined = np.vstack((X_train, X_val))
+    y_combined = np.concatenate((y_train, y_val))
     lb_searcher.fit(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
+        X=X_combined,
+        y=y_combined,
         tuning_iterations=0,
         random_state=42,
     )
@@ -289,10 +263,8 @@ def test_quantile_searcher_prediction_methods(big_toy_dataset):
         n_pre_conformal_trials=5,
     )
     thompson_searcher.fit(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
+        X=X_combined,
+        y=y_combined,
         tuning_iterations=0,
         random_state=42,
     )
@@ -306,10 +278,8 @@ def test_quantile_searcher_prediction_methods(big_toy_dataset):
         n_pre_conformal_trials=5,
     )
     ei_searcher.fit(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
+        X=X_combined,
+        y=y_combined,
         tuning_iterations=0,
         random_state=42,
     )
@@ -323,10 +293,8 @@ def test_quantile_searcher_prediction_methods(big_toy_dataset):
         n_pre_conformal_trials=5,
     )
     plb_searcher.fit(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
+        X=X_combined,
+        y=y_combined,
         tuning_iterations=0,
         random_state=42,
     )
@@ -340,28 +308,9 @@ def test_quantile_searcher_with_advanced_samplers(big_toy_dataset):
     X_val, y_val = X[7:], y[7:]
     X_test = X_val[:2]
 
-    ig_sampler = EntropySearchSampler(
-        n_quantiles=4,
-        n_paths=10,
-        n_x_candidates=2,
-        n_y_candidates_per_x=2,
-        sampling_strategy="thompson",
-    )
-    ig_searcher = QuantileConformalSearcher(
-        quantile_estimator_architecture="ql",
-        sampler=ig_sampler,
-        n_pre_conformal_trials=5,
-    )
-    ig_searcher.fit(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
-        tuning_iterations=0,
-        random_state=42,
-    )
-    ig_predictions = ig_searcher.predict(X_test)
-    assert len(ig_predictions) == len(X_test)
+    # Combine train and val data for new interface
+    X_combined = np.vstack((X_train, X_val))
+    y_combined = np.concatenate((y_train, y_val))
 
     mes_sampler = MaxValueEntropySearchSampler(
         n_quantiles=4,
@@ -374,10 +323,8 @@ def test_quantile_searcher_with_advanced_samplers(big_toy_dataset):
         n_pre_conformal_trials=5,
     )
     mes_searcher.fit(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
+        X=X_combined,
+        y=y_combined,
         tuning_iterations=0,
         random_state=42,
     )
@@ -401,9 +348,10 @@ def test_expected_improvement_best_value_update(current_best_value, big_toy_data
         sampler=sampler,
     )
 
-    searcher.fit(
-        X_train=X_train, y_train=y_train, X_val=X_val, y_val=y_val, random_state=42
-    )
+    # Combine train and val data for new interface
+    X_combined = np.vstack((X_train, X_val))
+    y_combined = np.concatenate((y_train, y_val))
+    searcher.fit(X=X_combined, y=y_combined, random_state=42)
 
     # Test that sampler has correct initial best value
     assert sampler.current_best_value == current_best_value
@@ -433,9 +381,10 @@ def test_adaptive_alpha_updating(big_toy_dataset):
         sampler=sampler,
     )
 
-    searcher.fit(
-        X_train=X_train, y_train=y_train, X_val=X_val, y_val=y_val, random_state=42
-    )
+    # Combine train and val data for new interface
+    X_combined = np.vstack((X_train, X_val))
+    y_combined = np.concatenate((y_train, y_val))
+    searcher.fit(X=X_combined, y=y_combined, random_state=42)
 
     # Store initial alpha values
     initial_alphas = searcher.sampler.fetch_alphas().copy()

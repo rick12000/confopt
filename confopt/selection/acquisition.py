@@ -40,7 +40,6 @@ from confopt.selection.sampling.expected_improvement_samplers import (
     ExpectedImprovementSampler,
 )
 from confopt.selection.sampling.entropy_samplers import (
-    EntropySearchSampler,
     MaxValueEntropySearchSampler,
 )
 from confopt.selection.estimation import initialize_estimator
@@ -90,7 +89,6 @@ class BaseConformalSearcher(ABC):
             ThompsonSampler,
             PessimisticLowerBoundSampler,
             ExpectedImprovementSampler,
-            EntropySearchSampler,
             MaxValueEntropySearchSampler,
         ],
     ):
@@ -100,8 +98,6 @@ class BaseConformalSearcher(ABC):
         ] = None
         self.X_train = None
         self.y_train = None
-        self.X_val = None
-        self.y_val = None
         self.last_beta = None
         self.predictions_per_interval = None
 
@@ -131,7 +127,7 @@ class BaseConformalSearcher(ABC):
             - ThompsonSampler: Posterior sampling with optional optimistic bias
             - PessimisticLowerBoundSampler: Conservative lower bound selection
             - ExpectedImprovementSampler: Expected improvement over current best
-            - InformationGainSampler: Information-theoretic point selection
+
             - MaxValueEntropySearchSampler: Maximum value entropy search
         """
         if isinstance(self.sampler, LowerBoundSampler):
@@ -142,8 +138,7 @@ class BaseConformalSearcher(ABC):
             return self._predict_with_pessimistic_lower_bound(X)
         elif isinstance(self.sampler, ExpectedImprovementSampler):
             return self._predict_with_expected_improvement(X)
-        elif isinstance(self.sampler, EntropySearchSampler):
-            return self._predict_with_information_gain(X)
+
         elif isinstance(self.sampler, MaxValueEntropySearchSampler):
             return self._predict_with_max_value_entropy_search(X)
         else:
@@ -203,20 +198,6 @@ class BaseConformalSearcher(ABC):
 
         Returns:
             Expected improvement acquisition values, shape (n_candidates,).
-        """
-
-    @abstractmethod
-    def _predict_with_information_gain(self, X: np.array):
-        """Generate information gain acquisition values.
-
-        Subclasses must implement information gain acquisition
-        using their specific conformal prediction approach.
-
-        Args:
-            X: Candidate points for evaluation, shape (n_candidates, n_features).
-
-        Returns:
-            Information gain acquisition values, shape (n_candidates,).
         """
 
     @abstractmethod
@@ -337,7 +318,6 @@ class BaseConformalSearcher(ABC):
                     (
                         ThompsonSampler,
                         ExpectedImprovementSampler,
-                        EntropySearchSampler,
                         MaxValueEntropySearchSampler,
                     ),
                 ):
@@ -409,25 +389,30 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
             ThompsonSampler,
             PessimisticLowerBoundSampler,
             ExpectedImprovementSampler,
-            EntropySearchSampler,
             MaxValueEntropySearchSampler,
         ],
+        n_calibration_folds: int = 3,
+        calibration_split_strategy: Literal[
+            "cv_plus", "train_test_split", "adaptive"
+        ] = "adaptive",
     ):
         super().__init__(sampler)
         self.point_estimator_architecture = point_estimator_architecture
         self.variance_estimator_architecture = variance_estimator_architecture
+        self.n_calibration_folds = n_calibration_folds
+        self.calibration_split_strategy = calibration_split_strategy
         self.conformal_estimator = LocallyWeightedConformalEstimator(
             point_estimator_architecture=self.point_estimator_architecture,
             variance_estimator_architecture=self.variance_estimator_architecture,
             alphas=self.sampler.fetch_alphas(),
+            n_calibration_folds=self.n_calibration_folds,
+            calibration_split_strategy=self.calibration_split_strategy,
         )
 
     def fit(
         self,
-        X_train: np.array,
-        y_train: np.array,
-        X_val: np.array,
-        y_val: np.array,
+        X: np.array,
+        y: np.array,
         tuning_iterations: Optional[int] = 0,
         random_state: Optional[int] = None,
     ):
@@ -438,35 +423,28 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
         Sets up the acquisition function for subsequent optimization.
 
         Args:
-            X_train: Training features for estimator fitting, shape (n_train, n_features).
-            y_train: Training targets for estimator fitting, shape (n_train,).
-            X_val: Validation features for conformal calibration, shape (n_val, n_features).
-            y_val: Validation targets for conformal calibration, shape (n_val,).
+            X: Input features for estimator fitting, shape (n_samples, n_features).
+            y: Target values for estimator fitting, shape (n_samples,).
             tuning_iterations: Number of hyperparameter tuning iterations (0 disables tuning).
-            random_state: Random seed for reproducible results, required for InformationGainSampler.
+            random_state: Random seed for reproducible results.
 
         Implementation Process:
-            1. Store training and validation data for access by acquisition strategies
+            1. Store data for potential use by acquisition strategies
             2. Set default random state for Information Gain Sampler if not provided
-            3. Fit LocallyWeightedConformalEstimator with data splitting for proper calibration
+            3. Fit LocallyWeightedConformalEstimator with internal data splitting
             4. Store point estimator validation error for performance monitoring
 
         Data Usage:
-            - X_train, y_train: Split internally for point and variance estimation
-            - X_val, y_val: Used for conformal calibration and nonconformity score computation
+            - X, y: Processed internally by conformalization module for proper splitting
             - Ensures proper separation required for conformal prediction guarantees
         """
-        self.X_train = X_train
-        self.y_train = y_train
-        self.X_val = X_val
-        self.y_val = y_val
-        if isinstance(self.sampler, EntropySearchSampler) and random_state is None:
-            random_state = DEFAULT_IG_SAMPLER_RANDOM_STATE
+        # Store data for potential use by samplers (though splitting is now internal)
+        self.X_train = X  # For backwards compatibility
+        self.y_train = y
+
         self.conformal_estimator.fit(
-            X_train=X_train,
-            y_train=y_train,
-            X_val=X_val,
-            y_val=y_val,
+            X=X,
+            y=y,
             tuning_iterations=tuning_iterations,
             random_state=random_state,
         )
@@ -578,42 +556,6 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
         self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
         return self.sampler.calculate_expected_improvement(
             predictions_per_interval=self.predictions_per_interval
-        )
-
-    def _predict_with_information_gain(self, X: np.array):
-        """Generate information gain acquisition values.
-
-        Calculates information-theoretic acquisition values that prioritize
-        points expected to provide maximal information about the objective
-        function. Uses locally weighted prediction intervals for uncertainty
-        quantification in information gain calculations.
-
-        Args:
-            X: Candidate points for evaluation, shape (n_candidates, n_features).
-
-        Returns:
-            Information gain acquisition values, shape (n_candidates,).
-
-        Information-Theoretic Approach:
-            Selects points that maximize expected reduction in prediction
-            uncertainty, using locally adapted intervals to capture
-            heteroscedastic uncertainty patterns in information calculations.
-
-        Implementation Notes:
-            Requires access to training and validation data for proper
-            information gain computation. Uses single-threaded execution
-            for consistent results across different environments.
-        """
-        self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
-        return self.sampler.calculate_information_gain(
-            X_train=self.X_train,
-            y_train=self.y_train,
-            X_val=self.X_val,
-            y_val=self.y_val,
-            X_space=X,
-            conformal_estimator=self.conformal_estimator,
-            predictions_per_interval=self.predictions_per_interval,
-            n_jobs=1,
         )
 
     def _predict_with_max_value_entropy_search(self, X: np.array):
@@ -730,26 +672,34 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             ThompsonSampler,
             PessimisticLowerBoundSampler,
             ExpectedImprovementSampler,
-            EntropySearchSampler,
             MaxValueEntropySearchSampler,
         ],
         n_pre_conformal_trials: int = 32,
+        n_calibration_folds: int = 3,
+        calibration_split_strategy: Literal[
+            "cv_plus", "train_test_split", "adaptive"
+        ] = "adaptive",
+        symmetric_adjustment: bool = True,
     ):
         super().__init__(sampler)
         self.quantile_estimator_architecture = quantile_estimator_architecture
         self.n_pre_conformal_trials = n_pre_conformal_trials
+        self.n_calibration_folds = n_calibration_folds
+        self.calibration_split_strategy = calibration_split_strategy
+        self.symmetric_adjustment = symmetric_adjustment
         self.conformal_estimator = QuantileConformalEstimator(
             quantile_estimator_architecture=self.quantile_estimator_architecture,
             alphas=self.sampler.fetch_alphas(),
             n_pre_conformal_trials=self.n_pre_conformal_trials,
+            n_calibration_folds=self.n_calibration_folds,
+            calibration_split_strategy=self.calibration_split_strategy,
+            symmetric_adjustment=self.symmetric_adjustment,
         )
 
     def fit(
         self,
-        X_train: np.array,
-        y_train: np.array,
-        X_val: np.array,
-        y_val: np.array,
+        X: np.array,
+        y: np.array,
         tuning_iterations: Optional[int] = 0,
         random_state: Optional[int] = None,
     ):
@@ -761,18 +711,16 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         optimistic Thompson sampling and median estimation for bound samplers.
 
         Args:
-            X_train: Training features for estimator fitting, shape (n_train, n_features).
-            y_train: Training targets for estimator fitting, shape (n_train,).
-            X_val: Validation features for conformal calibration, shape (n_val, n_features).
-            y_val: Validation targets for conformal calibration, shape (n_val,).
+            X: Input features for estimator fitting, shape (n_samples, n_features).
+            y: Target values for estimator fitting, shape (n_samples,).
             tuning_iterations: Number of hyperparameter tuning iterations (0 disables tuning).
-            random_state: Random seed for reproducible results, required for InformationGainSampler.
+            random_state: Random seed for reproducible results.
 
         Implementation Process:
-            1. Store training and validation data for access by acquisition strategies
+            1. Store data for potential use by acquisition strategies
             2. Configure sampler-specific quantile estimation and point estimators
             3. Set default random state for Information Gain Sampler if not provided
-            4. Fit QuantileConformalEstimator with appropriate quantile configuration
+            4. Fit QuantileConformalEstimator with internal data splitting
             5. Store estimator performance metrics for quality assessment
 
         Sampler-Specific Setup:
@@ -780,13 +728,10 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             - Optimistic Thompson: Additional point estimator training
             - Information-based: Full quantile range support
         """
-        self.X_train = X_train
-        self.y_train = y_train
-        self.X_val = X_val
-        self.y_val = y_val
+        # Store data for potential use by samplers (though splitting is now internal)
+        self.X_train = X  # For backwards compatibility
+        self.y_train = y
         random_state = random_state
-        if isinstance(self.sampler, EntropySearchSampler) and random_state is None:
-            random_state = DEFAULT_IG_SAMPLER_RANDOM_STATE
 
         # Create median estimator for bound samplers (UCB point estimates)
         if isinstance(self.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)):
@@ -795,8 +740,8 @@ class QuantileConformalSearcher(BaseConformalSearcher):
                 random_state=random_state,
             )
             self.median_estimator.fit(
-                X=np.vstack((X_train, X_val)),
-                y=np.concatenate((y_train, y_val)),
+                X=X,
+                y=y,
                 quantiles=[0.5],  # Only estimate the median
             )
 
@@ -813,16 +758,11 @@ class QuantileConformalSearcher(BaseConformalSearcher):
                     estimator_architecture="gbm",
                     random_state=random_state,
                 )
-                self.point_estimator.fit(
-                    X=np.vstack((X_train, X_val)),
-                    y=np.concatenate((y_train, y_val)),
-                )
+                self.point_estimator.fit(X=X, y=y)
 
         self.conformal_estimator.fit(
-            X_train=X_train,
-            y_train=y_train,
-            X_val=X_val,
-            y_val=y_val,
+            X=X,
+            y=y,
             tuning_iterations=tuning_iterations,
             random_state=random_state,
         )
@@ -930,36 +870,6 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
         return self.sampler.calculate_expected_improvement(
             predictions_per_interval=self.predictions_per_interval
-        )
-
-    def _predict_with_information_gain(self, X: np.array):
-        """Generate information gain acquisition values.
-
-        Calculates information-theoretic acquisition values using quantile-based
-        uncertainty quantification. Leverages full quantile range for
-        comprehensive uncertainty characterization in information calculations.
-
-        Args:
-            X: Candidate points for evaluation, shape (n_candidates, n_features).
-
-        Returns:
-            Information gain acquisition values, shape (n_candidates,).
-
-        Quantile-Based Information:
-            Uses quantile estimates to represent prediction uncertainty
-            in information gain calculations, providing rich uncertainty
-            characterization for information-theoretic point selection.
-        """
-        self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
-        return self.sampler.calculate_information_gain(
-            X_train=self.X_train,
-            y_train=self.y_train,
-            X_val=self.X_val,
-            y_val=self.y_val,
-            X_space=X,
-            conformal_estimator=self.conformal_estimator,
-            predictions_per_interval=self.predictions_per_interval,
-            n_jobs=1,
         )
 
     def _predict_with_max_value_entropy_search(self, X: np.array):

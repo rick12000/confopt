@@ -23,7 +23,7 @@ Regardless of searcher type, you can use the following samplers:
 * ``ThompsonSampler``: Posterior sampling for exploration (good for balancing exploration and exploitation)
 * ``ExpectedImprovementSampler``: Expected improvement over current best (good for both fast convergence and exploration)
 * ``MaxValueEntropySearchSampler``: Maximum value entropy search (good for complex problems)
-* ``EntropySearchSampler``: Information-theoretic selection (good for complex problems, but extremely slow, use ``MaxValueEntropySearchSampler`` instead)
+
 
 **Estimator Architectures**
 

@@ -207,7 +207,7 @@ The following diagram shows the complete end-to-end flow with class and method i
            PLBS["PessimisticLowerBoundSampler<br/>calculate_lower_bound()"]
            TS["ThompsonSampler<br/>sample()<br/>_update_posterior()"]
            EIS["ExpectedImprovementSampler<br/>sample()<br/>_calculate_expected_improvement()"]
-           ESS["EntropySearchSampler<br/>sample()<br/>_calculate_entropy()"]
+
            MVES["MaxValueEntropySearchSampler<br/>sample()<br/>_calculate_max_value_entropy()"]
        end
 
@@ -444,7 +444,7 @@ The ``BaseConformalSearcher.predict()`` method routes to strategy-specific imple
    ├── PessimisticLowerBoundSampler (Conservative Lower Bound)
    ├── ThompsonSampler (Posterior Sampling)
    ├── ExpectedImprovementSampler (Expected Improvement)
-   ├── EntropySearchSampler (Information Gain)
+
    └── MaxValueEntropySearchSampler (Maximum Value Entropy)
 
 Each strategy calls specific methods:
@@ -452,7 +452,7 @@ Each strategy calls specific methods:
 * ``LowerBoundSampler`` → ``calculate_upper_confidence_bound()``
 * ``ThompsonSampler`` → ``sample()`` and ``_update_posterior()``
 * ``ExpectedImprovementSampler`` → ``_calculate_expected_improvement()``
-* ``EntropySearchSampler`` → ``_calculate_entropy()``
+
 
 All strategies use shared utilities from ``selection.sampling.utils``:
 

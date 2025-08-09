@@ -151,39 +151,6 @@ def test_random_search_with_nan_performance(dummy_parameter_grid):
     assert len(tuner.study.trials) == 0
 
 
-def test_prepare_searcher_data_shapes(tuner):
-    # Initialize with some data
-    tuner.initialize_tuning_resources()
-    tuner.config_manager.mark_as_searched(
-        {"param_1": 0.5, "param_2": 10, "param_3": "option1"}, 1.0
-    )
-    tuner.config_manager.mark_as_searched(
-        {"param_1": 0.3, "param_2": 20, "param_3": "option2"}, 2.0
-    )
-    tuner.config_manager.mark_as_searched(
-        {"param_1": 0.7, "param_2": 15, "param_3": "option3"}, 1.5
-    )
-
-    X_train, y_train, X_val, y_val = tuner.prepare_searcher_data(validation_split=0.33)
-
-    assert X_train.shape[0] == len(y_train)
-    assert X_val.shape[0] == len(y_val)
-    assert X_train.shape[0] + X_val.shape[0] == 3
-    assert X_train.shape[1] == X_val.shape[1]
-
-
-def test_fit_transform_searcher_data_shapes(tuner):
-    X_train = np.random.rand(10, 3)
-    X_val = np.random.rand(5, 3)
-
-    scaler, X_train_scaled, X_val_scaled = tuner.fit_transform_searcher_data(
-        X_train, X_val
-    )
-
-    assert X_train_scaled.shape == X_train.shape
-    assert X_val_scaled.shape == X_val.shape
-
-
 @pytest.mark.parametrize("random_state", [42, 123, 999])
 def test_tune_method_reproducibility(dummy_parameter_grid, random_state):
     """Test that tune method produces identical results with same random seed"""

@@ -1,21 +1,20 @@
 """
-Information-theoretic acquisition strategies for conformal prediction optimization.
+Max Value Entropy Search acquisition strategy for conformal prediction optimization.
 
-This module implements entropy-based acquisition functions that use information gain
-to guide optimization decisions. The strategies quantify the expected reduction in
-uncertainty about the global optimum location through information-theoretic measures,
-providing principled exploration that balances between high-information regions and
+This module implements entropy-based acquisition functions for optimization under
+uncertainty. The strategy quantifies the expected reduction in uncertainty about
+the global optimum value through information-theoretic measures, providing
+principled exploration that balances between high-information regions and
 promising optimization areas.
 
 Key methodological approaches:
 - Differential entropy estimation using distance-based and histogram methods
-- Monte Carlo simulation for optimum location uncertainty quantification
-- Information gain computation through conditional entropy reduction
-- Efficient candidate selection using various sampling strategies
+- Monte Carlo simulation for optimum value uncertainty quantification
+- Efficient entropy computation without requiring model refitting
+- Direct value-based entropy reduction for computational efficiency
 
-The module provides two main acquisition strategies:
-1. Entropy Search: Full information gain computation with model updates
-2. Max Value Entropy Search: Simplified entropy reduction for computational efficiency
+The module provides the Max Value Entropy Search acquisition strategy:
+- Max Value Entropy Search: Simplified entropy reduction for computational efficiency
 
 Integration with conformal prediction enables robust uncertainty quantification
 without requiring explicit probabilistic models, making the approaches suitable
@@ -25,14 +24,9 @@ for diverse optimization scenarios with complex objective functions.
 from typing import Optional, List, Literal
 import numpy as np
 import joblib
-from copy import deepcopy
 from confopt.wrapping import ConformalBounds
 from confopt.selection.sampling.thompson_samplers import (
     flatten_conformal_bounds,
-    ThompsonSampler,
-)
-from confopt.selection.sampling.expected_improvement_samplers import (
-    ExpectedImprovementSampler,
 )
 from confopt.selection.sampling.utils import (
     initialize_quantile_alphas,
@@ -40,7 +34,6 @@ from confopt.selection.sampling.utils import (
     update_multi_interval_widths,
     validate_even_quantiles,
 )
-from scipy.stats import qmc
 import logging
 
 logger = logging.getLogger(__name__)
@@ -166,355 +159,6 @@ def _run_parallel_or_sequential(func, items, n_jobs=-1):
     else:
         with joblib.parallel_backend("loky", n_jobs=n_jobs):
             return joblib.Parallel()(joblib.delayed(func)(item) for item in items)
-
-
-class EntropySearchSampler:
-    """
-    Entropy Search acquisition strategy using information gain maximization.
-
-    This class implements full Entropy Search for optimization under uncertainty,
-    computing information gain about the global optimum location through Monte Carlo
-    simulation and conditional entropy reduction. The approach provides theoretically
-    principled exploration by selecting candidates that maximally reduce uncertainty
-    about the optimum location.
-
-    The implementation uses conformal prediction intervals for uncertainty quantification
-    and supports multiple candidate selection strategies for computational efficiency.
-    Information gain is computed by comparing prior and posterior entropy of the
-    optimum location distribution after hypothetical observations.
-
-    Methodological approach:
-    - Monte Carlo simulation of possible objective function realizations
-    - Prior entropy computation for current optimum location uncertainty
-    - Conditional entropy estimation after hypothetical observations
-    - Information gain calculation as entropy reduction
-
-    Performance characteristics:
-    - High computational cost due to model refitting for each candidate
-    - Excellent exploration properties with strong theoretical foundation
-    - Suitable for expensive optimization problems where acquisition cost is justified
-    """
-
-    def __init__(
-        self,
-        n_quantiles: int = 4,
-        adapter: Optional[Literal["DtACI", "ACI"]] = None,
-        n_paths: int = 100,
-        n_x_candidates: int = 10,
-        n_y_candidates_per_x: int = 3,
-        sampling_strategy: str = "uniform",
-        entropy_measure: Literal["distance", "histogram"] = "distance",
-    ):
-        """
-        Initialize Entropy Search sampler with configuration parameters.
-
-        Args:
-            n_quantiles: Number of quantiles for interval construction. Must be even
-                for symmetric pairing. Higher values provide finer uncertainty
-                resolution but increase computational cost.
-            adapter: Interval width adaptation strategy for coverage maintenance.
-                "DtACI" provides aggressive adaptation, "ACI" conservative adaptation.
-            n_paths: Number of Monte Carlo paths for entropy estimation. Higher
-                values provide more accurate entropy estimates but increase cost.
-                Typical values: 50-200.
-            n_x_candidates: Number of candidates to evaluate for information gain.
-                Computational cost scales linearly with this parameter.
-            n_y_candidates_per_x: Number of hypothetical y-values per candidate.
-                Higher values improve information gain estimates but increase cost.
-            sampling_strategy: Candidate selection strategy. Options include
-                "uniform", "thompson", "expected_improvement", "sobol", "perturbation".
-            entropy_measure: Entropy estimation method. "distance" uses Vasicek
-                estimator, "histogram" uses Scott's rule with bin correction.
-        """
-        validate_even_quantiles(n_quantiles, "Information Gain")
-        self.n_quantiles = n_quantiles
-        self.n_paths = n_paths
-        self.n_x_candidates = n_x_candidates
-        self.n_y_candidates_per_x = n_y_candidates_per_x
-        self.sampling_strategy = sampling_strategy
-        self.entropy_measure = entropy_measure
-        self.alphas = initialize_quantile_alphas(n_quantiles)
-        self.adapters = initialize_multi_adapters(self.alphas, adapter)
-
-    def fetch_alphas(self) -> List[float]:
-        """
-        Retrieve current alpha values for interval construction.
-
-        Returns:
-            List of alpha values (miscoverage rates) for each confidence level.
-        """
-        return self.alphas
-
-    def update_interval_width(self, betas: List[float]):
-        """
-        Update interval widths using observed coverage rates.
-
-        Args:
-            betas: Observed coverage rates for each interval, used to adjust
-                alpha parameters for better coverage maintenance.
-        """
-        self.alphas = update_multi_interval_widths(self.adapters, self.alphas, betas)
-
-    def get_entropy_of_optimum_location(
-        self,
-        all_bounds: np.ndarray,
-        n_observations: int,
-    ) -> float:
-        """
-        Compute entropy of global optimum location using Monte Carlo simulation.
-
-        This method estimates the current uncertainty about the global optimum
-        location by simulating multiple realizations of the objective function
-        and computing the entropy of the resulting minimum locations.
-
-        Args:
-            all_bounds: Flattened conformal bounds matrix of shape
-                (n_observations, n_intervals * 2).
-            n_observations: Number of candidate points.
-
-        Returns:
-            Estimated entropy of optimum location distribution.
-        """
-        optimum_locations = np.zeros(self.n_paths)
-        idxs = np.random.randint(
-            0, all_bounds.shape[1], size=(self.n_paths, n_observations)
-        )
-        for i in range(self.n_paths):
-            path_samples = all_bounds[np.arange(n_observations), idxs[i]]
-            optimum_locations[i] = np.min(path_samples)
-        optimum_location_entropy = calculate_entropy(
-            optimum_locations, method=self.entropy_measure
-        )
-        return optimum_location_entropy
-
-    def select_candidates(
-        self,
-        predictions_per_interval: List[ConformalBounds],
-        candidate_space: np.ndarray,
-        best_historical_y: Optional[float] = None,
-        best_historical_x: Optional[np.ndarray] = None,
-    ) -> np.ndarray:
-        """
-        Select candidate points for information gain evaluation using specified strategy.
-
-        This method implements multiple candidate selection strategies to balance
-        computational efficiency with exploration effectiveness. Different strategies
-        are appropriate for different phases of optimization and problem characteristics.
-
-        Args:
-            predictions_per_interval: List of ConformalBounds objects for uncertainty
-                quantification of candidate points.
-            candidate_space: Array of candidate points with shape (n_candidates, n_dims).
-            best_historical_y: Current best observed objective value for improvement-based
-                strategies.
-            best_historical_x: Current best observed point for perturbation-based
-                strategies.
-
-        Returns:
-            Array of selected candidate indices for information gain evaluation.
-        """
-        all_bounds = flatten_conformal_bounds(predictions_per_interval)
-        n_observations = len(predictions_per_interval[0].lower_bounds)
-        capped_n_candidates = min(self.n_x_candidates, n_observations)
-        if self.sampling_strategy == "thompson":
-            thompson_sampler = ThompsonSampler()
-            thompson_samples = thompson_sampler.calculate_thompson_predictions(
-                predictions_per_interval=predictions_per_interval
-            )
-            candidates = np.argsort(thompson_samples)[:capped_n_candidates]
-        elif self.sampling_strategy == "expected_improvement":
-            if best_historical_y is None:
-                best_historical_y = np.min(np.mean(all_bounds, axis=1))
-            ei_sampler = ExpectedImprovementSampler(
-                current_best_value=best_historical_y
-            )
-            ei_values = ei_sampler.calculate_expected_improvement(
-                predictions_per_interval=predictions_per_interval
-            )
-            candidates = np.argsort(ei_values)[:capped_n_candidates]
-        elif self.sampling_strategy == "sobol":
-            if candidate_space is None or len(candidate_space) < capped_n_candidates:
-                candidates = np.random.choice(
-                    n_observations, size=capped_n_candidates, replace=False
-                )
-            n_dim = candidate_space.shape[1]
-            sampler = qmc.Sobol(d=n_dim, scramble=True)
-            points = sampler.random(n=capped_n_candidates)
-            X_min = np.min(candidate_space, axis=0)
-            X_range = np.max(candidate_space, axis=0) - X_min
-            X_range[X_range == 0] = 1.0
-            X_normalized = (candidate_space - X_min) / X_range
-            selected_indices = []
-            for point in points:
-                distances = np.sqrt(np.sum((X_normalized - point) ** 2, axis=1))
-                selected_idx = np.argmin(distances)
-                selected_indices.append(selected_idx)
-            candidates = np.array(selected_indices)
-        elif self.sampling_strategy == "perturbation":
-            if (
-                candidate_space is None
-                or len(candidate_space) < 1
-                or best_historical_x is None
-                or best_historical_y is None
-            ):
-                candidates = np.random.choice(
-                    n_observations, size=capped_n_candidates, replace=False
-                )
-            n_dim = candidate_space.shape[1]
-            X_min = np.min(candidate_space, axis=0)
-            X_max = np.max(candidate_space, axis=0)
-            X_range = X_max - X_min
-            perturbation_scale = 0.1
-            if best_historical_x.ndim == 1:
-                best_historical_x = best_historical_x.reshape(1, -1)
-            lower_bounds = np.maximum(
-                best_historical_x - perturbation_scale * X_range, X_min
-            )
-            upper_bounds = np.minimum(
-                best_historical_x + perturbation_scale * X_range, X_max
-            )
-            perturbed_points = np.random.uniform(
-                lower_bounds, upper_bounds, size=(capped_n_candidates, n_dim)
-            )
-            selected_indices = []
-            for point in perturbed_points:
-                distances = np.sqrt(np.sum((candidate_space - point) ** 2, axis=1))
-                selected_idx = np.argmin(distances)
-                if selected_idx not in selected_indices:
-                    selected_indices.append(selected_idx)
-            while len(selected_indices) < capped_n_candidates:
-                idx = np.random.randint(0, n_observations)
-                if idx not in selected_indices:
-                    selected_indices.append(idx)
-            candidates = np.array(selected_indices)
-        else:
-            logger.warning(
-                f"Unknown sampling strategy '{self.sampling_strategy}'. Defaulting to uniform random sampling."
-            )
-            candidates = np.random.choice(
-                n_observations, size=capped_n_candidates, replace=False
-            )
-        return candidates
-
-    def calculate_information_gain(
-        self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        X_val: np.ndarray,
-        y_val: np.ndarray,
-        X_space: np.ndarray,
-        conformal_estimator,
-        predictions_per_interval: List[ConformalBounds],
-        n_jobs: int = 1,
-    ) -> np.ndarray:
-        """
-        Calculate information gain for candidate points through model updates.
-
-        This method computes the expected information gain about the global optimum
-        location by evaluating how much each candidate point would reduce uncertainty
-        if observed. The computation involves fitting updated models with hypothetical
-        observations and comparing resulting entropy estimates.
-
-        Args:
-            X_train: Training input data for model fitting.
-            y_train: Training target values for model fitting.
-            X_val: Validation input data for conformal calibration.
-            y_val: Validation target values for conformal calibration.
-            X_space: Full candidate space for entropy computation.
-            conformal_estimator: Conformal predictor instance for model updates.
-            predictions_per_interval: Current predictions for all candidates.
-            n_jobs: Number of parallel jobs for computation.
-
-        Returns:
-            Array of information gain values (negated for minimization compatibility).
-            Higher information gain (more negative values) indicates more informative
-            candidates.
-        """
-        all_bounds = flatten_conformal_bounds(predictions_per_interval)
-        n_observations = len(predictions_per_interval[0].lower_bounds)
-        optimum_location_entropy = self.get_entropy_of_optimum_location(
-            all_bounds, n_observations
-        )
-        combined_y = np.concatenate((y_train, y_val))
-        combined_X = np.vstack((X_train, X_val))
-        if self.sampling_strategy in ["expected_improvement", "perturbation"]:
-            best_idx = np.argmin(combined_y)
-            best_historical_y = combined_y[best_idx]
-            best_historical_x = combined_X[best_idx].reshape(1, -1)
-        else:
-            best_historical_y = None
-            best_historical_x = None
-
-        candidate_idxs = self.select_candidates(
-            predictions_per_interval=predictions_per_interval,
-            candidate_space=X_space,
-            best_historical_y=best_historical_y,
-            best_historical_x=best_historical_x,
-        )
-
-        def process_candidate(idx):
-            X_cand = X_space[idx].reshape(1, -1)
-            y_cand_idxs = np.random.randint(
-                0, all_bounds.shape[1], size=self.n_y_candidates_per_x
-            )
-            y_range = all_bounds[idx, y_cand_idxs]
-
-            information_gains = []
-            for y_cand in y_range:
-                X_expanded = np.vstack([X_train, X_cand])
-                y_expanded = np.append(y_train, y_cand)
-
-                cand_estimator = deepcopy(conformal_estimator)
-
-                cand_estimator.fit(
-                    X_train=X_expanded,
-                    y_train=y_expanded,
-                    X_val=X_val,
-                    y_val=y_val,
-                    tuning_iterations=0,
-                    random_state=1234,
-                )
-
-                cand_predictions = cand_estimator.predict_intervals(X_space)
-                cand_bounds = flatten_conformal_bounds(cand_predictions)
-
-                conditional_samples = np.zeros(self.n_paths)
-                cond_idxs = np.random.randint(
-                    0,
-                    cand_bounds.shape[1],
-                    size=(self.n_paths, n_observations),
-                )
-
-                for i in range(self.n_paths):
-                    path_samples = cand_bounds[
-                        np.arange(n_observations),
-                        cond_idxs[i],
-                    ]
-                    cond_minimizer = np.argmin(path_samples)
-                    conditional_samples[i] = path_samples[cond_minimizer]
-
-                conditional_optimum_location_entropy = calculate_entropy(
-                    conditional_samples, method=self.entropy_measure
-                )
-
-                information_gains.append(
-                    optimum_location_entropy - conditional_optimum_location_entropy
-                )
-
-            return idx, np.mean(information_gains) if information_gains else 0.0
-
-        information_gains = np.zeros(n_observations)
-
-        results = _run_parallel_or_sequential(
-            process_candidate,
-            candidate_idxs,
-            n_jobs=n_jobs,
-        )
-
-        for idx, ig_value in results:
-            information_gains[idx] = ig_value
-
-        return -information_gains
 
 
 class MaxValueEntropySearchSampler:

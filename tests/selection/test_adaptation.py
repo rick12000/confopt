@@ -55,12 +55,42 @@ class SimpleACI:
         return self.alpha_t
 
 
-def run_dtaci_performance_test(X, y, target_alpha, gamma_values=None):
-    """Helper function to run DtACI performance tests and return metrics."""
-    if gamma_values is None:
-        gamma_values = [0.01, 0.05, 0.1]
+class StaticCI:
+    def __init__(self, alpha: float = 0.1):
+        if not 0 < alpha < 1:
+            raise ValueError("alpha must be in (0, 1)")
+        self.alpha = alpha
+        self.alpha_t = alpha
+        self.alpha_history = []
 
-    dtaci = DtACI(alpha=target_alpha, gamma_values=gamma_values)
+    def update(self, beta: float) -> float:
+        if not 0 <= beta <= 1:
+            raise ValueError(f"beta must be in [0, 1], got {beta}")
+        self.alpha_history.append(self.alpha_t)
+        return self.alpha_t
+
+
+def run_conformal_performance_test(method, X, y, target_alpha, gamma_values=None):
+    """Helper function to run conformal prediction performance tests and return metrics.
+
+    Args:
+        method: Either 'dtaci' or 'static' to specify which method to test
+        X, y: Data for testing
+        target_alpha: Target miscoverage level
+        gamma_values: Learning rates for DtACI (ignored for static method)
+
+    Returns:
+        Dictionary with performance metrics
+    """
+    if method == "dtaci":
+        if gamma_values is None:
+            gamma_values = [0.01, 0.05, 0.1]
+        predictor = DtACI(alpha=target_alpha, gamma_values=gamma_values)
+    elif method == "static":
+        predictor = StaticCI(alpha=target_alpha)
+    else:
+        raise ValueError("method must be 'dtaci' or 'static'")
+
     breaches = []
     alpha_evolution = []
     initial_window = 30
@@ -82,12 +112,9 @@ def run_dtaci_performance_test(X, y, target_alpha, gamma_values=None):
         y_test_pred = model.predict(X_test)[0]
 
         test_residual = abs(y_test - y_test_pred)
-        # According to the DTACI paper: β_t := sup {β : Y_t ∈ Ĉ_t(β)}
-        # This means β_t is the proportion of calibration scores >= test nonconformity
-        # (i.e., the empirical coverage probability)
         beta = np.mean(cal_residuals >= test_residual)
 
-        current_alpha = dtaci.update(beta=beta)
+        current_alpha = predictor.update(beta=beta)
         alpha_evolution.append(current_alpha)
 
         # Check breach
@@ -499,7 +526,7 @@ def test_dtaci_algorithm_behavior():
 def test_dtaci_moderate_shift_performance(moderate_shift_data, target_alpha):
     """Test DtACI performance under moderate distribution shift."""
     X, y = moderate_shift_data
-    results = run_dtaci_performance_test(X, y, target_alpha)
+    results = run_conformal_performance_test("dtaci", X, y, target_alpha)
 
     tolerance = 0.05
 
@@ -513,7 +540,7 @@ def test_dtaci_moderate_shift_performance(moderate_shift_data, target_alpha):
 def test_dtaci_high_shift_performance(high_shift_data, target_alpha):
     """Test DtACI performance under high distribution shift."""
     X, y = high_shift_data
-    results = run_dtaci_performance_test(X, y, target_alpha)
+    results = run_conformal_performance_test("dtaci", X, y, target_alpha)
 
     tolerance = 0.05
 
@@ -521,3 +548,81 @@ def test_dtaci_high_shift_performance(high_shift_data, target_alpha):
     # Should show significant adaptation behavior under high shift
     assert results["alpha_variance"] > 0.00001
     assert results["alpha_range"] > 0.005
+
+
+def generate_shifted_data(
+    n_points=300, shift_points=None, noise_levels=None, random_seed=42
+):
+    """Generate synthetic data with distribution shifts for testing adaptive methods.
+
+    Args:
+        n_points: Total number of data points
+        shift_points: Points where distribution shifts occur
+        noise_levels: Noise levels for each segment
+        random_seed: Random seed for reproducibility
+
+    Returns:
+        X, y: Feature matrix and target vector
+    """
+    if shift_points is None:
+        shift_points = [80, 160, 240]
+    if noise_levels is None:
+        noise_levels = [0.1, 0.6, 0.2, 0.8]
+
+    np.random.seed(random_seed)
+
+    segments = []
+    start_idx = 0
+
+    for i, shift_point in enumerate(shift_points + [n_points]):
+        segment_size = shift_point - start_idx
+        X_segment = np.random.randn(segment_size, 2)
+        y_segment = X_segment.sum(axis=1) + noise_levels[i] * np.random.randn(
+            segment_size
+        )
+        segments.append((X_segment, y_segment))
+        start_idx = shift_point
+
+    X = np.vstack([seg[0] for seg in segments])
+    y = np.hstack([seg[1] for seg in segments])
+
+    return X, y
+
+
+@pytest.mark.parametrize("target_alpha", [0.1, 0.2])
+def test_dtaci_vs_static_conformal_multiple_repetitions(target_alpha):
+    """Test that DtACI outperforms static conformal prediction on highly shifted data.
+
+    Runs multiple random repetitions and verifies that DtACI achieves better
+    performance than static conformal prediction at least 75% of the time.
+    """
+    n_repetitions = 20
+    dtaci_wins = 0
+    dtaci_errors = []
+    static_errors = []
+
+    gamma_values = [0.01, 0.05, 0.1]
+
+    for rep in range(n_repetitions):
+        X, y = generate_shifted_data(random_seed=42 + rep)
+
+        # Run both methods using the consolidated function
+        dtaci_results = run_conformal_performance_test(
+            "dtaci", X, y, target_alpha, gamma_values
+        )
+        static_results = run_conformal_performance_test("static", X, y, target_alpha)
+
+        dtaci_errors.append(dtaci_results["coverage_error"])
+        static_errors.append(static_results["coverage_error"])
+
+        if dtaci_results["coverage_error"] < static_results["coverage_error"]:
+            dtaci_wins += 1
+
+    # DtACI should win at least 75% of the time
+    win_rate = dtaci_wins / n_repetitions
+    assert win_rate >= 0.75
+
+    # Additionally, DtACI should have better average performance
+    avg_dtaci_error = np.mean(dtaci_errors)
+    avg_static_error = np.mean(static_errors)
+    assert avg_dtaci_error <= avg_static_error

@@ -4,11 +4,9 @@ from typing import Optional, Dict, Tuple, get_type_hints, Literal, Union, List
 from confopt.wrapping import ParameterRange
 
 import numpy as np
-from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 from datetime import datetime
 import inspect
-from confopt.utils.preprocessing import train_val_split, remove_iqr_outliers
 from confopt.utils.tracking import (
     Trial,
     Study,
@@ -116,22 +114,6 @@ class ConformalTuner:
         self.warm_start_configurations = warm_start_configurations
         self.n_candidate_configurations = n_candidate_configurations
         self.dynamic_sampling = dynamic_sampling
-
-    @staticmethod
-    def _set_conformal_validation_split(X: np.array) -> float:
-        """Determine appropriate validation split ratio for conformal model training.
-
-        Implements adaptive validation split sizing based on available data volume.
-        Uses larger validation splits for small datasets to ensure statistical validity
-        of conformal predictions, while using standard splits for larger datasets.
-
-        Args:
-            X: Feature matrix of evaluated configurations
-
-        Returns:
-            Validation split ratio between 0 and 1
-        """
-        return 5 / len(X) if len(X) <= 50 else 0.10
 
     def check_objective_function(self) -> None:
         """Validate objective function signature and type annotations.
@@ -394,100 +376,24 @@ class ConformalTuner:
             )
         return optimizer
 
-    def prepare_searcher_data(
-        self,
-        validation_split: float,
-        filter_outliers: bool = False,
-        outlier_scope: str = "top_and_bottom",
-        random_state: Optional[int] = None,
-    ) -> Tuple[np.array, np.array, np.array, np.array]:
-        """Prepare training and validation data for conformal model fitting.
-
-        Processes the accumulated search history into properly formatted training
-        and validation sets for conformal prediction model training. Includes
-        optional outlier filtering and applies metric sign transformation for
-        consistent optimization direction handling.
-
-        Args:
-            validation_split: Fraction of data reserved for validation
-            filter_outliers: Whether to remove statistical outliers
-            outlier_scope: Outlier removal scope ('top_and_bottom', 'top', 'bottom')
-            random_state: Random seed for reproducible data splits
-
-        Returns:
-            Tuple of (X_train, y_train, X_val, y_val) arrays
-        """
-        searched_configs = self.config_manager.tabularize_configs(
-            self.config_manager.searched_configs
-        )
-        searched_performances = np.array(self.config_manager.searched_performances)
-
-        X = searched_configs.copy()
-        y = searched_performances.copy()
-        logger.debug(f"Minimum performance in searcher data: {y.min()}")
-        logger.debug(f"Maximum performance in searcher data: {y.max()}")
-
-        if filter_outliers:
-            X, y = remove_iqr_outliers(X=X, y=y, scope=outlier_scope)
-
-        X_train, y_train, X_val, y_val = train_val_split(
-            X=X,
-            y=y,
-            train_split=(1 - validation_split),
-            normalize=False,
-            ordinal=False,
-            random_state=random_state,
-        )
-
-        y_train = y_train * self.metric_sign
-        y_val = y_val * self.metric_sign
-
-        return X_train, y_train, X_val, y_val
-
-    def fit_transform_searcher_data(
-        self, X_train: np.array, X_val: np.array
-    ) -> Tuple[StandardScaler, np.array, np.array]:
-        """Fit feature scaler and transform training and validation data.
-
-        Applies standard scaling (zero mean, unit variance) to feature matrices
-        to ensure consistent scaling for conformal prediction models. The scaler
-        is fitted only on training data to prevent data leakage.
-
-        Args:
-            X_train: Training feature matrix
-            X_val: Validation feature matrix
-
-        Returns:
-            Tuple of (fitted_scaler, X_train_scaled, X_val_scaled)
-        """
-        scaler = StandardScaler()
-        scaler.fit(X=X_train)
-        X_train_scaled = scaler.transform(X=X_train)
-        X_val_scaled = scaler.transform(X=X_val)
-        return scaler, X_train_scaled, X_val_scaled
-
     def retrain_searcher(
         self,
         searcher: BaseConformalSearcher,
-        X_train: np.array,
-        y_train: np.array,
-        X_val: np.array,
-        y_val: np.array,
+        X: np.array,
+        y: np.array,
         tuning_count: int,
     ) -> Tuple[float, float]:
         """Train conformal prediction searcher on accumulated data.
 
-        Fits the conformal prediction model using current training and validation
-        data, tracking training time and model performance for adaptive parameter
+        Fits the conformal prediction model using the provided data,
+        tracking training time and model performance for adaptive parameter
         optimization. The tuning_count parameter controls internal hyperparameter
         optimization within the searcher.
 
         Args:
             searcher: Conformal searcher instance to train
-            X_train: Training feature matrix
-            y_train: Training target values (sign-adjusted)
-            X_val: Validation feature matrix
-            y_val: Validation target values (sign-adjusted)
+            X: Feature matrix (sign-adjusted)
+            y: Target values (sign-adjusted)
             tuning_count: Number of internal tuning iterations
 
         Returns:
@@ -495,10 +401,8 @@ class ConformalTuner:
         """
         runtime_tracker = RuntimeTracker()
         searcher.fit(
-            X_train=X_train,
-            y_train=y_train,
-            X_val=X_val,
-            y_val=y_val,
+            X=X,
+            y=y,
             tuning_iterations=tuning_count,
         )
 
@@ -651,25 +555,17 @@ class ConformalTuner:
                 iteration_count=1 if max_searches else 0,
             )
 
-            tabularized_searched_configs = self.config_manager.tabularize_configs(
+            X = self.config_manager.tabularize_configs(
                 self.config_manager.searched_configs
             )
-            validation_split = self._set_conformal_validation_split(
-                X=tabularized_searched_configs
-            )
-            X_train, y_train, X_val, y_val = self.prepare_searcher_data(
-                validation_split
-            )
-            scaler, X_train_scaled, X_val_scaled = self.fit_transform_searcher_data(
-                X_train, X_val
-            )
+            y = np.array(self.config_manager.searched_performances)
+
             searchable_configs = self.config_manager.get_searchable_configurations()
             X_searchable = self.config_manager.tabularize_configs(searchable_configs)
-            X_searchable_scaled = scaler.transform(X=X_searchable)
 
             if search_iter == 0 or search_iter % conformal_retraining_frequency == 0:
                 training_runtime, estimator_error = self.retrain_searcher(
-                    searcher, X_train_scaled, y_train, X_val_scaled, y_val, tuning_count
+                    searcher, X, y, tuning_count
                 )
 
                 (
@@ -691,18 +587,17 @@ class ConformalTuner:
                     )
 
             next_config = self.select_next_configuration(
-                searcher, searchable_configs, X_searchable_scaled
+                searcher, searchable_configs, X_searchable
             )
             performance, _ = self._evaluate_configuration(next_config)
             if np.isnan(performance):
                 self.config_manager.add_to_banned_configurations(next_config)
                 continue
 
-            transformed_config = scaler.transform(
-                self.config_manager.tabularize_configs([next_config])
-            )
+            transformed_config = self.config_manager.tabularize_configs([next_config])
+
             lower_bound, upper_bound = self.get_interval_if_applicable(
-                searcher, transformed_config
+                searcher, self.config_manager.tabularize_configs([next_config])
             )
             signed_lower_bound = (
                 (lower_bound * self.metric_sign) if lower_bound is not None else None
