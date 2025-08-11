@@ -83,7 +83,7 @@ ESTIMATOR_REGISTRY = {
         estimator_name=RF_NAME,
         estimator_class=RandomForestRegressor,
         default_params={
-            "n_estimators": 100,
+            "n_estimators": 50,
             "max_features": "sqrt",
             "min_samples_split": 2,
             "min_samples_leaf": 1,
@@ -118,7 +118,7 @@ ESTIMATOR_REGISTRY = {
         estimator_class=GradientBoostingRegressor,
         default_params={
             "learning_rate": 0.05,
-            "n_estimators": 100,
+            "n_estimators": 50,
             "min_samples_split": 2,
             "min_samples_leaf": 1,
             "max_depth": 3,
@@ -139,7 +139,7 @@ ESTIMATOR_REGISTRY = {
         estimator_class=LGBMRegressor,
         default_params={
             "learning_rate": 0.05,
-            "n_estimators": 100,
+            "n_estimators": 50,
             "max_depth": 3,
             "min_child_samples": 10,
             "subsample": 0.8,
@@ -177,7 +177,7 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QRF_NAME,
         estimator_class=QuantileForest,
         default_params={
-            "n_estimators": 100,
+            "n_estimators": 50,
             "max_depth": 3,
             "max_features": 0.8,
             "min_samples_split": 2,
@@ -206,7 +206,7 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QLEAF_NAME,
         estimator_class=QuantileLeaf,
         default_params={
-            "n_estimators": 100,
+            "n_estimators": 50,
             "max_depth": 3,
             "max_features": 0.8,
             "min_samples_split": 2,
@@ -227,7 +227,7 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileGBM,
         default_params={
             "learning_rate": 0.1,
-            "n_estimators": 100,
+            "n_estimators": 50,
             "min_samples_split": 2,
             "min_samples_leaf": 1,
             "max_depth": 3,
@@ -249,7 +249,7 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileLightGBM,
         default_params={
             "learning_rate": 0.05,
-            "n_estimators": 100,
+            "n_estimators": 50,
             "max_depth": 3,
             "min_child_samples": 10,
             "subsample": 0.8,
@@ -290,7 +290,7 @@ ESTIMATOR_REGISTRY = {
         default_params={
             "weighting_strategy": "linear_stack",
             "cv": 3,
-            "alpha": 0.0,
+            "alpha": 0.001,
         },
         estimator_parameter_space={
             "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
@@ -314,7 +314,7 @@ ESTIMATOR_REGISTRY = {
                 "class": QuantileGBM,
                 "params": {
                     "learning_rate": 0.1,
-                    "n_estimators": 100,
+                    "n_estimators": 50,
                     "min_samples_split": 2,
                     "min_samples_leaf": 1,
                     "max_depth": 3,
@@ -330,7 +330,7 @@ ESTIMATOR_REGISTRY = {
         default_params={
             "weighting_strategy": "linear_stack",
             "cv": 3,
-            "alpha": 0.0,
+            "alpha": 0.001,
         },
         estimator_parameter_space={
             "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
@@ -341,7 +341,7 @@ ESTIMATOR_REGISTRY = {
                 "class": QuantileGBM,
                 "params": {
                     "learning_rate": 0.1,
-                    "n_estimators": 100,
+                    "n_estimators": 50,
                     "min_samples_split": 2,
                     "min_samples_leaf": 1,
                     "max_depth": 3,
@@ -363,7 +363,7 @@ ESTIMATOR_REGISTRY = {
         default_params={
             "weighting_strategy": "linear_stack",
             "cv": 3,
-            "alpha": 0.0,
+            "alpha": 0.001,
         },
         estimator_parameter_space={
             "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
@@ -374,7 +374,7 @@ ESTIMATOR_REGISTRY = {
                 "class": QuantileGBM,
                 "params": {
                     "learning_rate": 0.1,
-                    "n_estimators": 100,
+                    "n_estimators": 50,
                     "min_samples_split": 2,
                     "min_samples_leaf": 1,
                     "max_depth": 3,
@@ -397,7 +397,7 @@ ESTIMATOR_REGISTRY = {
         default_params={
             "weighting_strategy": "linear_stack",
             "cv": 3,
-            "alpha": 0.0,
+            "alpha": 0.001,
         },
         estimator_parameter_space={
             "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
@@ -408,7 +408,7 @@ ESTIMATOR_REGISTRY = {
                 "class": QuantileGBM,
                 "params": {
                     "learning_rate": 0.1,
-                    "n_estimators": 100,
+                    "n_estimators": 50,
                     "min_samples_split": 2,
                     "min_samples_leaf": 1,
                     "max_depth": 3,
@@ -432,7 +432,7 @@ ESTIMATOR_REGISTRY = {
         default_params={
             "weighting_strategy": "linear_stack",
             "cv": 3,
-            "alpha": 0.0,
+            "alpha": 0.001,
         },
         estimator_parameter_space={
             "weighting_strategy": CategoricalRange(choices=["uniform", "linear_stack"]),
@@ -443,7 +443,7 @@ ESTIMATOR_REGISTRY = {
                 "class": QuantileGBM,
                 "params": {
                     "learning_rate": 0.1,
-                    "n_estimators": 100,
+                    "n_estimators": 50,
                     "min_samples_split": 2,
                     "min_samples_leaf": 1,
                     "max_depth": 3,

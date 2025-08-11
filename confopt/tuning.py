@@ -15,7 +15,7 @@ from confopt.utils.tracking import (
     StaticConfigurationManager,
     ProgressBarManager,
 )
-from confopt.utils.optimization import BayesianSearcherOptimizer, FixedSearcherOptimizer
+from confopt.utils.optimization import FixedSearcherOptimizer, DecayingSearcherOptimizer
 from confopt.selection.acquisition import (
     LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
@@ -93,7 +93,6 @@ class ConformalTuner:
         study: Container for storing trial results and optimization history
         config_manager: Handles configuration sampling and tracking
         search_timer: Tracks total optimization runtime
-        error_history: Sequence of conformal model prediction errors
     """
 
     def __init__(
@@ -338,31 +337,29 @@ class ConformalTuner:
         """Initialize multi-armed bandit optimizer for searcher parameter tuning.
 
         Creates an optimizer instance for automatically tuning searcher parameters
-        such as retraining frequency and internal tuning iterations. The optimizer
-        uses reward-cost trade-offs to balance prediction improvement against
-        computational overhead.
+        such as retraining frequency and internal tuning iterations.
 
         Args:
-            optimizer_framework: Tuning strategy ('reward_cost', 'fixed', None)
+            optimizer_framework: Tuning strategy ('decaying', 'fixed', None)
             conformal_retraining_frequency: Base retraining frequency for validation
 
         Returns:
             Configured optimizer instance
         """
-        if optimizer_framework == "reward_cost":
-            optimizer = BayesianSearcherOptimizer(
-                max_tuning_count=20,
-                max_tuning_interval=15,
-                conformal_retraining_frequency=conformal_retraining_frequency,
-                min_observations=5,
-                exploration_weight=0.1,
-                random_state=42,
-            )
-        elif optimizer_framework == "fixed":
+        if optimizer_framework == "fixed":
             optimizer = FixedSearcherOptimizer(
                 n_tuning_episodes=10,
-                tuning_interval=10 * conformal_retraining_frequency,
+                tuning_interval=max(20, conformal_retraining_frequency),
                 conformal_retraining_frequency=conformal_retraining_frequency,
+            )
+        elif optimizer_framework == "decaying":
+            optimizer = DecayingSearcherOptimizer(
+                n_tuning_episodes=10,
+                initial_tuning_interval=max(10, conformal_retraining_frequency),
+                conformal_retraining_frequency=conformal_retraining_frequency,
+                decay_rate=0.1,
+                decay_type="linear",
+                max_tuning_interval=40,
             )
         elif optimizer_framework is None:
             optimizer = FixedSearcherOptimizer(
@@ -372,7 +369,7 @@ class ConformalTuner:
             )
         else:
             raise ValueError(
-                "optimizer_framework must be either 'reward_cost', 'fixed', or None."
+                "optimizer_framework must be either 'fixed', 'decaying', or None."
             )
         return optimizer
 
@@ -407,10 +404,8 @@ class ConformalTuner:
         )
 
         training_runtime = runtime_tracker.return_runtime()
-        estimator_error = searcher.primary_estimator_error
-        self.error_history.append(estimator_error)
 
-        return training_runtime, estimator_error
+        return training_runtime
 
     def select_next_configuration(
         self,
@@ -474,10 +469,8 @@ class ConformalTuner:
     ) -> Tuple[int, int]:
         """Update multi-armed bandit optimizer and select new parameter values.
 
-        Provides feedback to the parameter optimizer about the effectiveness of
-        current searcher settings, using prediction error improvement as reward
-        and normalized training time as cost. Then selects new parameter values
-        for subsequent iterations.
+        Updates the parameter optimizer with the current search iteration and
+        selects new parameter values for subsequent iterations.
 
         Args:
             optimizer: Multi-armed bandit optimizer instance
@@ -489,24 +482,9 @@ class ConformalTuner:
         Returns:
             Tuple of (new_tuning_count, new_searcher_retuning_frequency)
         """
-        has_multiple_errors = len(self.error_history) > 1
-        if has_multiple_errors:
-            error_improvement = max(0, self.error_history[-2] - self.error_history[-1])
-
-            normalized_runtime = 0
-            try:
-                normalized_runtime = (
-                    training_runtime / self.study.get_average_target_model_runtime()
-                )
-            except ZeroDivisionError:
-                normalized_runtime = 0
-
-            optimizer.update(
-                arm=(tuning_count, searcher_retuning_frequency),
-                reward=error_improvement,
-                cost=normalized_runtime,
-                search_iter=search_iter,
-            )
+        optimizer.update(
+            search_iter=search_iter,
+        )
 
         new_tuning_count, new_searcher_retuning_frequency = optimizer.select_arm()
         return new_tuning_count, new_searcher_retuning_frequency
@@ -546,7 +524,7 @@ class ConformalTuner:
 
         tuning_count = 0
         searcher_retuning_frequency = conformal_retraining_frequency
-        self.error_history = []
+
         for search_iter in range(conformal_max_searches):
             progress_manager.update_progress(
                 current_runtime=(
@@ -564,9 +542,7 @@ class ConformalTuner:
             X_searchable = self.config_manager.tabularize_configs(searchable_configs)
 
             if search_iter == 0 or search_iter % conformal_retraining_frequency == 0:
-                training_runtime, estimator_error = self.retrain_searcher(
-                    searcher, X, y, tuning_count
-                )
+                training_runtime = self.retrain_searcher(searcher, X, y, tuning_count)
 
                 (
                     tuning_count,
@@ -622,7 +598,6 @@ class ConformalTuner:
                 searcher_runtime=training_runtime,
                 lower_bound=signed_lower_bound,
                 upper_bound=signed_upper_bound,
-                primary_estimator_error=estimator_error,
             )
             self.study.append_trial(trial)
 
@@ -648,7 +623,7 @@ class ConformalTuner:
         ] = None,
         n_random_searches: int = 15,
         conformal_retraining_frequency: int = 1,
-        optimizer_framework: Optional[Literal["reward_cost", "fixed"]] = None,
+        optimizer_framework: Optional[Literal["decaying", "fixed"]] = None,
         random_state: Optional[int] = None,
         verbose: bool = True,
     ) -> None:
@@ -677,8 +652,8 @@ class ConformalTuner:
                 Recommended values are 1 if your target model takes >1 min to train, 2-5 if your
                 target model is very small to reduce computational overhead. Default: 1.
             optimizer_framework: Controls how and when the surrogate model tunes its own parameters
-                (this is different from tuning your target model). Options are 'reward_cost' for
-                Bayesian selection balancing prediction improvement vs cost, 'fixed' for
+                (this is different from tuning your target model). Options are 'decaying' for
+                adaptive tuning with increasing intervals over time, 'fixed' for
                 deterministic tuning at fixed intervals, or None for no tuning. Surrogate tuning
                 adds computational cost and is recommended only if your target model takes more
                 than 1-5 minutes to train. Default: None.

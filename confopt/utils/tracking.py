@@ -149,7 +149,6 @@ class Trial(BaseModel):
     upper_bound: Optional[float] = None
     searcher_runtime: Optional[float] = None
     target_model_runtime: Optional[float] = None
-    primary_estimator_error: Optional[float] = None
 
 
 class Study:

@@ -362,7 +362,7 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
         point_estimator_architecture: Point estimator configuration.
         variance_estimator_architecture: Variance estimator configuration.
         conformal_estimator: Fitted LocallyWeightedConformalEstimator instance.
-        primary_estimator_error: Point estimator validation error for quality assessment.
+
 
     Mathematical Foundation:
         Uses locally weighted conformal prediction where intervals have the form:
@@ -448,7 +448,6 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
             tuning_iterations=tuning_iterations,
             random_state=random_state,
         )
-        self.primary_estimator_error = self.conformal_estimator.primary_estimator_error
 
     def _predict_with_pessimistic_lower_bound(self, X: np.array):
         """Generate pessimistic lower bound acquisition values.
@@ -645,7 +644,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         n_pre_conformal_trials: Threshold for conformal vs non-conformal mode.
         conformal_estimator: Fitted QuantileConformalEstimator instance.
         point_estimator: Optional point estimator for optimistic Thompson sampling.
-        primary_estimator_error: Mean pinball loss across quantiles for quality assessment.
+
 
     Mathematical Foundation:
         Uses quantile conformal prediction where intervals have the form:
@@ -766,7 +765,6 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             tuning_iterations=tuning_iterations,
             random_state=random_state,
         )
-        self.primary_estimator_error = self.conformal_estimator.primary_estimator_error
 
     def _predict_with_pessimistic_lower_bound(self, X: np.array):
         """Generate pessimistic lower bound acquisition values.

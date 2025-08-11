@@ -1,13 +1,12 @@
 import numpy as np
 import pytest
-from sklearn.preprocessing import StandardScaler
 from confopt.selection.conformalization import (
     LocallyWeightedConformalEstimator,
     QuantileConformalEstimator,
     alpha_to_quantiles,
 )
 from confopt.wrapping import ConformalBounds
-
+from confopt.utils.preprocessing import train_val_split
 from conftest import (
     AMENDED_POINT_ESTIMATOR_ARCHITECTURES,
     AMENDED_SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
@@ -23,57 +22,6 @@ ARCH_TOLERANCE_OVERRIDES: dict[str, float] = {
     # Example only (keep empty unless specific architectures are identified):
     # "problem_arch": 0.10,
 }
-
-
-def create_train_val_split(
-    X: np.ndarray, y: np.ndarray, train_split: float, random_state: int = 42
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    rng = np.random.RandomState(random_state)
-    indices = np.arange(len(X))
-    rng.shuffle(indices)
-    split_idx = round(len(X) * train_split)
-    train_indices = indices[:split_idx]
-    val_indices = indices[split_idx:]
-    X_train, y_train = X[train_indices], y[train_indices]
-    X_val, y_val = X[val_indices], y[val_indices]
-
-    # Standardize features to avoid penalizing scale-sensitive estimators
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_val = scaler.transform(X_val)
-
-    return X_train, y_train, X_val, y_val
-
-
-def create_train_val_test_split(
-    X: np.ndarray,
-    y: np.ndarray,
-    train_frac: float = 0.4,
-    val_frac: float = 0.2,
-    random_state: int = 42,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    rng = np.random.RandomState(random_state)
-    indices = np.arange(len(X))
-    rng.shuffle(indices)
-
-    n = len(X)
-    n_train = int(round(n * train_frac))
-    n_val = int(round(n * val_frac))
-
-    train_indices = indices[:n_train]
-    val_indices = indices[n_train : n_train + n_val]
-    test_indices = indices[n_train + n_val :]
-
-    X_train, y_train = X[train_indices], y[train_indices]
-    X_val, y_val = X[val_indices], y[val_indices]
-    X_test, y_test = X[test_indices], y[test_indices]
-
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_val = scaler.transform(X_val)
-    X_test = scaler.transform(X_test)
-
-    return X_train, y_train, X_val, y_val, X_test, y_test
 
 
 def validate_intervals(
@@ -129,14 +77,9 @@ def test_locally_weighted_fit_and_predict_intervals_shape_and_coverage(
     data_splitting_strategy,
 ):
     X, y = request.getfixturevalue(data_fixture_name)
-    (
-        X_train,
-        y_train,
-        X_val,
-        y_val,
-        X_test,
-        y_test,
-    ) = create_train_val_test_split(X, y, train_frac=0.4, val_frac=0.2, random_state=42)
+    (X_train, y_train, X_test, y_test,) = train_val_split(
+        X, y, train_split=0.8, normalize=False, ordinal=False, random_state=42
+    )
 
     estimator = LocallyWeightedConformalEstimator(
         point_estimator_architecture=point_arch,
@@ -146,12 +89,9 @@ def test_locally_weighted_fit_and_predict_intervals_shape_and_coverage(
         calibration_split_strategy=data_splitting_strategy,
         adaptive_threshold=50,
     )
-    # Combine train and val data for new interface
-    X_combined = np.vstack((X_train, X_val))
-    y_combined = np.concatenate((y_train, y_val))
     estimator.fit(
-        X=X_combined,
-        y=y_combined,
+        X=X_train,
+        y=y_train,
         tuning_iterations=tuning_iterations,
         random_state=42,
     )
@@ -172,8 +112,8 @@ def test_locally_weighted_calculate_betas_output_properties(
         alphas=[0.1, 0.2, 0.3],
     )
     X, y = dummy_expanding_quantile_gaussian_dataset
-    X_train, y_train, X_val, y_val = create_train_val_split(
-        X, y, train_split=0.8, random_state=42
+    X_train, y_train, X_val, y_val = train_val_split(
+        X, y, train_split=0.8, normalize=False, ordinal=False, random_state=42
     )
     # Combine train and val data for new interface
     X_combined = np.vstack((X_train, X_val))
@@ -247,14 +187,9 @@ def test_quantile_fit_and_predict_intervals_shape_and_coverage(
     symmetric_adjustment,
 ):
     X, y = request.getfixturevalue(data_fixture_name)
-    (
-        X_train,
-        y_train,
-        X_val,
-        y_val,
-        X_test,
-        y_test,
-    ) = create_train_val_test_split(X, y, train_frac=0.4, val_frac=0.2, random_state=42)
+    (X_train, y_train, X_test, y_test,) = train_val_split(
+        X, y, train_split=0.8, normalize=False, ordinal=False, random_state=42
+    )
 
     estimator = QuantileConformalEstimator(
         quantile_estimator_architecture=estimator_architecture,
@@ -264,12 +199,9 @@ def test_quantile_fit_and_predict_intervals_shape_and_coverage(
         calibration_split_strategy=calibration_split_strategy,
         symmetric_adjustment=symmetric_adjustment,
     )
-    # Combine train and val data for new interface
-    X_combined = np.vstack((X_train, X_val))
-    y_combined = np.concatenate((y_train, y_val))
     estimator.fit(
-        X=X_combined,
-        y=y_combined,
+        X=X_train,
+        y=y_train,
         tuning_iterations=tuning_iterations,
         random_state=42,
     )
@@ -298,13 +230,10 @@ def test_quantile_calculate_betas_output_properties(
         n_pre_conformal_trials=15,
     )
     X, y = dummy_expanding_quantile_gaussian_dataset
-    X_train, y_train, X_val, y_val = create_train_val_split(
-        X, y, train_split=0.8, random_state=42
+    X_train, y_train, X_val, y_val = train_val_split(
+        X, y, train_split=0.8, normalize=False, ordinal=False, random_state=42
     )
-    # Combine train and val data for new interface
-    X_combined = np.vstack((X_train, X_val))
-    y_combined = np.concatenate((y_train, y_val))
-    estimator.fit(X=X_combined, y=y_combined, random_state=42)
+    estimator.fit(X=X_train, y=y_train, random_state=42)
     test_point = X_val[0]
     test_value = y_val[0]
     betas = estimator.calculate_betas(test_point, test_value)
@@ -330,13 +259,10 @@ def test_quantile_conformalization_decision_logic(n_trials, expected_conformaliz
     total_size = n_trials
     X = np.random.rand(total_size, 3)
     y = np.random.rand(total_size)
-    X_train, y_train, X_val, y_val, _, _ = create_train_val_test_split(
-        X, y, train_frac=0.6, val_frac=0.2, random_state=42
+    X_train, y_train, _, _ = train_val_split(
+        X, y, train_split=0.8, normalize=False, ordinal=False, random_state=42
     )
-    # Combine train and val data for new interface
-    X_combined = np.vstack((X_train, X_val))
-    y_combined = np.concatenate((y_train, y_val))
-    estimator.fit(X=X_combined, y=y_combined)
+    estimator.fit(X=X_train, y=y_train)
     assert estimator.conformalize_predictions == expected_conformalize
 
 
@@ -385,12 +311,17 @@ def test_conformalized_vs_non_conformalized_quantile_estimator_coverage(
 ):
     X, y = request.getfixturevalue(data_fixture_name)
 
-    n_repeats = 5
+    n_repeats = 10
     random_states = [np.random.randint(0, 10000) for _ in range(n_repeats)]
     better_or_equal_count = 0
     for random_state in random_states:
-        (X_train, y_train, X_val, y_val, X_test, y_test,) = create_train_val_test_split(
-            X, y, train_frac=0.4, val_frac=0.2, random_state=random_state
+        (X_train, y_train, X_test, y_test,) = train_val_split(
+            X,
+            y,
+            train_split=0.8,
+            normalize=False,
+            ordinal=False,
+            random_state=random_state,
         )
 
         conformalized_estimator = QuantileConformalEstimator(
@@ -401,12 +332,9 @@ def test_conformalized_vs_non_conformalized_quantile_estimator_coverage(
             calibration_split_strategy=calibration_split_strategy,
         )
 
-        # Combine train and val data for new interface
-        X_combined = np.vstack((X_train, X_val))
-        y_combined = np.concatenate((y_train, y_val))
         conformalized_estimator.fit(
-            X=X_combined,
-            y=y_combined,
+            X=X_train,
+            y=y_train,
             random_state=random_state,
         )
 
@@ -419,8 +347,8 @@ def test_conformalized_vs_non_conformalized_quantile_estimator_coverage(
         )
 
         non_conformalized_estimator.fit(
-            X=X_combined,
-            y=y_combined,
+            X=X_train,
+            y=y_train,
             random_state=random_state,
         )
 

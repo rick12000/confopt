@@ -1,206 +1,162 @@
 import logging
 import numpy as np
 from typing import Tuple, Optional
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import ConstantKernel, Matern
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from scipy.stats import norm
 
 logger = logging.getLogger(__name__)
 
 
-class BayesianSearcherOptimizer:
+class DecayingSearcherOptimizer:
+    """Searcher optimizer that increases tuning_interval as search progresses.
+
+    This optimizer implements a decaying strategy where the tuning interval
+    starts at an initial value and increases over time according to various
+    decay rate options. The n_tuning_episodes remains constant throughout
+    the search process.
+
+    Args:
+        n_tuning_episodes (int): Number of tuning episodes to perform at each
+            optimization step. Defaults to 10.
+        initial_tuning_interval (int): Initial tuning interval to decay from.
+            Must be a positive integer. Defaults to 1.
+        conformal_retraining_frequency (int): Base retraining frequency for
+            validation. All intervals will be multiples of this value. Defaults to 1.
+        decay_rate (float): Rate of decay - higher values mean faster increase
+            in tuning interval. Defaults to 0.1.
+        decay_type (str): Type of decay function. Must be one of 'linear',
+            'exponential', or 'logarithmic'. Defaults to 'linear'.
+        max_tuning_interval (int): Maximum tuning interval cap to prevent
+            excessive intervals. Defaults to 20.
+
+    Attributes:
+        current_iter (int): Current search iteration number.
+
+    Note:
+        The decay functions are:
+        - Linear: interval = initial + decay_rate * iter
+        - Exponential: interval = initial * (1 + decay_rate)^iter
+        - Logarithmic: interval = initial + decay_rate * log(1 + iter)
+
+        All intervals are rounded to integers and adjusted to be multiples of
+        conformal_retraining_frequency.
+    """
+
     def __init__(
         self,
-        max_tuning_count: int = 20,
-        max_tuning_interval: int = 5,
+        n_tuning_episodes: int = 10,
+        initial_tuning_interval: int = 1,
         conformal_retraining_frequency: int = 1,
-        min_observations: int = 5,  # Changed from 3 to 5
-        exploration_weight: float = 0.1,
-        random_state: Optional[int] = None,
+        decay_rate: float = 0.1,
+        decay_type: str = "linear",
+        max_tuning_interval: int = 20,
     ):
-        self.max_tuning_count = max_tuning_count
-        self.max_tuning_interval = max_tuning_interval
+        self.n_tuning_episodes = n_tuning_episodes
+        self.initial_tuning_interval = initial_tuning_interval
         self.conformal_retraining_frequency = conformal_retraining_frequency
-        self.min_observations = min_observations
-        self.exploration_weight = exploration_weight
-        self.random_state = random_state
-
-        # Calculate valid tuning intervals (multiples of conformal_retraining_frequency)
-        self.valid_intervals = [
-            i
-            for i in range(1, max_tuning_interval + 1)
-            if i % self.conformal_retraining_frequency == 0
-        ]
-
-        # If no valid intervals found, force at least one valid interval
-        if not self.valid_intervals:
-            self.valid_intervals = [self.conformal_retraining_frequency]
-            logger.warning(
-                f"No valid tuning intervals found. Using {self.conformal_retraining_frequency}."
-            )
-
-        if random_state is not None:
-            np.random.seed(random_state)
-
-        # Observation storage
-        self.X_observed = []  # Features: [search_iter, tuning_count, tuning_interval]
-        self.y_observed = []  # Target: efficiency (reward/cost)
+        self.decay_rate = decay_rate
+        self.decay_type = decay_type
+        self.max_tuning_interval = max_tuning_interval
         self.current_iter = 0
 
-        # Initialize Gaussian Process model with a suitable kernel
-        # Matern kernel is good for optimization as it doesn't assume excessive smoothness
-        kernel = ConstantKernel() * Matern(nu=2.5, length_scale_bounds=(1e-5, 1e5))
-        self.gp_model = GaussianProcessRegressor(
-            kernel=kernel,
-            n_restarts_optimizer=10,
-            normalize_y=True,
-            random_state=random_state,
-        )
-        self.scaler = StandardScaler()
+        # Validate decay_type
+        if decay_type not in ["linear", "exponential", "logarithmic"]:
+            raise ValueError(
+                "decay_type must be one of 'linear', 'exponential', 'logarithmic'"
+            )
 
-        # Add efficiency normalization
-        self.efficiency_scaler = MinMaxScaler()
+        # Ensure initial_tuning_interval is a multiple of conformal_retraining_frequency
+        if initial_tuning_interval % conformal_retraining_frequency != 0:
+            nearest_multiple = round(
+                initial_tuning_interval / conformal_retraining_frequency
+            )
+            self.initial_tuning_interval = (
+                max(1, nearest_multiple) * conformal_retraining_frequency
+            )
+            logger.warning(
+                f"Initial tuning interval {initial_tuning_interval} is not a multiple of conformal_retraining_frequency {conformal_retraining_frequency}. "
+                f"Using {self.initial_tuning_interval} instead."
+            )
 
-        # Flag to indicate if model has been trained
-        self.model_trained = False
+    def _calculate_current_interval(self, search_iter: int) -> int:
+        """Calculate the current tuning interval based on search iteration.
 
-    def update(
-        self,
-        arm: Tuple[int, int],
-        reward: float,
-        cost: float,
-        search_iter: Optional[int] = None,
-    ) -> None:
-        """Update the model with new observation data"""
-        # Update current iteration if provided
+        Args:
+            search_iter (int): Current search iteration number.
+
+        Returns:
+            int: Calculated tuning interval, rounded to integer and adjusted to be
+                a multiple of conformal_retraining_frequency.
+        """
+        if self.decay_type == "linear":
+            # Linear increase: interval = initial + decay_rate * iter
+            interval = self.initial_tuning_interval + self.decay_rate * search_iter
+        elif self.decay_type == "exponential":
+            # Exponential increase: interval = initial * (1 + decay_rate)^iter
+            interval = self.initial_tuning_interval * (
+                (1 + self.decay_rate) ** search_iter
+            )
+        elif self.decay_type == "logarithmic":
+            # Logarithmic increase: interval = initial + decay_rate * log(1 + iter)
+            interval = self.initial_tuning_interval + self.decay_rate * np.log(
+                1 + search_iter
+            )
+
+        # Cap at maximum interval
+        interval = min(interval, self.max_tuning_interval)
+
+        # Round to integer and ensure it's a multiple of conformal_retraining_frequency
+        interval = int(round(interval))
+        remainder = interval % self.conformal_retraining_frequency
+        if remainder != 0:
+            interval = interval + (self.conformal_retraining_frequency - remainder)
+
+        # Ensure minimum interval
+        interval = max(interval, self.conformal_retraining_frequency)
+
+        return interval
+
+    def update(self, search_iter: Optional[int] = None) -> None:
+        """Update the optimizer with search iteration information.
+
+        Args:
+            search_iter (int, optional): Current search iteration number. If provided,
+                updates the internal iteration counter used for decay calculations.
+        """
         if search_iter is not None:
             self.current_iter = search_iter
 
-        # Extract the tuning parameters from the arm
-        tuning_count, tuning_interval = arm
-
-        # Calculate efficiency directly (reward/cost)
-        # Avoid division by zero
-        cost = max(cost, 1e-10)
-        efficiency = reward / cost
-
-        logger.debug(
-            f"Observed efficiency: {efficiency:.4f} (reward={reward:.4f}, cost={cost:.4f})"
-        )
-
-        # Store the observation
-        self.X_observed.append([self.current_iter, tuning_count, tuning_interval])
-        self.y_observed.append(efficiency)
-
-        # Try to fit model if we have enough data
-        if len(self.X_observed) >= self.min_observations:
-            self._fit_model()
-
-    def _fit_model(self):
-        """Fit Gaussian Process model to predict efficiency"""
-        if len(self.X_observed) < self.min_observations:
-            return
-
-        # Prepare training data
-        X = np.array(self.X_observed)
-        y = np.array(self.y_observed)
-
-        # Normalize the efficiency values to handle different units
-        y_normalized = self.efficiency_scaler.fit_transform(y.reshape(-1, 1)).ravel()
-
-        # Scale features
-        X_scaled = self.scaler.fit_transform(X)
-
-        try:
-            # Train Gaussian Process model on normalized data
-            self.gp_model.fit(X_scaled, y_normalized)
-            self.model_trained = True
-            logger.debug(f"GP model trained on {len(self.X_observed)} observations")
-
-        except Exception as e:
-            logger.warning(f"Error fitting Gaussian Process model: {e}")
-            self.model_trained = False
-
-    def _expected_improvement(self, mean, std, best_f):
-        """
-        Calculate expected improvement acquisition function
-
-        Args:
-            mean: Predicted mean at candidate points
-            std: Predicted standard deviation at candidate points
-            best_f: Best observed value so far
+    def select_arm(self) -> Tuple[int, int]:
+        """Select the tuning count and interval based on current decay strategy.
 
         Returns:
-            Expected improvement values
+            tuple[int, int]: Tuple containing (n_tuning_episodes, current_tuning_interval).
+                The tuning interval is calculated based on the current iteration
+                and decay parameters.
         """
-        # Handle case where std is very small/zero to avoid numerical issues
-        std = np.maximum(std, 1e-9)
-
-        # Calculate z-score
-        z = (mean - best_f) / std
-
-        # Calculate expected improvement
-        phi_z = norm.cdf(z)
-        phi_z_pdf = norm.pdf(z)
-
-        ei = (mean - best_f) * phi_z + std * phi_z_pdf
-
-        # Apply exploration weight to balance exploration vs exploitation
-        ei = ei * (1 + self.exploration_weight * std)
-
-        return ei
-
-    def select_arm(self) -> Tuple[int, int]:
-        """Select the optimal tuning count and interval using Bayesian optimization"""
-        if not self.model_trained or len(self.X_observed) < self.min_observations:
-            # Not enough data, select random arm
-            count = np.random.randint(1, self.max_tuning_count + 1)
-            interval = np.random.choice(self.valid_intervals)
-            logger.debug(
-                f"Insufficient data, selecting random arm: ({count}, {interval})"
-            )
-            return (count, interval)
-
-        # Generate all possible combinations of tuning count and interval
-        # Use current_iter + 1 to predict for the next iteration
-        next_iter = self.current_iter + 1
-        tuning_counts = np.arange(1, self.max_tuning_count + 1)
-        tuning_intervals = np.array(self.valid_intervals)
-
-        all_combinations = []
-        for count in tuning_counts:
-            for interval in tuning_intervals:
-                all_combinations.append([next_iter, count, interval])
-
-        X_candidates = np.array(all_combinations)
-        X_candidates_scaled = self.scaler.transform(X_candidates)
-
-        # Predict efficiency mean and standard deviation
-        mean_pred, std_pred = self.gp_model.predict(
-            X_candidates_scaled, return_std=True
-        )
-
-        # Find the best observed normalized value so far
-        y_normalized = self.efficiency_scaler.transform(
-            np.array(self.y_observed).reshape(-1, 1)
-        ).ravel()
-        best_observed_value = max(y_normalized) if len(y_normalized) > 0 else 0
-
-        # Calculate expected improvement
-        ei = self._expected_improvement(mean_pred, std_pred, best_observed_value)
-
-        # Find the combination with the highest expected improvement
-        best_idx = np.argmax(ei)
-        _, best_count, best_interval = X_candidates[best_idx]
-
-        logger.debug(
-            f"Selected optimal arm for iter {next_iter}: ({int(best_count)}, {int(best_interval)}) with EI={ei[best_idx]:.4f}"
-        )
-        return (int(best_count), int(best_interval))
+        current_interval = self._calculate_current_interval(self.current_iter)
+        return (self.n_tuning_episodes, current_interval)
 
 
 class FixedSearcherOptimizer:
+    """Fixed searcher optimizer with constant tuning parameters.
+
+    This optimizer returns fixed tuning parameters regardless of search progress.
+    Useful as a baseline or when consistent tuning behavior is desired.
+
+    Args:
+        n_tuning_episodes (int): Number of tuning episodes to perform at each
+            optimization step. Defaults to 10.
+        tuning_interval (int): Fixed tuning interval to use throughout optimization.
+            Defaults to 5.
+        conformal_retraining_frequency (int): Base retraining frequency for validation.
+            The tuning_interval will be adjusted to be a multiple of this value if
+            necessary. Defaults to 1.
+
+    Attributes:
+        fixed_count (int): Fixed number of tuning episodes.
+        fixed_interval (int): Fixed tuning interval, adjusted to be a multiple of
+            conformal_retraining_frequency.
+    """
+
     def __init__(
         self,
         n_tuning_episodes: int = 10,
@@ -224,13 +180,20 @@ class FixedSearcherOptimizer:
             self.fixed_interval = tuning_interval
 
     def select_arm(self) -> Tuple[int, int]:
+        """Select the fixed tuning count and interval.
+
+        Returns:
+            tuple[int, int]: Tuple containing (fixed_count, fixed_interval).
+        """
         return self.fixed_count, self.fixed_interval
 
-    def update(
-        self,
-        arm: Tuple[int, int],
-        reward: float,
-        cost: float,
-        search_iter: Optional[int] = None,
-    ) -> None:
-        """Update method that accepts search_iter for API compatibility"""
+    def update(self, search_iter: Optional[int] = None) -> None:
+        """Update method that accepts search_iter for API compatibility.
+
+        This method does nothing for the fixed optimizer but maintains
+        the same interface as other optimizers.
+
+        Args:
+            search_iter (int, optional): Current search iteration number.
+                Ignored by this optimizer.
+        """

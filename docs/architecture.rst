@@ -120,7 +120,7 @@ Module Organization and Flow
   The ``tuning`` module contains ``ConformalTuner`` which orchestrates the entire optimization process. It depends on data structures from ``wrapping`` and coordinates all other layers.
 
 **Utilities Layer**
-  * ``utils.preprocessing``: Data splitting and outlier handling
+  * ``utils.preprocessing``: Data splitting utilities
   * ``utils.tracking``: Experiment management and progress monitoring
   * ``utils.optimization``: Bayesian optimization algorithms
   * ``utils.configurations.*``: Parameter encoding, sampling, and hashing utilities
@@ -222,12 +222,11 @@ The following diagram shows the complete end-to-end flow with class and method i
 
        subgraph "Data Processing"
            TVS["train_val_split()<br/>data_splitting()"]
-           RIO["remove_iqr_outliers()<br/>outlier_removal()"]
        end
 
-       subgraph "Bayesian Optimization"
-           BSO["BayesianSearcherOptimizer<br/>suggest()<br/>_fit_gp()<br/>_calculate_acquisition()"]
-           FSO["FixedSearcherOptimizer<br/>suggest()<br/>_fixed_suggestions()"]
+       subgraph "Searcher Optimization"
+           DSO["DecayingSearcherOptimizer<br/>select_arm()<br/>_calculate_current_interval()"]
+           FSO["FixedSearcherOptimizer<br/>select_arm()"]
        end
 
        subgraph "Parameter Structures"
@@ -245,7 +244,7 @@ The following diagram shows the complete end-to-end flow with class and method i
        CT --> QCS
        CT --> TVS
        CT --> RIO
-       CT --> BSO
+       CT --> DSO
        CT --> FSO
        CT --> STOP
 
@@ -256,7 +255,7 @@ The following diagram shows the complete end-to-end flow with class and method i
        STUDY --> CCH
        SCM --> GTC
        DCM --> GTC
-       DCM --> BSO
+       DCM --> DSO
 
        %% Acquisition Flow
        LWCS --> LWCE
@@ -344,7 +343,7 @@ The following diagram shows the complete end-to-end flow with class and method i
        style QCS fill:#4ecdc4
        style LWCE fill:#45b7d1
        style QCE fill:#45b7d1
-       style BSO fill:#96ceb4
+       style DSO fill:#96ceb4
        style STUDY fill:#feca57
 
 End-to-End Execution Flow
@@ -380,7 +379,7 @@ Both inherit from ``BaseConformalSearcher`` which provides the common interface 
 
 **Step 3: Data Processing Pipeline**
 
-Raw input data flows through ``train_val_split()`` which creates training, validation, and calibration sets. The ``remove_iqr_outliers()`` function filters statistical outliers. This split data structure maintains proper separation required for conformal prediction coverage guarantees.
+Raw input data flows through ``train_val_split()`` which creates training, validation, and calibration sets. This split data structure maintains proper separation required for conformal prediction coverage guarantees.
 
 For ``LocallyWeightedConformalEstimator``, the training data gets further split:
 
@@ -493,7 +492,7 @@ All conformal searchers need to train on the configuration to performance pairs 
 we tune them? (tune the tuners, sounds circular I know). Decisions about how often to tune the searchers and how many
 tuning trials to perform can be handled by the optimizers:
 
-* ``BayesianSearcherOptimizer`` - fits Gaussian processes with ``_fit_gp()`` and suggests optimal retraining interval and number of tuning trials to perform.
+* ``DecayingSearcherOptimizer`` - increases tuning intervals over time using linear, exponential, or logarithmic decay functions.
 * ``FixedSearcherOptimizer`` - always suggests the same retraining interval and number of tuning trials to perform.
 
 There is also an option to not tune at all.

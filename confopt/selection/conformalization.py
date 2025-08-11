@@ -1,11 +1,10 @@
 import logging
 import numpy as np
 from typing import Optional, Tuple, List, Literal
-from sklearn.metrics import mean_squared_error, mean_pinball_loss
 from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler
 from confopt.wrapping import ConformalBounds
-from confopt.utils.preprocessing import train_val_split, remove_iqr_outliers
+from confopt.utils.preprocessing import train_val_split
 from confopt.selection.estimation import (
     initialize_estimator,
     PointTuner,
@@ -42,7 +41,6 @@ class LocallyWeightedConformalEstimator:
         pe_estimator: Fitted point estimator for conditional mean prediction.
         ve_estimator: Fitted variance estimator for conditional variance prediction.
         nonconformity_scores: Calibration scores from validation set.
-        primary_estimator_error: MSE of point estimator on validation set.
         best_pe_config: Best hyperparameters found for point estimator.
         best_ve_config: Best hyperparameters found for variance estimator.
 
@@ -74,9 +72,6 @@ class LocallyWeightedConformalEstimator:
         adaptive_threshold: int = 50,
         validation_split: float = 0.2,
         normalize_features: bool = True,
-        filter_outliers: bool = False,
-        outlier_scope: str = "top_and_bottom",
-        iqr_factor: float = 1.5,
     ):
         self.point_estimator_architecture = point_estimator_architecture
         self.variance_estimator_architecture = variance_estimator_architecture
@@ -87,13 +82,9 @@ class LocallyWeightedConformalEstimator:
         self.adaptive_threshold = adaptive_threshold
         self.validation_split = validation_split
         self.normalize_features = normalize_features
-        self.filter_outliers = filter_outliers
-        self.outlier_scope = outlier_scope
-        self.iqr_factor = iqr_factor
         self.pe_estimator = None
         self.ve_estimator = None
         self.nonconformity_scores = None
-        self.primary_estimator_error = None
         self.best_pe_config = None
         self.best_ve_config = None
         self.feature_scaler = None
@@ -104,7 +95,7 @@ class LocallyWeightedConformalEstimator:
         y: np.ndarray,
         estimator_architecture: str,
         tuning_iterations: int,
-        min_obs_for_tuning: int = 30,
+        min_obs_for_tuning: int,
         random_state: Optional[int] = None,
         last_best_params: Optional[dict] = None,
     ):
@@ -168,7 +159,32 @@ class LocallyWeightedConformalEstimator:
         return estimator, initialization_params
 
     def _determine_splitting_strategy(self, total_size: int) -> str:
-        """Determine which data splitting strategy to use based on configuration."""
+        """Determine optimal data splitting strategy based on dataset size and configuration.
+
+        Selects between CV+ and train-test split approaches for conformal calibration
+        based on the configured strategy and dataset characteristics. The adaptive
+        strategy automatically chooses the most appropriate method based on data size
+        to balance computational efficiency with calibration stability.
+
+        Args:
+            total_size: Total number of samples in the dataset.
+
+        Returns:
+            Strategy identifier: "cv_plus" or "train_test_split".
+
+        Strategy Selection Logic:
+            - "adaptive": Uses CV+ for small datasets (< adaptive_threshold) to maximize
+              calibration stability, switches to train-test split for larger datasets
+              to improve computational efficiency
+            - "cv_plus": Always uses cross-validation based calibration
+            - "train_test_split": Always uses single split calibration
+
+        Design Rationale:
+            Small datasets benefit from CV+ approach as it provides more stable
+            nonconformity score estimation through cross-validation. Large datasets
+            can use simpler train-test splits for computational efficiency while
+            maintaining adequate calibration due to larger validation sets.
+        """
         if self.calibration_split_strategy == "adaptive":
             return (
                 "cv_plus"
@@ -187,7 +203,48 @@ class LocallyWeightedConformalEstimator:
         best_pe_config: Optional[dict],
         best_ve_config: Optional[dict],
     ):
-        """Fit using CV+ approach following Barber et al. (2019)."""
+        """Fit locally weighted conformal estimator using CV+ calibration strategy.
+
+        Implements the CV+ (Cross-Validation Plus) approach from Barber et al. (2019)
+        for conformal prediction with proper finite-sample coverage guarantees. This
+        method uses k-fold cross-validation for calibration while training final
+        estimators on the complete dataset to maximize predictive performance.
+
+        The approach splits each fold's training data into point estimation and
+        variance estimation subsets, fits both estimators, then computes nonconformity
+        scores on the fold's validation set. Final estimators are trained on all
+        available data using the aggregated calibration scores from all folds.
+
+        Args:
+            X: Input features for training, shape (n_samples, n_features).
+            y: Target values for training, shape (n_samples,).
+            tuning_iterations: Number of hyperparameter search iterations per estimator.
+            min_obs_for_tuning: Minimum samples required to trigger hyperparameter tuning.
+            random_state: Random seed for reproducible fold splits and model initialization.
+            best_pe_config: Warm-start parameters for point estimator hyperparameter search.
+            best_ve_config: Warm-start parameters for variance estimator hyperparameter search.
+
+        Implementation Details:
+            - Uses stratified k-fold splitting with shuffle for robust calibration
+            - Each fold splits training data 75/25 for point/variance estimation
+            - Applies feature scaling within each fold to prevent data leakage
+            - Aggregates nonconformity scores across all validation folds
+            - Trains final estimators on complete dataset with proper scaling
+            - Stores calibration scores for interval quantile computation
+
+        Mathematical Framework:
+            For each fold f with training indices T_f and validation indices V_f:
+            1. Split T_f → (T_pe_f, T_ve_f) for point and variance estimation
+            2. Fit μ̂_f on T_pe_f, compute residuals on T_ve_f
+            3. Fit σ̂²_f on (T_ve_f, |residuals|)
+            4. Compute R_i = |y_i - μ̂_f(x_i)| / max(σ̂_f(x_i), ε) for i ∈ V_f
+            5. Aggregate all R_i across folds for final calibration distribution
+
+        Coverage Properties:
+            Provides finite-sample coverage guarantees under exchangeability assumptions
+            while using all available data for final model training, balancing statistical
+            efficiency with coverage validity.
+        """
         kfold = KFold(
             n_splits=self.n_calibration_folds, shuffle=True, random_state=random_state
         )
@@ -200,18 +257,12 @@ class LocallyWeightedConformalEstimator:
             X_fold_train, X_fold_val = X[train_idx], X[val_idx]
             y_fold_train, y_fold_val = y[train_idx], y[val_idx]
 
-            # Apply scaling within fold if requested
-            if self.normalize_features:
-                fold_scaler = StandardScaler()
-                X_fold_train = fold_scaler.fit_transform(X_fold_train)
-                X_fold_val = fold_scaler.transform(X_fold_val)
-
             # Further split training data for point and variance estimation
             (X_pe, y_pe, X_ve, y_ve) = train_val_split(
                 X_fold_train,
                 y_fold_train,
                 train_split=0.75,
-                normalize=False,  # Already normalized above if requested
+                normalize=False,  # Normalization already applied in fit()
                 random_state=random_state + fold_idx if random_state else None,
             )
 
@@ -256,16 +307,9 @@ class LocallyWeightedConformalEstimator:
                 }
             )
 
-        # Fit final estimators on all data with proper scaling
         (X_pe_final, y_pe_final, X_ve_final, y_ve_final) = train_val_split(
             X, y, train_split=0.75, normalize=False, random_state=random_state
         )
-
-        # Apply scaling to final data if requested
-        if self.normalize_features:
-            self.feature_scaler = StandardScaler()
-            X_pe_final = self.feature_scaler.fit_transform(X_pe_final)
-            X_ve_final = self.feature_scaler.transform(X_ve_final)
 
         self.pe_estimator, self.best_pe_config = self._tune_fit_component_estimator(
             X=X_pe_final,
@@ -291,44 +335,74 @@ class LocallyWeightedConformalEstimator:
         # Store aggregated nonconformity scores
         self.nonconformity_scores = np.array(all_nonconformity_scores)
 
-        # Compute primary estimator error on a held-out portion
-        if len(X) > 20:  # Only if we have enough data
-            test_size = min(10, len(X) // 4)
-            X_test = X[-test_size:]
-            y_test = y[-test_size:]
-            self.primary_estimator_error = mean_squared_error(
-                self.pe_estimator.predict(X_test), y_test
-            )
-        else:
-            self.primary_estimator_error = None
-
     def _fit_train_test_split(
         self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        X_val: np.ndarray,
-        y_val: np.ndarray,
+        X: np.ndarray,
+        y: np.ndarray,
         tuning_iterations: int,
         min_obs_for_tuning: int,
         random_state: Optional[int],
         best_pe_config: Optional[dict],
         best_ve_config: Optional[dict],
     ):
-        """Fit using traditional train-test split approach."""
-        # Apply scaling to train data if requested, fit scaler on training data only
-        if self.normalize_features:
-            self.feature_scaler = StandardScaler()
-            X_train_scaled = self.feature_scaler.fit_transform(X_train)
-            X_val_scaled = self.feature_scaler.transform(X_val)
-        else:
-            X_train_scaled = X_train
-            X_val_scaled = X_val
+        """Fit locally weighted conformal estimator using train-test split calibration.
+
+        Implements the traditional split conformal prediction approach using a single
+        train-validation split for calibration. This method is computationally efficient
+        for larger datasets where cross-validation becomes expensive, while still
+        maintaining finite-sample coverage guarantees.
+
+        The input data is first split into training and validation sets. The training
+        set is further subdivided for point estimation and variance estimation, with
+        the validation set reserved exclusively for nonconformity score computation.
+        Feature scaling is applied consistently across the split to prevent data
+        leakage while ensuring proper normalization.
+
+        Args:
+            X: Input features for training, shape (n_samples, n_features).
+            y: Target values for training, shape (n_samples,).
+            tuning_iterations: Number of hyperparameter search iterations per estimator.
+            min_obs_for_tuning: Minimum samples required to trigger hyperparameter tuning.
+            random_state: Random seed for reproducible data splits and model initialization.
+            best_pe_config: Warm-start parameters for point estimator hyperparameter search.
+            best_ve_config: Warm-start parameters for variance estimator hyperparameter search.
+
+        Implementation Details:
+            - Splits input data into training and validation sets using validation_split
+            - Fits feature scaler on training data only to prevent information leakage
+            - Splits training set 75/25 for point estimation vs variance estimation
+            - Uses validation set exclusively for nonconformity score computation
+            - Applies consistent preprocessing across train/validation splits
+            - Stores single-split calibration scores for interval construction
+
+        Mathematical Framework:
+            1. Split X, y → (X_train, y_train), (X_val, y_val)
+            2. Split X_train → (X_pe, X_ve) and y_train → (y_pe, y_ve)
+            3. Fit point estimator: μ̂(x) on (X_pe, y_pe)
+            4. Compute residuals: r_i = |y_ve_i - μ̂(X_ve_i)| for variance training
+            5. Fit variance estimator: σ̂²(x) on (X_ve, r)
+            6. Compute validation nonconformity: R_i = |y_val_i - μ̂(X_val_i)| / max(σ̂(X_val_i), ε)
+
+        Efficiency Considerations:
+            More computationally efficient than CV+ for large datasets, using single
+            train-validation split instead of k-fold cross-validation. However, may
+            have slightly less stable calibration with smaller validation sets compared
+            to the cross-validation approach.
+        """
+        # Split data internally for train-test approach
+        X_train, y_train, X_val, y_val = train_val_split(
+            X,
+            y,
+            train_split=(1 - self.validation_split),
+            normalize=False,  # Normalization already applied in fit()
+            random_state=random_state,
+        )
 
         (X_pe, y_pe, X_ve, y_ve,) = train_val_split(
-            X_train_scaled,
+            X_train,
             y_train,
             train_split=0.75,
-            normalize=False,  # Already normalized above if requested
+            normalize=False,  # Normalization already applied in fit()
             random_state=random_state,
         )
 
@@ -353,55 +427,19 @@ class LocallyWeightedConformalEstimator:
             last_best_params=best_ve_config,
         )
 
-        var_pred = self.ve_estimator.predict(X_val_scaled)
+        var_pred = self.ve_estimator.predict(X_val)
         var_pred = np.array([max(0.001, x) for x in var_pred])
 
         self.nonconformity_scores = (
-            abs(y_val - self.pe_estimator.predict(X_val_scaled)) / var_pred
+            abs(y_val - self.pe_estimator.predict(X_val)) / var_pred
         )
-
-        self.primary_estimator_error = mean_squared_error(
-            self.pe_estimator.predict(X=X_val_scaled), y_val
-        )
-
-    def _prepare_data(
-        self,
-        X: np.ndarray,
-        y: np.ndarray,
-        random_state: Optional[int] = None,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Prepare input data by applying outlier filtering only.
-
-        Scaling is handled separately in each calibration strategy to prevent data leakage.
-
-        Args:
-            X: Input features, shape (n_samples, n_features).
-            y: Target values, shape (n_samples,).
-            random_state: Random seed for reproducible operations.
-
-        Returns:
-            Tuple of (X_processed, y_processed) arrays.
-        """
-        X_processed = X.copy()
-        y_processed = y.copy()
-
-        # Apply outlier filtering if requested
-        if self.filter_outliers:
-            X_processed, y_processed = remove_iqr_outliers(
-                X=X_processed,
-                y=y_processed,
-                scope=self.outlier_scope,
-                iqr_factor=self.iqr_factor,
-            )
-
-        return X_processed, y_processed
 
     def fit(
         self,
         X: np.array,
         y: np.array,
         tuning_iterations: Optional[int] = 0,
-        min_obs_for_tuning: int = 30,
+        min_obs_for_tuning: int = 50,
         random_state: Optional[int] = None,
         best_pe_config: Optional[dict] = None,
         best_ve_config: Optional[dict] = None,
@@ -410,7 +448,7 @@ class LocallyWeightedConformalEstimator:
 
         Uses adaptive data splitting strategy: CV+ for small datasets, train-test split
         for larger datasets, or explicit strategy selection. Handles data preprocessing
-        including outlier removal and feature scaling internally.
+        including feature scaling applied to the entire dataset.
 
         Args:
             X: Input features, shape (n_samples, n_features).
@@ -423,16 +461,21 @@ class LocallyWeightedConformalEstimator:
         """
         self._fetch_alphas()
 
-        # Prepare data with preprocessing
-        X_processed, y_processed = self._prepare_data(X, y, random_state)
+        # Apply feature scaling to entire dataset if requested
+        if self.normalize_features:
+            self.feature_scaler = StandardScaler()
+            X_scaled = self.feature_scaler.fit_transform(X)
+        else:
+            X_scaled = X
+            self.feature_scaler = None
 
-        total_size = len(X_processed)
+        total_size = len(X)
         strategy = self._determine_splitting_strategy(total_size)
 
         if strategy == "cv_plus":
             self._fit_cv_plus(
-                X_processed,
-                y_processed,
+                X_scaled,
+                y,
                 tuning_iterations,
                 min_obs_for_tuning,
                 random_state,
@@ -440,19 +483,9 @@ class LocallyWeightedConformalEstimator:
                 best_ve_config,
             )
         else:  # train_test_split
-            # Split data internally for train-test approach
-            X_train, y_train, X_val, y_val = train_val_split(
-                X_processed,
-                y_processed,
-                train_split=(1 - self.validation_split),
-                normalize=False,  # Already normalized if requested
-                random_state=random_state,
-            )
             self._fit_train_test_split(
-                X_train,
-                y_train,
-                X_val,
-                y_val,
+                X_scaled,
+                y,
                 tuning_iterations,
                 min_obs_for_tuning,
                 random_state,
@@ -657,7 +690,6 @@ class QuantileConformalEstimator:
         all_quantiles: Sorted list of all required quantiles.
         quantile_indices: Mapping from quantile values to prediction array indices.
         conformalize_predictions: Boolean flag indicating if conformal adjustment is used.
-        primary_estimator_error: Mean pinball loss across all quantiles.
 
     Mathematical Framework:
         For each alpha level α:
@@ -688,9 +720,6 @@ class QuantileConformalEstimator:
         symmetric_adjustment: bool = True,
         validation_split: float = 0.2,
         normalize_features: bool = True,
-        filter_outliers: bool = False,
-        outlier_scope: str = "top_and_bottom",
-        iqr_factor: float = 1.5,
     ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
         self.alphas = alphas
@@ -702,9 +731,6 @@ class QuantileConformalEstimator:
         self.symmetric_adjustment = symmetric_adjustment
         self.validation_split = validation_split
         self.normalize_features = normalize_features
-        self.filter_outliers = filter_outliers
-        self.outlier_scope = outlier_scope
-        self.iqr_factor = iqr_factor
 
         self.quantile_estimator = None
         self.nonconformity_scores = None
@@ -713,12 +739,37 @@ class QuantileConformalEstimator:
         self.all_quantiles = None
         self.quantile_indices = None
         self.conformalize_predictions = False
-        self.primary_estimator_error = None
         self.last_best_params = None
         self.feature_scaler = None
 
     def _determine_splitting_strategy(self, total_size: int) -> str:
-        """Determine which data splitting strategy to use based on configuration."""
+        """Determine optimal data splitting strategy based on dataset size and configuration.
+
+        Selects between CV+ and train-test split approaches for quantile-based conformal
+        calibration based on the configured strategy and dataset characteristics. The
+        adaptive strategy automatically chooses the most appropriate method based on
+        data size to balance computational efficiency with calibration stability.
+
+        Args:
+            total_size: Total number of samples in the dataset.
+
+        Returns:
+            Strategy identifier: "cv_plus" or "train_test_split".
+
+        Strategy Selection Logic:
+            - "adaptive": Uses CV+ for small datasets (< adaptive_threshold) to maximize
+              calibration stability through cross-validation, switches to train-test
+              split for larger datasets to improve computational efficiency
+            - "cv_plus": Always uses cross-validation based calibration
+            - "train_test_split": Always uses single split calibration
+
+        Design Rationale:
+            Small datasets benefit from CV+ approach as it provides more stable
+            nonconformity score estimation through cross-validation, particularly
+            important for quantile-based methods where score stability affects
+            coverage reliability. Large datasets can use simpler train-test splits
+            for computational efficiency while maintaining adequate calibration.
+        """
         if self.calibration_split_strategy == "adaptive":
             return (
                 "cv_plus"
@@ -738,14 +789,47 @@ class QuantileConformalEstimator:
         random_state: Optional[int],
         last_best_params: Optional[dict],
     ):
-        """Fit without conformal calibration."""
-        # Apply scaling if requested
-        if self.normalize_features:
-            self.feature_scaler = StandardScaler()
-            X_scaled = self.feature_scaler.fit_transform(X)
-        else:
-            X_scaled = X
+        """Fit quantile estimator without conformal calibration for small datasets.
 
+        Trains a quantile regression model directly on the provided data without
+        applying conformal prediction adjustments. This mode is used when the dataset
+        is too small for reliable conformal calibration (below n_pre_conformal_trials
+        threshold), providing direct quantile predictions instead of conformally
+        adjusted intervals.
+
+        While this approach loses the finite-sample coverage guarantees of conformal
+        prediction, it may provide more reliable predictions when calibration data
+        is insufficient. The estimator assumes the quantile regression model can
+        accurately capture the conditional quantiles of the target distribution.
+
+        Args:
+            X: Input features for training, shape (n_samples, n_features).
+            y: Target values for training, shape (n_samples,).
+            all_quantiles: Sorted list of quantile levels to estimate, in [0, 1].
+            current_alphas: Alpha levels for coverage (used for context, not calibration).
+            tuning_iterations: Number of hyperparameter search iterations.
+            min_obs_for_tuning: Minimum samples required to trigger hyperparameter tuning.
+            random_state: Random seed for reproducible model initialization.
+            last_best_params: Warm-start parameters from previous hyperparameter search.
+
+        Implementation Details:
+            - Applies feature scaling if requested (fits scaler on all available data)
+            - Uses hyperparameter tuning when sufficient data and iterations available
+            - Falls back to default parameters for small datasets or when tuning disabled
+            - Fits single quantile regression model for all required quantile levels
+            - Sets conformalize_predictions flag to False for prediction behavior
+
+        Mathematical Framework:
+            Directly estimates conditional quantiles: Q̂_τ(x) = argmin E[ρ_τ(Y - q)]
+            where ρ_τ(u) = u(τ - I(u < 0)) is the quantile loss function.
+
+            Prediction intervals: [Q̂_α/2(x), Q̂_1-α/2(x)] without conformal adjustments.
+
+        Usage Context:
+            Automatically selected when dataset size < n_pre_conformal_trials, typically
+            for exploratory analysis or when conformal calibration is not feasible due
+            to data limitations. Users should be aware of the lack of coverage guarantees.
+        """
         forced_param_configurations = []
 
         if last_best_params is not None:
@@ -759,7 +843,7 @@ class QuantileConformalEstimator:
         if tuning_iterations > 1 and len(X) > min_obs_for_tuning:
             tuner = QuantileTuner(random_state=random_state, quantiles=all_quantiles)
             initialization_params = tuner.tune(
-                X=X_scaled,
+                X=X,
                 y=y,
                 estimator_architecture=self.quantile_estimator_architecture,
                 n_searches=tuning_iterations,
@@ -777,40 +861,10 @@ class QuantileConformalEstimator:
             initialization_params=initialization_params,
             random_state=random_state,
         )
-        self.quantile_estimator.fit(X_scaled, y, quantiles=all_quantiles)
+        self.quantile_estimator.fit(X, y, quantiles=all_quantiles)
         self.conformalize_predictions = False
 
-        # Compute performance on held-out data if available
-        if len(X) > 20:
-            test_size = min(10, len(X) // 4)
-            X_test = X[-test_size:]
-            y_test = y[-test_size:]
-
-            # Apply same scaling to test data if scaler was fitted
-            if self.normalize_features and self.feature_scaler is not None:
-                X_test_scaled = self.feature_scaler.transform(X_test)
-            else:
-                X_test_scaled = X_test
-
-            scores = []
-            for alpha in current_alphas:
-                lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
-                lower_idx = self.quantile_indices[lower_quantile]
-                upper_idx = self.quantile_indices[upper_quantile]
-
-                predictions = self.quantile_estimator.predict(X_test_scaled)
-                lo_y_pred = predictions[:, lower_idx]
-                hi_y_pred = predictions[:, upper_idx]
-
-                lo_score = mean_pinball_loss(y_test, lo_y_pred, alpha=lower_quantile)
-                hi_score = mean_pinball_loss(y_test, hi_y_pred, alpha=upper_quantile)
-                scores.extend([lo_score, hi_score])
-
-            self.primary_estimator_error = np.mean(scores)
-        else:
-            self.primary_estimator_error = None
-
-    def _fit_cv_plus_quantile(
+    def _fit_cv_plus(
         self,
         X: np.ndarray,
         y: np.ndarray,
@@ -821,7 +875,52 @@ class QuantileConformalEstimator:
         random_state: Optional[int],
         last_best_params: Optional[dict],
     ):
-        """Fit using CV+ approach for quantile conformal prediction."""
+        """Fit quantile conformal estimator using CV+ calibration strategy.
+
+        Implements the CV+ (Cross-Validation Plus) approach adapted for quantile-based
+        conformal prediction. This method uses k-fold cross-validation for nonconformity
+        score calibration while training the final quantile estimator on the complete
+        dataset to maximize predictive performance and ensure finite-sample coverage.
+
+        Each fold trains a quantile regression model and computes nonconformity scores
+        on the fold's validation set. The scores are aggregated across all folds to
+        create a robust calibration distribution. The final estimator is trained on
+        all available data using the aggregated calibration scores.
+
+        Args:
+            X: Input features for training, shape (n_samples, n_features).
+            y: Target values for training, shape (n_samples,).
+            all_quantiles: Sorted list of quantile levels to estimate, in [0, 1].
+            current_alphas: Alpha levels for coverage, determining required quantiles.
+            tuning_iterations: Number of hyperparameter search iterations per fold and final fit.
+            min_obs_for_tuning: Minimum samples required to trigger hyperparameter tuning.
+            random_state: Random seed for reproducible fold splits and model initialization.
+            last_best_params: Warm-start parameters for quantile estimator hyperparameter search.
+
+        Implementation Details:
+            - Uses stratified k-fold splitting with shuffle for robust calibration
+            - Applies feature scaling within each fold to prevent data leakage
+            - Performs hyperparameter tuning within each fold when data permits
+            - Supports both symmetric and asymmetric nonconformity score computation
+            - Aggregates scores across all validation folds for final calibration
+            - Trains final quantile estimator on complete dataset with proper scaling
+
+        Mathematical Framework:
+            For each fold f with training indices T_f and validation indices V_f:
+            1. Fit quantile estimator Q̂_f(x, τ) on T_f for all τ ∈ all_quantiles
+            2. For each alpha level α, compute validation nonconformity scores:
+               - Symmetric: R_i = max(Q̂_f(x_i, α/2) - y_i, y_i - Q̂_f(x_i, 1-α/2))
+               - Asymmetric: R_L_i = Q̂_f(x_i, α/2) - y_i, R_U_i = y_i - Q̂_f(x_i, 1-α/2)
+            3. Aggregate scores across folds: {R_i}_{i ∈ ∪_f V_f}
+
+        Adjustment Types:
+            - Symmetric: Uses single adjustment C = quantile(R, 1-α) for both bounds
+            - Asymmetric: Uses separate adjustments C_L, C_U for lower/upper bounds
+
+        Coverage Properties:
+            Provides finite-sample coverage guarantees under exchangeability while
+            using all data for final model training, balancing efficiency and validity.
+        """
         kfold = KFold(
             n_splits=self.n_calibration_folds, shuffle=True, random_state=random_state
         )
@@ -846,15 +945,6 @@ class QuantileConformalEstimator:
             X_fold_train, X_fold_val = X[train_idx], X[val_idx]
             y_fold_train, y_fold_val = y[train_idx], y[val_idx]
 
-            # Apply scaling within fold if requested
-            if self.normalize_features:
-                fold_scaler = StandardScaler()
-                X_fold_train_scaled = fold_scaler.fit_transform(X_fold_train)
-                X_fold_val_scaled = fold_scaler.transform(X_fold_val)
-            else:
-                X_fold_train_scaled = X_fold_train
-                X_fold_val_scaled = X_fold_val
-
             # Fit quantile estimator on fold training data with tuning
             if tuning_iterations > 1 and len(X_fold_train) > min_obs_for_tuning:
                 tuner = QuantileTuner(
@@ -862,7 +952,7 @@ class QuantileConformalEstimator:
                     quantiles=all_quantiles,
                 )
                 fold_initialization_params = tuner.tune(
-                    X=X_fold_train_scaled,
+                    X=X_fold_train,
                     y=y_fold_train,
                     estimator_architecture=self.quantile_estimator_architecture,
                     n_searches=tuning_iterations,
@@ -880,12 +970,10 @@ class QuantileConformalEstimator:
                 initialization_params=fold_initialization_params,
                 random_state=random_state + fold_idx if random_state else None,
             )
-            fold_estimator.fit(
-                X_fold_train_scaled, y_fold_train, quantiles=all_quantiles
-            )
+            fold_estimator.fit(X_fold_train, y_fold_train, quantiles=all_quantiles)
 
             # Compute nonconformity scores on validation fold
-            val_prediction = fold_estimator.predict(X_fold_val_scaled)
+            val_prediction = fold_estimator.predict(X_fold_val)
 
             for i, alpha in enumerate(current_alphas):
                 lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
@@ -918,18 +1006,11 @@ class QuantileConformalEstimator:
                 np.array(scores) for scores in all_upper_scores
             ]
 
-        # Apply scaling to final data if requested
-        if self.normalize_features:
-            self.feature_scaler = StandardScaler()
-            X_scaled = self.feature_scaler.fit_transform(X)
-        else:
-            X_scaled = X
-
         # Fit final estimator on all data with tuning
         if tuning_iterations > 1 and len(X) > min_obs_for_tuning:
             tuner = QuantileTuner(random_state=random_state, quantiles=all_quantiles)
             final_initialization_params = tuner.tune(
-                X=X_scaled,
+                X=X,
                 y=y,
                 estimator_architecture=self.quantile_estimator_architecture,
                 n_searches=tuning_iterations,
@@ -947,45 +1028,13 @@ class QuantileConformalEstimator:
             initialization_params=final_initialization_params,
             random_state=random_state,
         )
-        self.quantile_estimator.fit(X_scaled, y, quantiles=all_quantiles)
+        self.quantile_estimator.fit(X, y, quantiles=all_quantiles)
         self.conformalize_predictions = True
 
-        # Compute performance metrics on a held-out portion if possible
-        if len(X) > 20:
-            test_size = min(10, len(X) // 4)
-            X_test = X[-test_size:]
-            y_test = y[-test_size:]
-
-            # Apply same scaling to test data if scaler was fitted
-            if self.normalize_features and self.feature_scaler is not None:
-                X_test_scaled = self.feature_scaler.transform(X_test)
-            else:
-                X_test_scaled = X_test
-
-            scores = []
-            for alpha in current_alphas:
-                lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
-                lower_idx = self.quantile_indices[lower_quantile]
-                upper_idx = self.quantile_indices[upper_quantile]
-
-                predictions = self.quantile_estimator.predict(X_test_scaled)
-                lo_y_pred = predictions[:, lower_idx]
-                hi_y_pred = predictions[:, upper_idx]
-
-                lo_score = mean_pinball_loss(y_test, lo_y_pred, alpha=lower_quantile)
-                hi_score = mean_pinball_loss(y_test, hi_y_pred, alpha=upper_quantile)
-                scores.extend([lo_score, hi_score])
-
-            self.primary_estimator_error = np.mean(scores)
-        else:
-            self.primary_estimator_error = None
-
-    def _fit_train_test_split_quantile(
+    def _fit_train_test_split(
         self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        X_val: np.ndarray,
-        y_val: np.ndarray,
+        X: np.ndarray,
+        y: np.ndarray,
         all_quantiles: List[float],
         current_alphas: List[float],
         tuning_iterations: int,
@@ -993,15 +1042,63 @@ class QuantileConformalEstimator:
         random_state: Optional[int],
         last_best_params: Optional[dict],
     ):
-        """Fit using traditional train-test split approach."""
-        # Apply scaling to train data if requested, fit scaler on training data only
-        if self.normalize_features:
-            self.feature_scaler = StandardScaler()
-            X_train_scaled = self.feature_scaler.fit_transform(X_train)
-            X_val_scaled = self.feature_scaler.transform(X_val)
-        else:
-            X_train_scaled = X_train
-            X_val_scaled = X_val
+        """Fit quantile conformal estimator using train-test split calibration.
+
+        Implements the traditional split conformal prediction approach for quantile-based
+        estimation using a single train-validation split. This method is computationally
+        efficient for larger datasets where cross-validation becomes expensive, while
+        maintaining finite-sample coverage guarantees through proper calibration.
+
+        The input data is first split into training and validation sets. The quantile
+        estimator is trained on the training set and validated on the separate validation
+        set to compute nonconformity scores. Feature scaling is applied consistently
+        across the split to prevent data leakage while ensuring proper normalization
+        for the quantile regression model.
+
+        Args:
+            X: Input features for training, shape (n_samples, n_features).
+            y: Target values for training, shape (n_samples,).
+            all_quantiles: Sorted list of quantile levels to estimate, in [0, 1].
+            current_alphas: Alpha levels for coverage, determining required quantiles.
+            tuning_iterations: Number of hyperparameter search iterations.
+            min_obs_for_tuning: Minimum samples required to trigger hyperparameter tuning.
+            random_state: Random seed for reproducible data splits and model initialization.
+            last_best_params: Warm-start parameters for quantile estimator hyperparameter search.
+
+        Implementation Details:
+            - Splits input data into training and validation sets using validation_split
+            - Fits feature scaler on training data only to prevent information leakage
+            - Performs hyperparameter tuning on training set when data permits
+            - Uses validation set exclusively for nonconformity score computation
+            - Supports both symmetric and asymmetric conformal adjustments
+            - Handles empty validation sets gracefully (falls back to non-conformal mode)
+
+        Mathematical Framework:
+            1. Split X, y → (X_train, y_train), (X_val, y_val)
+            2. Fit quantile estimator Q̂(x, τ) on (X_train, y_train) for all τ ∈ all_quantiles
+            3. For each alpha level α and validation point (x_i, y_i):
+               - Symmetric: R_i = max(Q̂(x_i, α/2) - y_i, y_i - Q̂(x_i, 1-α/2))
+               - Asymmetric: R_L_i = Q̂(x_i, α/2) - y_i, R_U_i = y_i - Q̂(x_i, 1-α/2)
+            4. Store {R_i}_{i=1}^{n_val} for conformal adjustment during prediction
+
+        Efficiency Considerations:
+            More computationally efficient than CV+ for large datasets, using single
+            train-validation split instead of k-fold cross-validation. However, may
+            have less stable calibration with smaller validation sets compared to
+            the cross-validation approach, especially for asymmetric adjustments.
+
+        Edge Cases:
+            When validation set is empty, automatically disables conformal adjustment
+            and falls back to direct quantile prediction mode for robustness.
+        """
+        # Split data internally for train-test approach
+        X_train, y_train, X_val, y_val = train_val_split(
+            X,
+            y,
+            train_split=(1 - self.validation_split),
+            normalize=False,  # Normalization already applied in fit()
+            random_state=random_state,
+        )
 
         forced_param_configurations = []
 
@@ -1016,7 +1113,7 @@ class QuantileConformalEstimator:
         if tuning_iterations > 1 and len(X_train) > min_obs_for_tuning:
             tuner = QuantileTuner(random_state=random_state, quantiles=all_quantiles)
             initialization_params = tuner.tune(
-                X=X_train_scaled,
+                X=X_train,
                 y=y_train,
                 estimator_architecture=self.quantile_estimator_architecture,
                 n_searches=tuning_iterations,
@@ -1034,7 +1131,7 @@ class QuantileConformalEstimator:
             initialization_params=initialization_params,
             random_state=random_state,
         )
-        self.quantile_estimator.fit(X_train_scaled, y_train, quantiles=all_quantiles)
+        self.quantile_estimator.fit(X_train, y_train, quantiles=all_quantiles)
 
         # Compute nonconformity scores on validation set if available
         if len(X_val) > 0:
@@ -1044,7 +1141,7 @@ class QuantileConformalEstimator:
                 self.lower_nonconformity_scores = [np.array([]) for _ in current_alphas]
                 self.upper_nonconformity_scores = [np.array([]) for _ in current_alphas]
 
-            val_prediction = self.quantile_estimator.predict(X_val_scaled)
+            val_prediction = self.quantile_estimator.predict(X_val)
 
             for i, alpha in enumerate(current_alphas):
                 lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
@@ -1066,64 +1163,15 @@ class QuantileConformalEstimator:
                     )
 
             self.conformalize_predictions = True
-
-            # Compute performance metrics
-            scores = []
-            for alpha in current_alphas:
-                lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
-                lower_idx = self.quantile_indices[lower_quantile]
-                upper_idx = self.quantile_indices[upper_quantile]
-
-                lo_y_pred = val_prediction[:, lower_idx]
-                hi_y_pred = val_prediction[:, upper_idx]
-
-                lo_score = mean_pinball_loss(y_val, lo_y_pred, alpha=lower_quantile)
-                hi_score = mean_pinball_loss(y_val, hi_y_pred, alpha=upper_quantile)
-                scores.extend([lo_score, hi_score])
-
-            self.primary_estimator_error = np.mean(scores)
         else:
             self.conformalize_predictions = False
-            self.primary_estimator_error = None
-
-    def _prepare_data(
-        self,
-        X: np.ndarray,
-        y: np.ndarray,
-        random_state: Optional[int] = None,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Prepare input data by applying outlier filtering only.
-
-        Scaling is handled separately in each calibration strategy to prevent data leakage.
-
-        Args:
-            X: Input features, shape (n_samples, n_features).
-            y: Target values, shape (n_samples,).
-            random_state: Random seed for reproducible operations.
-
-        Returns:
-            Tuple of (X_processed, y_processed) arrays.
-        """
-        X_processed = X.copy()
-        y_processed = y.copy()
-
-        # Apply outlier filtering if requested
-        if self.filter_outliers:
-            X_processed, y_processed = remove_iqr_outliers(
-                X=X_processed,
-                y=y_processed,
-                scope=self.outlier_scope,
-                iqr_factor=self.iqr_factor,
-            )
-
-        return X_processed, y_processed
 
     def fit(
         self,
         X: np.array,
         y: np.array,
         tuning_iterations: Optional[int] = 0,
-        min_obs_for_tuning: int = 30,
+        min_obs_for_tuning: int = 50,
         random_state: Optional[int] = None,
         last_best_params: Optional[dict] = None,
     ):
@@ -1132,7 +1180,7 @@ class QuantileConformalEstimator:
         Uses adaptive data splitting strategy: CV+ for small datasets, train-test split
         for larger datasets, or explicit strategy selection. Supports both symmetric
         and asymmetric conformal adjustments. Handles data preprocessing including
-        outlier removal and feature scaling internally.
+        feature scaling applied to the entire dataset.
 
         Args:
             X: Input features, shape (n_samples, n_features).
@@ -1144,6 +1192,14 @@ class QuantileConformalEstimator:
         """
         current_alphas = self._fetch_alphas()
 
+        # Apply feature scaling to entire dataset if requested
+        if self.normalize_features:
+            self.feature_scaler = StandardScaler()
+            X_scaled = self.feature_scaler.fit_transform(X)
+        else:
+            X_scaled = X
+            self.feature_scaler = None
+
         all_quantiles = []
         for alpha in current_alphas:
             lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
@@ -1153,19 +1209,16 @@ class QuantileConformalEstimator:
 
         self.quantile_indices = {q: i for i, q in enumerate(all_quantiles)}
 
-        # Prepare data with preprocessing
-        X_processed, y_processed = self._prepare_data(X, y, random_state)
-
-        total_size = len(X_processed)
+        total_size = len(X)
         use_conformal = total_size > self.n_pre_conformal_trials
 
         if use_conformal:
             strategy = self._determine_splitting_strategy(total_size)
 
             if strategy == "cv_plus":
-                self._fit_cv_plus_quantile(
-                    X_processed,
-                    y_processed,
+                self._fit_cv_plus(
+                    X_scaled,
+                    y,
                     all_quantiles,
                     current_alphas,
                     tuning_iterations,
@@ -1174,19 +1227,9 @@ class QuantileConformalEstimator:
                     last_best_params,
                 )
             else:  # train_test_split
-                # Split data internally for train-test approach
-                X_train, y_train, X_val, y_val = train_val_split(
-                    X_processed,
-                    y_processed,
-                    train_split=(1 - self.validation_split),
-                    normalize=False,  # Already normalized if requested
-                    random_state=random_state,
-                )
-                self._fit_train_test_split_quantile(
-                    X_train,
-                    y_train,
-                    X_val,
-                    y_val,
+                self._fit_train_test_split(
+                    X_scaled,
+                    y,
                     all_quantiles,
                     current_alphas,
                     tuning_iterations,
@@ -1197,8 +1240,8 @@ class QuantileConformalEstimator:
 
         else:
             self._fit_non_conformal(
-                X_processed,
-                y_processed,
+                X_scaled,
+                y,
                 all_quantiles,
                 current_alphas,
                 tuning_iterations,

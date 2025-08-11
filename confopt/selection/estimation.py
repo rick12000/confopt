@@ -159,7 +159,7 @@ class RandomTuner:
         y: np.array,
         estimator_architecture: str,
         n_searches: int,
-        train_split: float = 0.8,
+        train_split: float = 0.66,
         split_type: Literal["k_fold", "ordinal_split"] = "k_fold",
         forced_param_configurations: Optional[List[Dict]] = None,
     ) -> Dict:
@@ -260,7 +260,7 @@ class RandomTuner:
         estimator_config: EstimatorConfig,
         X: np.array,
         y: np.array,
-        train_split: float = 0.8,
+        train_split: float = 0.66,
         split_type: Literal["k_fold", "ordinal_split"] = "k_fold",
     ) -> Tuple[List[Dict], List[float]]:
         """Evaluate parameter configurations via cross-validation.

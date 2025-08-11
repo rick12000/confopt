@@ -124,21 +124,21 @@ Optimizers control how the surrogate models tune their own hyperparameters.
 **Optimizer Frameworks**
 
 * ``None``: No tuning.
-* ``'reward_cost'``: Tune parameters after X sampling episodes, with Y hyperparameter combinations, where X and Y are selected dynamically by a Bayesian optimization algorithm.
+* ``'decaying'``: Tune parameters with increasing intervals over time, using configurable decay functions (linear, exponential, or logarithmic).
 * ``'fixed'``: Tune parameters after each sampling episode, with a fixed number (10) of hyperparameter combinations.
 
 **Which Should I Use?**
 
 * Use ``None`` if the model you want to tune (not the surrogate model) trains very quickly (less than 10 seconds) or on little data.
-* Use ``'reward_cost'`` if the model you want to tune takes longer than 10 seconds to train.
-* Use ``'fixed'`` if the model you want to tune takes longer than a few minutes to train, and you always want to force the surrogate model to tune its hyperparameters.
+* Use ``'decaying'`` if you want adaptive tuning that starts intensive and becomes less frequent over time.
+* Use ``'fixed'`` if you want consistent tuning behavior throughout the optimization process.
 
 **Example:**
 
 .. code-block:: python
 
    tuner.tune(
-       optimizer_framework='reward_cost',
+       optimizer_framework='decaying',
        conformal_retraining_frequency=2,
        max_searches=200,
        verbose=True
