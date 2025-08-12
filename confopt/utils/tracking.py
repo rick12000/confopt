@@ -391,12 +391,18 @@ class StaticConfigurationManager(BaseConfigurationManager):
         """
         # Remove already searched and banned configs from cache
         banned_hashes = set(create_config_hash(c) for c in self.banned_configurations)
-        self.cached_searchable_configs = [
-            c
-            for c in self.cached_searchable_configs
-            if create_config_hash(c) not in self.searched_config_hashes
-            and create_config_hash(c) not in banned_hashes
-        ]
+
+        # Filter cache without repeated hash computation or in-place modification
+        filtered_configs = []
+        for c in self.cached_searchable_configs:
+            config_hash = create_config_hash(c)
+            if (
+                config_hash not in self.searched_config_hashes
+                and config_hash not in banned_hashes
+            ):
+                filtered_configs.append(c)
+
+        self.cached_searchable_configs = filtered_configs
         return self.cached_searchable_configs.copy()
 
     def mark_as_searched(self, config: dict, performance: float) -> None:

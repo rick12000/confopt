@@ -536,7 +536,7 @@ class ConformalTuner:
             X = self.config_manager.tabularize_configs(
                 self.config_manager.searched_configs
             )
-            y = np.array(self.config_manager.searched_performances)
+            y = np.array(self.config_manager.searched_performances) * self.metric_sign
 
             searchable_configs = self.config_manager.get_searchable_configurations()
             X_searchable = self.config_manager.tabularize_configs(searchable_configs)
@@ -573,17 +573,25 @@ class ConformalTuner:
             transformed_config = self.config_manager.tabularize_configs([next_config])
 
             lower_bound, upper_bound = self.get_interval_if_applicable(
-                searcher, self.config_manager.tabularize_configs([next_config])
+                searcher, transformed_config
             )
-            signed_lower_bound = (
-                (lower_bound * self.metric_sign) if lower_bound is not None else None
-            )
-            signed_upper_bound = (
-                (upper_bound * self.metric_sign) if upper_bound is not None else None
-            )
+            # Convert bounds back to original units and handle interval orientation
+            if lower_bound is not None and upper_bound is not None:
+                converted_lower = lower_bound * self.metric_sign
+                converted_upper = upper_bound * self.metric_sign
+                # For maximization (metric_sign = -1), swap bounds to maintain proper ordering
+                if self.metric_optimization == "maximize":
+                    signed_lower_bound = converted_upper  # What was upper becomes lower
+                    signed_upper_bound = converted_lower  # What was lower becomes upper
+                else:
+                    signed_lower_bound = converted_lower
+                    signed_upper_bound = converted_upper
+            else:
+                signed_lower_bound = None
+                signed_upper_bound = None
 
             signed_performance = self.metric_sign * performance
-            searcher.update(X=transformed_config, y_true=signed_performance)
+            searcher.update(X=transformed_config.flatten(), y_true=signed_performance)
 
             self.config_manager.mark_as_searched(next_config, performance)
             trial = Trial(
