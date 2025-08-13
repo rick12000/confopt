@@ -393,7 +393,7 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
         ],
         n_calibration_folds: int = 3,
         calibration_split_strategy: Literal[
-            "cv_plus", "train_test_split", "adaptive"
+            "cv", "train_test_split", "adaptive"
         ] = "adaptive",
     ):
         super().__init__(sampler)
@@ -676,7 +676,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         n_pre_conformal_trials: int = 32,
         n_calibration_folds: int = 3,
         calibration_split_strategy: Literal[
-            "cv_plus", "train_test_split", "adaptive"
+            "cv", "train_test_split", "adaptive"
         ] = "adaptive",
         symmetric_adjustment: bool = True,
     ):

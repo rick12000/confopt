@@ -16,6 +16,16 @@ from copy import deepcopy
 logger = logging.getLogger(__name__)
 
 
+def set_calibration_split(n_observations: int) -> float:
+    """Set to 20%, but limit to between 4 and 8 observations
+    since we tend to only need at most 4 quantiles for conformal search"""
+    candidate_split = 0.2
+    if candidate_split * n_observations < 4:
+        return 4 / n_observations
+    else:
+        return candidate_split
+
+
 class LocallyWeightedConformalEstimator:
     """Locally weighted conformal predictor with adaptive variance modeling.
 
@@ -67,10 +77,9 @@ class LocallyWeightedConformalEstimator:
         alphas: List[float],
         n_calibration_folds: int = 3,
         calibration_split_strategy: Literal[
-            "cv_plus", "train_test_split", "adaptive"
+            "cv", "train_test_split", "adaptive"
         ] = "adaptive",
         adaptive_threshold: int = 50,
-        validation_split: float = 0.2,
         normalize_features: bool = True,
     ):
         self.point_estimator_architecture = point_estimator_architecture
@@ -80,7 +89,6 @@ class LocallyWeightedConformalEstimator:
         self.n_calibration_folds = n_calibration_folds
         self.calibration_split_strategy = calibration_split_strategy
         self.adaptive_threshold = adaptive_threshold
-        self.validation_split = validation_split
         self.normalize_features = normalize_features
         self.pe_estimator = None
         self.ve_estimator = None
@@ -161,7 +169,7 @@ class LocallyWeightedConformalEstimator:
     def _determine_splitting_strategy(self, total_size: int) -> str:
         """Determine optimal data splitting strategy based on dataset size and configuration.
 
-        Selects between CV+ and train-test split approaches for conformal calibration
+        Selects between cross-validation (CV) and train-test split approaches for conformal calibration
         based on the configured strategy and dataset characteristics. The adaptive
         strategy automatically chooses the most appropriate method based on data size
         to balance computational efficiency with calibration stability.
@@ -170,30 +178,26 @@ class LocallyWeightedConformalEstimator:
             total_size: Total number of samples in the dataset.
 
         Returns:
-            Strategy identifier: "cv_plus" or "train_test_split".
+            Strategy identifier: "cv" or "train_test_split".
 
         Strategy Selection Logic:
-            - "adaptive": Uses CV+ for small datasets (< adaptive_threshold) to maximize
-              calibration stability, switches to train-test split for larger datasets
-              to improve computational efficiency
-            - "cv_plus": Always uses cross-validation based calibration
+            - "adaptive": Uses CV for small datasets (< adaptive_threshold) to improve
+              calibration stability with fewer folds, then switches to train-test split
+              for larger datasets to improve computational efficiency
+            - "cv": Always uses cross-validation-based calibration (CV, not CV+)
             - "train_test_split": Always uses single split calibration
 
         Design Rationale:
-            Small datasets benefit from CV+ approach as it provides more stable
-            nonconformity score estimation through cross-validation. Large datasets
-            can use simpler train-test splits for computational efficiency while
-            maintaining adequate calibration due to larger validation sets.
+            Small datasets benefit from CV-based calibration which provides more stable
+            nonconformity score estimation than a single split while typically requiring
+            fewer folds. Note: CV (not CV+) offers weaker distribution-free guarantees
+            than CV+ [Foygel Barber et al., 2019], but is often effective in practice.
         """
         if self.calibration_split_strategy == "adaptive":
-            return (
-                "cv_plus"
-                if total_size < self.adaptive_threshold
-                else "train_test_split"
-            )
+            return "cv" if total_size < self.adaptive_threshold else "train_test_split"
         return self.calibration_split_strategy
 
-    def _fit_cv_plus(
+    def _fit_cv(
         self,
         X: np.ndarray,
         y: np.ndarray,
@@ -203,12 +207,14 @@ class LocallyWeightedConformalEstimator:
         best_pe_config: Optional[dict],
         best_ve_config: Optional[dict],
     ):
-        """Fit locally weighted conformal estimator using CV+ calibration strategy.
+        """Fit locally weighted conformal estimator using cross-validation (CV).
 
-        Implements the CV+ (Cross-Validation Plus) approach from Barber et al. (2019)
-        for conformal prediction with proper finite-sample coverage guarantees. This
-        method uses k-fold cross-validation for calibration while training final
-        estimators on the complete dataset to maximize predictive performance.
+        Uses k-fold cross-validation for calibration while training final estimators
+        on the complete dataset to maximize predictive performance. This is a CV-based
+        conformal calibration procedure (not CV+): it aggregates out-of-fold
+        nonconformity scores across folds and then fits the final models on all data.
+        Compared to CV+ [Foygel Barber et al., 2019], this typically provides weaker
+        distribution-free guarantees but works well with fewer folds.
 
         The approach splits each fold's training data into point estimation and
         variance estimation subsets, fits both estimators, then computes nonconformity
@@ -241,9 +247,8 @@ class LocallyWeightedConformalEstimator:
             5. Aggregate all R_i across folds for final calibration distribution
 
         Coverage Properties:
-            Provides finite-sample coverage guarantees under exchangeability assumptions
-            while using all available data for final model training, balancing statistical
-            efficiency with coverage validity.
+            Provides practical coverage under exchangeability assumptions, but offers
+            weaker formal guarantees than CV+; in return, it is effective with fewer folds.
         """
         kfold = KFold(
             n_splits=self.n_calibration_folds, shuffle=True, random_state=random_state
@@ -263,7 +268,7 @@ class LocallyWeightedConformalEstimator:
                 y_fold_train,
                 train_split=0.75,
                 normalize=False,  # Normalization already applied in fit()
-                random_state=random_state + fold_idx if random_state else None,
+                random_state=random_state if random_state else None,
             )
 
             # Fit point estimator
@@ -273,7 +278,7 @@ class LocallyWeightedConformalEstimator:
                 estimator_architecture=self.point_estimator_architecture,
                 tuning_iterations=tuning_iterations,
                 min_obs_for_tuning=min_obs_for_tuning,
-                random_state=random_state + fold_idx if random_state else None,
+                random_state=random_state if random_state else None,
                 last_best_params=best_pe_config,
             )
 
@@ -285,7 +290,7 @@ class LocallyWeightedConformalEstimator:
                 estimator_architecture=self.variance_estimator_architecture,
                 tuning_iterations=tuning_iterations,
                 min_obs_for_tuning=min_obs_for_tuning,
-                random_state=random_state + fold_idx if random_state else None,
+                random_state=random_state if random_state else None,
                 last_best_params=best_ve_config,
             )
 
@@ -368,7 +373,6 @@ class LocallyWeightedConformalEstimator:
             best_ve_config: Warm-start parameters for variance estimator hyperparameter search.
 
         Implementation Details:
-            - Splits input data into training and validation sets using validation_split
             - Fits feature scaler on training data only to prevent information leakage
             - Splits training set 75/25 for point estimation vs variance estimation
             - Uses validation set exclusively for nonconformity score computation
@@ -384,16 +388,16 @@ class LocallyWeightedConformalEstimator:
             6. Compute validation nonconformity: R_i = |y_val_i - μ̂(X_val_i)| / max(σ̂(X_val_i), ε)
 
         Efficiency Considerations:
-            More computationally efficient than CV+ for large datasets, using single
-            train-validation split instead of k-fold cross-validation. However, may
-            have slightly less stable calibration with smaller validation sets compared
-            to the cross-validation approach.
+            More computationally efficient than CV-based calibration for large datasets,
+            using a single train-validation split instead of k-fold cross-validation.
+            However, it may have slightly less stable calibration with smaller validation
+            sets compared to the cross-validation approach.
         """
         # Split data internally for train-test approach
         X_train, y_train, X_val, y_val = train_val_split(
             X,
             y,
-            train_split=(1 - self.validation_split),
+            train_split=(1 - set_calibration_split(len(X))),
             normalize=False,  # Normalization already applied in fit()
             random_state=random_state,
         )
@@ -446,7 +450,7 @@ class LocallyWeightedConformalEstimator:
     ):
         """Fit the locally weighted conformal estimator.
 
-        Uses adaptive data splitting strategy: CV+ for small datasets, train-test split
+        Uses adaptive data splitting strategy: CV (not CV+) for small datasets, train-test split
         for larger datasets, or explicit strategy selection. Handles data preprocessing
         including feature scaling applied to the entire dataset.
 
@@ -472,8 +476,8 @@ class LocallyWeightedConformalEstimator:
         total_size = len(X)
         strategy = self._determine_splitting_strategy(total_size)
 
-        if strategy == "cv_plus":
-            self._fit_cv_plus(
+        if strategy == "cv":
+            self._fit_cv(
                 X_scaled,
                 y,
                 tuning_iterations,
@@ -714,11 +718,10 @@ class QuantileConformalEstimator:
         n_pre_conformal_trials: int = 32,
         n_calibration_folds: int = 3,
         calibration_split_strategy: Literal[
-            "cv_plus", "train_test_split", "adaptive"
+            "cv", "train_test_split", "adaptive"
         ] = "adaptive",
         adaptive_threshold: int = 50,
         symmetric_adjustment: bool = True,
-        validation_split: float = 0.2,
         normalize_features: bool = True,
     ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
@@ -729,7 +732,6 @@ class QuantileConformalEstimator:
         self.calibration_split_strategy = calibration_split_strategy
         self.adaptive_threshold = adaptive_threshold
         self.symmetric_adjustment = symmetric_adjustment
-        self.validation_split = validation_split
         self.normalize_features = normalize_features
 
         self.quantile_estimator = None
@@ -745,7 +747,7 @@ class QuantileConformalEstimator:
     def _determine_splitting_strategy(self, total_size: int) -> str:
         """Determine optimal data splitting strategy based on dataset size and configuration.
 
-        Selects between CV+ and train-test split approaches for quantile-based conformal
+        Selects between cross-validation (CV) and train-test split approaches for quantile-based conformal
         calibration based on the configured strategy and dataset characteristics. The
         adaptive strategy automatically chooses the most appropriate method based on
         data size to balance computational efficiency with calibration stability.
@@ -754,28 +756,24 @@ class QuantileConformalEstimator:
             total_size: Total number of samples in the dataset.
 
         Returns:
-            Strategy identifier: "cv_plus" or "train_test_split".
+            Strategy identifier: "cv" or "train_test_split".
 
         Strategy Selection Logic:
-            - "adaptive": Uses CV+ for small datasets (< adaptive_threshold) to maximize
-              calibration stability through cross-validation, switches to train-test
-              split for larger datasets to improve computational efficiency
-            - "cv_plus": Always uses cross-validation based calibration
+            - "adaptive": Uses CV for small datasets (< adaptive_threshold) to improve
+              calibration stability with fewer folds, and switches to train-test split
+              for larger datasets to improve computational efficiency
+            - "cv": Always uses cross-validation-based calibration (CV, not CV+)
             - "train_test_split": Always uses single split calibration
 
         Design Rationale:
-            Small datasets benefit from CV+ approach as it provides more stable
-            nonconformity score estimation through cross-validation, particularly
-            important for quantile-based methods where score stability affects
-            coverage reliability. Large datasets can use simpler train-test splits
-            for computational efficiency while maintaining adequate calibration.
+            Small datasets benefit from CV-based calibration which provides more stable
+            nonconformity score estimation than a single split. Note: CV (not CV+)
+            offers weaker distribution-free guarantees than CV+ but is effective with
+            fewer folds. Large datasets can use simpler train-test splits for
+            computational efficiency while maintaining adequate calibration.
         """
         if self.calibration_split_strategy == "adaptive":
-            return (
-                "cv_plus"
-                if total_size < self.adaptive_threshold
-                else "train_test_split"
-            )
+            return "cv" if total_size < self.adaptive_threshold else "train_test_split"
         return self.calibration_split_strategy
 
     def _fit_non_conformal(
@@ -864,7 +862,7 @@ class QuantileConformalEstimator:
         self.quantile_estimator.fit(X, y, quantiles=all_quantiles)
         self.conformalize_predictions = False
 
-    def _fit_cv_plus(
+    def _fit_cv(
         self,
         X: np.ndarray,
         y: np.ndarray,
@@ -875,12 +873,13 @@ class QuantileConformalEstimator:
         random_state: Optional[int],
         last_best_params: Optional[dict],
     ):
-        """Fit quantile conformal estimator using CV+ calibration strategy.
+        """Fit quantile conformal estimator using cross-validation (CV).
 
-        Implements the CV+ (Cross-Validation Plus) approach adapted for quantile-based
-        conformal prediction. This method uses k-fold cross-validation for nonconformity
-        score calibration while training the final quantile estimator on the complete
-        dataset to maximize predictive performance and ensure finite-sample coverage.
+        Uses k-fold cross-validation for nonconformity score calibration while training
+        the final quantile estimator on the complete dataset to maximize predictive
+        performance. This is a CV-based conformal calibration procedure (not CV+).
+        Compared to CV+ [Foygel Barber et al., 2019], it typically yields weaker
+        formal guarantees but performs well with fewer folds.
 
         Each fold trains a quantile regression model and computes nonconformity scores
         on the fold's validation set. The scores are aggregated across all folds to
@@ -918,8 +917,8 @@ class QuantileConformalEstimator:
             - Asymmetric: Uses separate adjustments C_L, C_U for lower/upper bounds
 
         Coverage Properties:
-            Provides finite-sample coverage guarantees under exchangeability while
-            using all data for final model training, balancing efficiency and validity.
+            Provides practical coverage under exchangeability assumptions, but offers
+            weaker formal guarantees than CV+; in return, it is effective with fewer folds.
         """
         kfold = KFold(
             n_splits=self.n_calibration_folds, shuffle=True, random_state=random_state
@@ -948,7 +947,7 @@ class QuantileConformalEstimator:
             # Fit quantile estimator on fold training data with tuning
             if tuning_iterations > 1 and len(X_fold_train) > min_obs_for_tuning:
                 tuner = QuantileTuner(
-                    random_state=random_state + fold_idx if random_state else None,
+                    random_state=random_state if random_state else None,
                     quantiles=all_quantiles,
                 )
                 fold_initialization_params = tuner.tune(
@@ -968,7 +967,7 @@ class QuantileConformalEstimator:
             fold_estimator = initialize_estimator(
                 estimator_architecture=self.quantile_estimator_architecture,
                 initialization_params=fold_initialization_params,
-                random_state=random_state + fold_idx if random_state else None,
+                random_state=random_state if random_state else None,
             )
             fold_estimator.fit(X_fold_train, y_fold_train, quantiles=all_quantiles)
 
@@ -1066,7 +1065,6 @@ class QuantileConformalEstimator:
             last_best_params: Warm-start parameters for quantile estimator hyperparameter search.
 
         Implementation Details:
-            - Splits input data into training and validation sets using validation_split
             - Fits feature scaler on training data only to prevent information leakage
             - Performs hyperparameter tuning on training set when data permits
             - Uses validation set exclusively for nonconformity score computation
@@ -1082,10 +1080,11 @@ class QuantileConformalEstimator:
             4. Store {R_i}_{i=1}^{n_val} for conformal adjustment during prediction
 
         Efficiency Considerations:
-            More computationally efficient than CV+ for large datasets, using single
-            train-validation split instead of k-fold cross-validation. However, may
-            have less stable calibration with smaller validation sets compared to
-            the cross-validation approach, especially for asymmetric adjustments.
+            More computationally efficient than CV-based calibration for large datasets,
+            using a single train-validation split instead of k-fold cross-validation.
+            However, it may have less stable calibration with smaller validation sets
+            compared to the cross-validation approach, especially for asymmetric
+            adjustments.
 
         Edge Cases:
             When validation set is empty, automatically disables conformal adjustment
@@ -1095,7 +1094,7 @@ class QuantileConformalEstimator:
         X_train, y_train, X_val, y_val = train_val_split(
             X,
             y,
-            train_split=(1 - self.validation_split),
+            train_split=(1 - set_calibration_split(len(X))),
             normalize=False,  # Normalization already applied in fit()
             random_state=random_state,
         )
@@ -1177,10 +1176,10 @@ class QuantileConformalEstimator:
     ):
         """Fit the quantile conformal estimator.
 
-        Uses adaptive data splitting strategy: CV+ for small datasets, train-test split
-        for larger datasets, or explicit strategy selection. Supports both symmetric
-        and asymmetric conformal adjustments. Handles data preprocessing including
-        feature scaling applied to the entire dataset.
+        Uses an adaptive data splitting strategy: CV (not CV+) for small datasets,
+        train-test split for larger datasets, or explicit strategy selection. Supports
+        both symmetric and asymmetric conformal adjustments. Handles data preprocessing
+        including feature scaling applied to the entire dataset.
 
         Args:
             X: Input features, shape (n_samples, n_features).
@@ -1215,8 +1214,8 @@ class QuantileConformalEstimator:
         if use_conformal:
             strategy = self._determine_splitting_strategy(total_size)
 
-            if strategy == "cv_plus":
-                self._fit_cv_plus(
+            if strategy == "cv":
+                self._fit_cv(
                     X_scaled,
                     y,
                     all_quantiles,
