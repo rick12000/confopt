@@ -539,7 +539,7 @@ class LocallyWeightedConformalEstimator:
         var_pred = np.array([max(x, 0) for x in var_pred]).reshape(-1, 1)
 
         intervals = []
-        for alpha in self.alphas:
+        for alpha in self._fetch_alphas():
             non_conformity_score_quantile = np.quantile(
                 self.nonconformity_scores,
                 (1 - alpha) / (1 + 1 / len(self.nonconformity_scores)),
@@ -1189,7 +1189,7 @@ class QuantileConformalEstimator:
             random_state: Random seed for reproducible initialization.
             last_best_params: Warm-start parameters from previous fitting.
         """
-        current_alphas = self._fetch_alphas()
+        self._fetch_alphas()
 
         # Apply feature scaling to entire dataset if requested
         if self.normalize_features:
@@ -1200,7 +1200,7 @@ class QuantileConformalEstimator:
             self.feature_scaler = None
 
         all_quantiles = []
-        for alpha in current_alphas:
+        for alpha in self.alphas:
             lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
             all_quantiles.append(lower_quantile)
             all_quantiles.append(upper_quantile)
@@ -1219,7 +1219,7 @@ class QuantileConformalEstimator:
                     X_scaled,
                     y,
                     all_quantiles,
-                    current_alphas,
+                    self.alphas,
                     tuning_iterations,
                     min_obs_for_tuning,
                     random_state,
@@ -1230,7 +1230,7 @@ class QuantileConformalEstimator:
                     X_scaled,
                     y,
                     all_quantiles,
-                    current_alphas,
+                    self.alphas,
                     tuning_iterations,
                     min_obs_for_tuning,
                     random_state,
@@ -1242,7 +1242,7 @@ class QuantileConformalEstimator:
                 X_scaled,
                 y,
                 all_quantiles,
-                current_alphas,
+                self.alphas,
                 tuning_iterations,
                 min_obs_for_tuning,
                 random_state,
@@ -1294,7 +1294,9 @@ class QuantileConformalEstimator:
         intervals = []
         prediction = self.quantile_estimator.predict(X_processed)
 
-        for i, alpha in enumerate(self.alphas):
+        for i, (alpha, alpha_adjusted) in enumerate(
+            zip(self.alphas, self._fetch_alphas())
+        ):
             lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
 
             lower_idx = self.quantile_indices[lower_quantile]
@@ -1305,7 +1307,8 @@ class QuantileConformalEstimator:
                     # Symmetric adjustment (original CQR)
                     score = np.quantile(
                         self.nonconformity_scores[i],
-                        (1 - alpha) / (1 + 1 / len(self.nonconformity_scores[i])),
+                        (1 - alpha_adjusted)
+                        / (1 + 1 / len(self.nonconformity_scores[i])),
                         method="linear",
                     )
                     lower_interval_bound = np.array(prediction[:, lower_idx]) - score
@@ -1315,13 +1318,13 @@ class QuantileConformalEstimator:
                     # with same misscoverage on each level, otherwise need to use different alpha for each)
                     lower_adjustment = np.quantile(
                         self.lower_nonconformity_scores[i],
-                        (1 - alpha / 2)
+                        (1 - alpha_adjusted / 2)
                         / (1 + 1 / len(self.lower_nonconformity_scores[i])),
                         method="linear",
                     )
                     upper_adjustment = np.quantile(
                         self.upper_nonconformity_scores[i],
-                        (1 - alpha / 2)
+                        (1 - alpha_adjusted / 2)
                         / (1 + 1 / len(self.upper_nonconformity_scores[i])),
                         method="linear",
                     )
