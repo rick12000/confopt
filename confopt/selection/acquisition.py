@@ -308,8 +308,10 @@ class BaseConformalSearcher(ABC):
         if isinstance(self.sampler, LowerBoundSampler):
             self.sampler.update_exploration_step()
         if self.conformal_estimator.nonconformity_scores is not None:
-            uses_adaptation = hasattr(self.sampler, "adapter") or hasattr(
-                self.sampler, "adapters"
+            uses_adaptation = (
+                hasattr(self.sampler, "adapter") and self.sampler.adapter is not None
+            ) or (
+                hasattr(self.sampler, "adapters") and self.sampler.adapters is not None
             )
             if uses_adaptation:
                 betas = self._calculate_betas(X, y_true)

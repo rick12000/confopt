@@ -85,7 +85,7 @@ class LocallyWeightedConformalEstimator:
         self.point_estimator_architecture = point_estimator_architecture
         self.variance_estimator_architecture = variance_estimator_architecture
         self.alphas = alphas
-        self.updated_alphas = alphas.copy()
+        self.updated_alphas = self.alphas.copy()
         self.n_calibration_folds = n_calibration_folds
         self.calibration_split_strategy = calibration_split_strategy
         self.adaptive_threshold = adaptive_threshold
@@ -463,8 +463,6 @@ class LocallyWeightedConformalEstimator:
             best_pe_config: Warm-start parameters for point estimator.
             best_ve_config: Warm-start parameters for variance estimator.
         """
-        self._fetch_alphas()
-
         # Apply feature scaling to entire dataset if requested
         if self.normalize_features:
             self.feature_scaler = StandardScaler()
@@ -539,7 +537,7 @@ class LocallyWeightedConformalEstimator:
         var_pred = np.array([max(x, 0) for x in var_pred]).reshape(-1, 1)
 
         intervals = []
-        for alpha in self._fetch_alphas():
+        for alpha in self.updated_alphas:
             non_conformity_score_quantile = np.quantile(
                 self.nonconformity_scores,
                 (1 - alpha) / (1 + 1 / len(self.nonconformity_scores)),
@@ -603,7 +601,7 @@ class LocallyWeightedConformalEstimator:
         # This means β_t is the proportion of calibration scores >= test nonconformity
         # (i.e., the empirical coverage probability)
         beta = np.mean(self.nonconformity_scores >= nonconformity)
-        betas = [beta] * len(self.alphas)
+        betas = [beta] * len(self.updated_alphas)
 
         return betas
 
@@ -625,22 +623,6 @@ class LocallyWeightedConformalEstimator:
             changing requirements or feedback.
         """
         self.updated_alphas = new_alphas.copy()
-
-    def _fetch_alphas(self) -> List[float]:
-        """Fetch the latest updated alphas and sync internal alpha state.
-
-        Returns:
-            The current alphas to be used for fitting and prediction.
-
-        Implementation Details:
-            Provides an abstraction layer for alpha updates that maintains
-            state consistency between update_alphas calls and internal usage.
-            Ensures that alpha changes are properly propagated throughout
-            the estimator without breaking encapsulation.
-        """
-        if self.updated_alphas != self.alphas:
-            self.alphas = self.updated_alphas.copy()
-        return self.alphas
 
 
 def alpha_to_quantiles(alpha: float) -> Tuple[float, float]:
@@ -726,7 +708,7 @@ class QuantileConformalEstimator:
     ):
         self.quantile_estimator_architecture = quantile_estimator_architecture
         self.alphas = alphas
-        self.updated_alphas = alphas.copy()
+        self.updated_alphas = self.alphas.copy()
         self.n_pre_conformal_trials = n_pre_conformal_trials
         self.n_calibration_folds = n_calibration_folds
         self.calibration_split_strategy = calibration_split_strategy
@@ -781,7 +763,6 @@ class QuantileConformalEstimator:
         X: np.ndarray,
         y: np.ndarray,
         all_quantiles: List[float],
-        current_alphas: List[float],
         tuning_iterations: int,
         min_obs_for_tuning: int,
         random_state: Optional[int],
@@ -804,7 +785,6 @@ class QuantileConformalEstimator:
             X: Input features for training, shape (n_samples, n_features).
             y: Target values for training, shape (n_samples,).
             all_quantiles: Sorted list of quantile levels to estimate, in [0, 1].
-            current_alphas: Alpha levels for coverage (used for context, not calibration).
             tuning_iterations: Number of hyperparameter search iterations.
             min_obs_for_tuning: Minimum samples required to trigger hyperparameter tuning.
             random_state: Random seed for reproducible model initialization.
@@ -867,7 +847,6 @@ class QuantileConformalEstimator:
         X: np.ndarray,
         y: np.ndarray,
         all_quantiles: List[float],
-        current_alphas: List[float],
         tuning_iterations: int,
         min_obs_for_tuning: int,
         random_state: Optional[int],
@@ -890,7 +869,6 @@ class QuantileConformalEstimator:
             X: Input features for training, shape (n_samples, n_features).
             y: Target values for training, shape (n_samples,).
             all_quantiles: Sorted list of quantile levels to estimate, in [0, 1].
-            current_alphas: Alpha levels for coverage, determining required quantiles.
             tuning_iterations: Number of hyperparameter search iterations per fold and final fit.
             min_obs_for_tuning: Minimum samples required to trigger hyperparameter tuning.
             random_state: Random seed for reproducible fold splits and model initialization.
@@ -925,10 +903,10 @@ class QuantileConformalEstimator:
         )
 
         if self.symmetric_adjustment:
-            all_nonconformity_scores = [[] for _ in current_alphas]
+            all_nonconformity_scores = [[] for _ in self.alphas]
         else:
-            all_lower_scores = [[] for _ in current_alphas]
-            all_upper_scores = [[] for _ in current_alphas]
+            all_lower_scores = [[] for _ in self.alphas]
+            all_upper_scores = [[] for _ in self.alphas]
 
         # Prepare forced parameter configurations for tuning
         forced_param_configurations = []
@@ -974,7 +952,7 @@ class QuantileConformalEstimator:
             # Compute nonconformity scores on validation fold
             val_prediction = fold_estimator.predict(X_fold_val)
 
-            for i, alpha in enumerate(current_alphas):
+            for i, alpha in enumerate(self.alphas):
                 lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
                 lower_idx = self.quantile_indices[lower_quantile]
                 upper_idx = self.quantile_indices[upper_quantile]
@@ -1035,7 +1013,6 @@ class QuantileConformalEstimator:
         X: np.ndarray,
         y: np.ndarray,
         all_quantiles: List[float],
-        current_alphas: List[float],
         tuning_iterations: int,
         min_obs_for_tuning: int,
         random_state: Optional[int],
@@ -1058,7 +1035,6 @@ class QuantileConformalEstimator:
             X: Input features for training, shape (n_samples, n_features).
             y: Target values for training, shape (n_samples,).
             all_quantiles: Sorted list of quantile levels to estimate, in [0, 1].
-            current_alphas: Alpha levels for coverage, determining required quantiles.
             tuning_iterations: Number of hyperparameter search iterations.
             min_obs_for_tuning: Minimum samples required to trigger hyperparameter tuning.
             random_state: Random seed for reproducible data splits and model initialization.
@@ -1135,14 +1111,14 @@ class QuantileConformalEstimator:
         # Compute nonconformity scores on validation set if available
         if len(X_val) > 0:
             if self.symmetric_adjustment:
-                self.nonconformity_scores = [np.array([]) for _ in current_alphas]
+                self.nonconformity_scores = [np.array([]) for _ in self.alphas]
             else:
-                self.lower_nonconformity_scores = [np.array([]) for _ in current_alphas]
-                self.upper_nonconformity_scores = [np.array([]) for _ in current_alphas]
+                self.lower_nonconformity_scores = [np.array([]) for _ in self.alphas]
+                self.upper_nonconformity_scores = [np.array([]) for _ in self.alphas]
 
             val_prediction = self.quantile_estimator.predict(X_val)
 
-            for i, alpha in enumerate(current_alphas):
+            for i, alpha in enumerate(self.alphas):
                 lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
                 lower_idx = self.quantile_indices[lower_quantile]
                 upper_idx = self.quantile_indices[upper_quantile]
@@ -1189,8 +1165,6 @@ class QuantileConformalEstimator:
             random_state: Random seed for reproducible initialization.
             last_best_params: Warm-start parameters from previous fitting.
         """
-        self._fetch_alphas()
-
         # Apply feature scaling to entire dataset if requested
         if self.normalize_features:
             self.feature_scaler = StandardScaler()
@@ -1219,7 +1193,6 @@ class QuantileConformalEstimator:
                     X_scaled,
                     y,
                     all_quantiles,
-                    self.alphas,
                     tuning_iterations,
                     min_obs_for_tuning,
                     random_state,
@@ -1230,7 +1203,6 @@ class QuantileConformalEstimator:
                     X_scaled,
                     y,
                     all_quantiles,
-                    self.alphas,
                     tuning_iterations,
                     min_obs_for_tuning,
                     random_state,
@@ -1242,7 +1214,6 @@ class QuantileConformalEstimator:
                 X_scaled,
                 y,
                 all_quantiles,
-                self.alphas,
                 tuning_iterations,
                 min_obs_for_tuning,
                 random_state,
@@ -1294,8 +1265,12 @@ class QuantileConformalEstimator:
         intervals = []
         prediction = self.quantile_estimator.predict(X_processed)
 
+        # NOTE: We use fixed alphas to train quantile estimator, but adaptive alpha
+        # to determine percentile of non conformity scores to take (the estimator is
+        # fixed, if you vary that too there will be calibration mismatch every iteration,
+        # and beta scores won't be comparable)
         for i, (alpha, alpha_adjusted) in enumerate(
-            zip(self.alphas, self._fetch_alphas())
+            zip(self.alphas, self.updated_alphas)
         ):
             lower_quantile, upper_quantile = alpha_to_quantiles(alpha)
 
@@ -1449,19 +1424,3 @@ class QuantileConformalEstimator:
             in a single training pass.
         """
         self.updated_alphas = new_alphas.copy()
-
-    def _fetch_alphas(self) -> List[float]:
-        """Fetch the latest updated alphas and sync internal alpha state.
-
-        Returns:
-            The current alphas to be used for fitting and prediction.
-
-        Implementation Details:
-            Provides an abstraction layer for alpha updates that maintains
-            state consistency between update_alphas calls and internal usage.
-            Critical for quantile-based estimation where alpha changes affect
-            the required quantile set.
-        """
-        if self.updated_alphas != self.alphas:
-            self.alphas = self.updated_alphas.copy()
-        return self.alphas

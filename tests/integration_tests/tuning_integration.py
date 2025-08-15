@@ -121,9 +121,11 @@ def run_experiment(
     return coverage_rate, windowed_deviation
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("target_alpha", TARGET_ALPHAS)
 @pytest.mark.parametrize("adapter_type", ADAPTER_TYPES)
 def test_adaptive_vs_nonadaptive_coverage(target_alpha, adapter_type):
+    print(f"Testing {adapter_type} with target alpha {target_alpha}")
     n_seeds = 5
     adaptive_wins_global = 0
     adaptive_wins_local = 0
@@ -147,6 +149,8 @@ def test_adaptive_vs_nonadaptive_coverage(target_alpha, adapter_type):
 
     global_win_rate = adaptive_wins_global / n_seeds
     local_win_rate = adaptive_wins_local / n_seeds
+
+    print(f"Global win rate: {global_win_rate}, Local win rate: {local_win_rate}")
 
     if adapter_type is not None:
         assert (
