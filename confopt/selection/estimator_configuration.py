@@ -7,12 +7,10 @@ from confopt.wrapping import IntRange, FloatRange, CategoricalRange
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.kernel_ridge import KernelRidge
 from sklearn.neighbors import KNeighborsRegressor
-from lightgbm import LGBMRegressor
 from confopt.selection.estimators.quantile_estimation import (
     BaseSingleFitQuantileEstimator,
     BaseMultiFitQuantileEstimator,
     QuantileGBM,
-    QuantileLightGBM,
     QuantileForest,
     QuantileKNN,
     QuantileLasso,
@@ -57,14 +55,12 @@ QGBM_NAME: str = "qgbm"
 QRF_NAME: str = "qrf"
 KR_NAME: str = "kr"
 GBM_NAME: str = "gbm"
-LGBM_NAME: str = "lgbm"
 KNN_NAME: str = "knn"
 RF_NAME: str = "rf"
 QKNN_NAME: str = "qknn"
 QL_NAME: str = "ql"
-QLGBM_NAME: str = "qlgbm"
 SFQENS_NAME: str = "sfqens"  # Quantile ensemble model
-MFENS_NAME: str = "mfqens"  # Ensemble model name for QLGBM + QL combination
+MFENS_NAME: str = "mfqens"  # Ensemble model name for multi-fit quantile combinations
 PENS_NAME: str = "pens"  # Point ensemble model for GBM + KNN combination
 QGP_NAME: str = "qgp"  # Gaussian Process Quantile Estimator
 QLEAF_NAME: str = "qleaf"  # New quantile estimator
@@ -132,32 +128,6 @@ ESTIMATOR_REGISTRY = {
             "min_samples_leaf": IntRange(min_value=3, max_value=7),
             "max_depth": IntRange(min_value=2, max_value=4),
             "subsample": FloatRange(min_value=0.7, max_value=0.9),
-        },
-    ),
-    LGBM_NAME: EstimatorConfig(
-        estimator_name=LGBM_NAME,
-        estimator_class=LGBMRegressor,
-        default_params={
-            "learning_rate": 0.05,
-            "n_estimators": 50,
-            "max_depth": 3,
-            "min_child_samples": 10,
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "reg_alpha": 0.3,
-            "reg_lambda": 0.3,
-            "min_child_weight": 5,
-            "random_state": None,  # added
-        },
-        estimator_parameter_space={
-            "learning_rate": FloatRange(min_value=0.02, max_value=0.1),
-            "n_estimators": IntRange(min_value=10, max_value=25),
-            "max_depth": IntRange(min_value=2, max_value=4),
-            "min_child_samples": IntRange(min_value=8, max_value=15),
-            "subsample": FloatRange(min_value=0.7, max_value=0.9),
-            "colsample_bytree": FloatRange(min_value=0.7, max_value=0.9),
-            "reg_alpha": FloatRange(min_value=0.1, max_value=1.0),
-            "reg_lambda": FloatRange(min_value=0.1, max_value=1.0),
         },
     ),
     KR_NAME: EstimatorConfig(
@@ -242,32 +212,6 @@ ESTIMATOR_REGISTRY = {
             "max_depth": IntRange(min_value=2, max_value=6),
             "subsample": FloatRange(min_value=0.8, max_value=1.0),
             "max_features": FloatRange(min_value=0.7, max_value=1.0),
-        },
-    ),
-    QLGBM_NAME: EstimatorConfig(
-        estimator_name=QLGBM_NAME,
-        estimator_class=QuantileLightGBM,
-        default_params={
-            "learning_rate": 0.05,
-            "n_estimators": 50,
-            "max_depth": 3,
-            "min_child_samples": 10,
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "reg_alpha": 0.3,
-            "reg_lambda": 0.3,
-            "min_child_weight": 5,
-            "random_state": None,  # added
-        },
-        estimator_parameter_space={
-            "learning_rate": FloatRange(min_value=0.05, max_value=0.2),
-            "n_estimators": IntRange(min_value=25, max_value=200),
-            "max_depth": IntRange(min_value=2, max_value=4),
-            "min_child_samples": IntRange(min_value=8, max_value=15),
-            "subsample": FloatRange(min_value=0.7, max_value=0.9),
-            "colsample_bytree": FloatRange(min_value=0.7, max_value=0.9),
-            "reg_alpha": FloatRange(min_value=0.2, max_value=0.5),
-            "reg_lambda": FloatRange(min_value=0.2, max_value=0.5),
         },
     ),
     QL_NAME: EstimatorConfig(

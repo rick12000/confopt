@@ -337,7 +337,7 @@ class BaseConformalSearcher(ABC):
                 self.conformal_estimator.update_alphas(self.sampler.fetch_alphas())
 
 
-PointEstimatorArchitecture = Literal["gbm", "lgbm", "rf", "knn", "kr", "pens"]
+PointEstimatorArchitecture = Literal["gbm", "rf", "knn", "kr", "pens"]
 
 
 class LocallyWeightedConformalSearcher(BaseConformalSearcher):
@@ -608,7 +608,6 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
 QuantileEstimatorArchitecture = Literal[
     "qrf",
     "qgbm",
-    "qlgbm",
     "qknn",
     "ql",
     "qgp",

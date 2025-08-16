@@ -8,7 +8,6 @@ quantification in conformal prediction frameworks.
 """
 
 from typing import List, Union, Optional
-from lightgbm import LGBMRegressor
 import numpy as np
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.neighbors import NearestNeighbors
@@ -392,74 +391,6 @@ class QuantileGBM(BaseMultiFitQuantileEstimator):
 
         Returns:
             Fitted GradientBoostingRegressor for the quantile.
-        """
-        estimator = clone(self.base_estimator)
-        estimator.set_params(alpha=quantile)
-        estimator.fit(X, y)
-        return estimator
-
-
-class QuantileLightGBM(BaseMultiFitQuantileEstimator):
-    """LightGBM-based quantile regression with advanced gradient boosting.
-
-    Implements quantile regression using LightGBM's efficient gradient boosting
-    implementation. Provides faster training than scikit-learn GBM with support
-    for categorical features and advanced regularization. Each quantile level
-    trains a separate model optimized for the quantile objective.
-
-    Args:
-        learning_rate: Step size for gradient descent updates.
-        n_estimators: Number of boosting stages to fit.
-        max_depth: Maximum depth of individual trees (-1 for no limit).
-        min_child_samples: Minimum samples required in child nodes.
-        subsample: Fraction of samples used for fitting individual trees.
-        colsample_bytree: Fraction of features used for fitting individual trees.
-        reg_alpha: L1 regularization strength.
-        reg_lambda: L2 regularization strength.
-        min_child_weight: Minimum sum of instance weight in child nodes.
-        random_state: Seed for reproducible tree construction.
-    """
-
-    def __init__(
-        self,
-        learning_rate: float,
-        n_estimators: int,
-        max_depth: Optional[int] = None,
-        min_child_samples: Optional[int] = None,
-        subsample: Optional[float] = None,
-        colsample_bytree: Optional[float] = None,
-        reg_alpha: Optional[float] = None,
-        reg_lambda: Optional[float] = None,
-        min_child_weight: Optional[int] = None,
-        random_state: Optional[int] = None,
-    ):
-        super().__init__()
-        self.base_estimator = LGBMRegressor(
-            learning_rate=learning_rate,
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            min_child_samples=min_child_samples,
-            subsample=subsample,
-            colsample_bytree=colsample_bytree,
-            reg_alpha=reg_alpha,
-            reg_lambda=reg_lambda,
-            min_child_weight=min_child_weight,
-            random_state=random_state,
-            objective="quantile",
-            metric="quantile",
-            verbose=-1,
-        )
-
-    def _fit_quantile_estimator(self, X: np.array, y: np.array, quantile: float):
-        """Fit LightGBM model for a specific quantile level.
-
-        Args:
-            X: Training features with shape (n_samples, n_features).
-            y: Training targets with shape (n_samples,).
-            quantile: Quantile level in [0, 1] to fit model for.
-
-        Returns:
-            Fitted LGBMRegressor for the quantile.
         """
         estimator = clone(self.base_estimator)
         estimator.set_params(alpha=quantile)

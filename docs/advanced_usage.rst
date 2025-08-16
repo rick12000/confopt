@@ -35,7 +35,6 @@ For ``QuantileConformalSearcher``, you can choose from the following architectur
 * ``"qrf"``: Quantile Random Forest
 * ``"qgbm"``: Quantile Gradient Boosting Machine
 * ``"qknn"``: Quantile K-Nearest Neighbors
-* ``"qlgbm"``: Quantile LightGBM
 * ``"qgp"``: Quantile Gaussian Process
 * ``"ql"``: Quantile Lasso
 
@@ -44,7 +43,6 @@ For ``LocallyWeightedConformalSearcher``, you can choose from the following arch
 * ``"rf"``: Random Forest
 * ``"gbm"``: Gradient Boosting Machine
 * ``"knn"``: K-Nearest Neighbors
-* ``"lgbm"``: LightGBM
 * ``"gp"``: Gaussian Process
 
 **Example:**

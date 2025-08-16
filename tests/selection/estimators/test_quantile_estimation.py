@@ -7,7 +7,6 @@ from unittest.mock import Mock
 from confopt.selection.estimators.quantile_estimation import (
     QuantileLasso,
     QuantileGBM,
-    QuantileLightGBM,
     QuantileForest,
     QuantileKNN,
     GaussianProcessQuantileEstimator,
@@ -109,11 +108,6 @@ QUALITY_THRESHOLDS = {
                 "max_depth": 4,
                 "random_state": 42,
             },
-            "multi_fit",
-        ),
-        (
-            QuantileLightGBM,
-            {"learning_rate": 0.1, "n_estimators": 30, "random_state": 42},
             "multi_fit",
         ),
         (
