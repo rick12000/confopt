@@ -66,7 +66,7 @@ def _uniform_sampling(
     Generate unique parameter configurations using uniform random sampling.
 
     For each configuration, samples each parameter independently: integers and floats are drawn
-    uniformly from their respective ranges (log-scale supported for floats), and categorical
+    uniformly from their respective ranges (log-scale supported for both), and categorical
     parameters are chosen randomly from their choices. Ensures uniqueness by hashing each
     configuration. Sampling stops when the requested number of unique configurations is reached
     or a maximum attempt threshold is exceeded.
@@ -93,9 +93,18 @@ def _uniform_sampling(
         for name in param_names:
             param_range = parameter_grid[name]
             if isinstance(param_range, IntRange):
-                config[name] = random.randint(
-                    param_range.min_value, param_range.max_value
-                )
+                if param_range.log_scale:
+                    lmin = np.log(max(param_range.min_value, 1))
+                    lmax = np.log(param_range.max_value)
+                    config[name] = int(np.round(np.exp(random.uniform(lmin, lmax))))
+                    # Ensure the value is within bounds
+                    config[name] = max(
+                        param_range.min_value, min(config[name], param_range.max_value)
+                    )
+                else:
+                    config[name] = random.randint(
+                        param_range.min_value, param_range.max_value
+                    )
             elif isinstance(param_range, FloatRange):
                 if param_range.log_scale:
                     lmin = np.log(max(param_range.min_value, 1e-10))
@@ -179,12 +188,19 @@ def _sobol_sampling(
         # Map Sobol sample to each numeric parameter
         for dim, (_, name, pr) in enumerate(numeric_params):
             if isinstance(pr, IntRange):
-                value = int(
-                    np.floor(
-                        row[dim] * (pr.max_value - pr.min_value + 1e-10) + pr.min_value
+                if pr.log_scale:
+                    lmin = np.log(max(pr.min_value, 1))
+                    lmax = np.log(pr.max_value)
+                    value = int(np.round(np.exp(lmin + row[dim] * (lmax - lmin))))
+                    config[name] = max(pr.min_value, min(value, pr.max_value))
+                else:
+                    value = int(
+                        np.floor(
+                            row[dim] * (pr.max_value - pr.min_value + 1e-10)
+                            + pr.min_value
+                        )
                     )
-                )
-                config[name] = max(pr.min_value, min(value, pr.max_value))
+                    config[name] = max(pr.min_value, min(value, pr.max_value))
             else:
                 if pr.log_scale:
                     lmin = np.log(max(pr.min_value, 1e-10))

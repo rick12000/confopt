@@ -8,6 +8,7 @@ class IntRange(BaseModel):
 
     min_value: int
     max_value: int
+    log_scale: bool = False  # Whether to sample on a logarithmic scale
 
     @field_validator("max_value")
     def max_gt_min(cls, v, info: ValidationInfo):
@@ -17,6 +18,17 @@ class IntRange(BaseModel):
             and v <= info.data["min_value"]
         ):
             raise ValueError("max_value must be greater than min_value")
+        return v
+
+    @field_validator("log_scale")
+    def log_scale_positive_values(cls, v, info: ValidationInfo):
+        if (
+            v
+            and hasattr(info, "data")
+            and "min_value" in info.data
+            and info.data["min_value"] <= 0
+        ):
+            raise ValueError("log_scale=True requires min_value > 0")
         return v
 
 
