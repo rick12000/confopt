@@ -487,6 +487,26 @@ def test_dtaci_convergence_under_stationary_conditions():
     assert abs(alpha_mean - dtaci.alpha) < 0.1
 
 
+def test_dtaci_directional_behavior():
+    """Test that DtACI adjusts alpha in the correct direction based on beta values.
+
+    This test verifies the fundamental adaptive behavior:
+    - When beta > alpha (coverage achieved): alpha should increase slightly toward target
+    - When beta < alpha (breach occurred): alpha should decrease more significantly away from target
+
+    This follows the ACI update rule: α_{t+1} = α_t + γ(α - err_t)
+    where err_t = 1 if breach (β < α), 0 if coverage (β ≥ α).
+    """
+    for beta in [0.8, 0.05]:
+        dtaci = DtACI(alpha=0.1, gamma_values=[0.01])
+        initial_alpha = dtaci.alpha_t
+        updated_alpha = dtaci.update(beta=beta)
+        if beta > initial_alpha:
+            assert updated_alpha > initial_alpha
+        else:
+            assert updated_alpha < initial_alpha
+
+
 def test_dtaci_algorithm_behavior():
     """Test comprehensive DtACI algorithm behavior and theoretical correctness."""
     dtaci = DtACI(alpha=0.1, gamma_values=[0.01, 0.05])

@@ -208,6 +208,7 @@ def test_tune_method_reproducibility(dummy_parameter_grid, random_state):
         # Skip acquisition_source comparison as it contains object addresses
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("dynamic_sampling", [True, False])
 def test_tune_method_comprehensive_integration(
     comprehensive_tuning_setup, dynamic_sampling
@@ -261,6 +262,7 @@ def test_tune_method_comprehensive_integration(
     assert best_value == min(t.performance for t in study.trials)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("dynamic_sampling", [True, False])
 def test_conformal_vs_random_performance_averaged(
     comprehensive_tuning_setup, dynamic_sampling

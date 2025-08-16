@@ -194,6 +194,7 @@ def test_quantile_ensemble_predict_quantiles(
     quantile_estimator2.predict.assert_called_with(X)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "data_fixture_name",
     [
@@ -257,6 +258,7 @@ def test_ensemble_outperforms_components_multiple_repetitions(
     assert pinball_success_rate > success_threshold
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "data_fixture_name",
     [

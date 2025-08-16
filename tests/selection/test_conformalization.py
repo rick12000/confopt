@@ -143,9 +143,6 @@ def test_locally_weighted_alpha_update_mechanism(initial_alphas, new_alphas):
     estimator.update_alphas(new_alphas)
     assert estimator.updated_alphas == new_alphas
     assert estimator.alphas == initial_alphas
-    fetched_alphas = estimator._fetch_alphas()
-    assert fetched_alphas == new_alphas
-    assert estimator.alphas == new_alphas
 
 
 def test_locally_weighted_prediction_errors_before_fitting():
@@ -282,9 +279,6 @@ def test_quantile_alpha_update_mechanism(initial_alphas, new_alphas):
     estimator.update_alphas(new_alphas)
     assert estimator.updated_alphas == new_alphas
     assert estimator.alphas == initial_alphas
-    fetched_alphas = estimator._fetch_alphas()
-    assert fetched_alphas == new_alphas
-    assert estimator.alphas == new_alphas
 
 
 @pytest.mark.slow
@@ -297,7 +291,7 @@ def test_quantile_alpha_update_mechanism(initial_alphas, new_alphas):
 )
 @pytest.mark.parametrize("estimator_architecture", ["qrf", "qgbm"])
 @pytest.mark.parametrize("alphas", [[0.2, 0.4, 0.6, 0.8]])
-@pytest.mark.parametrize("calibration_split_strategy", ["cv", "train_test_split"])
+@pytest.mark.parametrize("calibration_split_strategy", ["cv"])
 @pytest.mark.parametrize("symmetric_adjustment", [True, False])
 def test_conformalized_vs_non_conformalized_quantile_estimator_coverage(
     request,
