@@ -462,9 +462,6 @@ class ConformalTuner:
     def update_optimizer_parameters(
         self,
         optimizer,
-        training_runtime: float,
-        tuning_count: int,
-        searcher_retuning_frequency: int,
         search_iter: int,
     ) -> Tuple[int, int]:
         """Update multi-armed bandit optimizer and select new parameter values.
@@ -549,9 +546,6 @@ class ConformalTuner:
                     searcher_retuning_frequency,
                 ) = self.update_optimizer_parameters(
                     optimizer,
-                    training_runtime,
-                    tuning_count,
-                    searcher_retuning_frequency,
                     search_iter,
                 )
                 if (

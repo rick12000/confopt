@@ -267,10 +267,9 @@ def test_tune_method_comprehensive_integration(
 def test_conformal_vs_random_performance_averaged(
     comprehensive_tuning_setup, dynamic_sampling
 ):
-    """Compare conformal vs random search performance over multiple runs (averaged)."""
+    """Compare conformal vs random search win rate over multiple runs."""
     n_repeats = 20
-    min_conformal, min_random = [], []
-    avg_conformal, avg_random = [], []
+    conformal_wins, total_comparisons = 0, 0
     for seed in range(n_repeats):
         tuner, searcher, _, _ = comprehensive_tuning_setup(dynamic_sampling)
         tuner.tune(
@@ -290,13 +289,13 @@ def test_conformal_vs_random_performance_averaged(
         ]
         if len(rs_trials) == 0 or len(conformal_trials) == 0:
             continue
-        min_random.append(min(t.performance for t in rs_trials))
-        min_conformal.append(min(t.performance for t in conformal_trials))
-        avg_random.append(np.mean([t.performance for t in rs_trials]))
-        avg_conformal.append(np.mean([t.performance for t in conformal_trials]))
+        for rs_trial in rs_trials:
+            for conformal_trial in conformal_trials:
+                if conformal_trial.performance < rs_trial.performance:
+                    conformal_wins += 1
+                total_comparisons += 1
 
-    assert np.mean(avg_conformal) < np.mean(avg_random)
-    assert np.mean(min_conformal) <= np.mean(min_random)
+    assert conformal_wins / total_comparisons == 1.0
 
 
 @pytest.mark.parametrize("metric_optimization", ["minimize", "maximize"])
