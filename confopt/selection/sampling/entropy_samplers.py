@@ -264,13 +264,17 @@ class MaxValueEntropySearchSampler:
         """
         n_observations = len(predictions_per_interval[0].lower_bounds)
         all_bounds = flatten_conformal_bounds(predictions_per_interval)
-        idxs = np.random.randint(
-            0, all_bounds.shape[1], size=(self.n_paths, n_observations)
-        )
 
         optimums = np.zeros(self.n_paths)
         for i in range(self.n_paths):
-            optimums[i] = np.min(all_bounds[np.arange(n_observations), idxs[i]])
+            # For each Monte Carlo path, sample one value from each observation's intervals
+            sampled_values = np.zeros(n_observations)
+            for obs_idx in range(n_observations):
+                # Sample uniformly from this observation's available bounds (all columns)
+                col_idx = np.random.randint(0, all_bounds.shape[1])
+                sampled_values[obs_idx] = all_bounds[obs_idx, col_idx]
+            # Find the minimum across this coherent set of samples
+            optimums[i] = np.min(sampled_values)
 
         try:
             from confopt.selection.sampling import cy_differential_entropy

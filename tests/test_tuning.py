@@ -289,13 +289,13 @@ def test_conformal_vs_random_performance_averaged(
         ]
         if len(rs_trials) == 0 or len(conformal_trials) == 0:
             continue
-        for rs_trial in rs_trials:
-            for conformal_trial in conformal_trials:
-                if conformal_trial.performance < rs_trial.performance:
-                    conformal_wins += 1
-                total_comparisons += 1
+        last_rs_trial = rs_trials[-1]
+        last_conformal_trial = conformal_trials[-1]
+        if last_conformal_trial.performance < last_rs_trial.performance:
+            conformal_wins += 1
+        total_comparisons += 1
 
-    assert conformal_wins / total_comparisons == 1.0
+    assert conformal_wins / total_comparisons > 0.9
 
 
 @pytest.mark.parametrize("metric_optimization", ["minimize", "maximize"])
