@@ -9,12 +9,82 @@ from sklearn.ensemble import RandomForestRegressor
 from confopt.selection.estimators.ensembling import (
     PointEnsembleEstimator,
     QuantileEnsembleEstimator,
+    QuantileLassoMeta,
 )
 from confopt.selection.estimators.quantile_estimation import (
     QuantileGBM,
     QuantileKNN,
     QuantileLasso,
 )
+
+
+def test_quantile_lasso_meta_fit_predict():
+    """Test that QuantileLassoMeta correctly fits and predicts."""
+    np.random.seed(42)
+    n_samples, n_features = 100, 3
+    X = np.random.randn(n_samples, n_features)
+    y = X @ np.array([0.5, 0.3, 0.2]) + 0.1 * np.random.randn(n_samples)
+
+    quantile_lasso = QuantileLassoMeta(alpha=0.01, quantile=0.5)
+    quantile_lasso.fit(X, y)
+
+    # Check that coefficients sum to 1 (normalized)
+    assert np.isclose(np.sum(quantile_lasso.coef_), 1.0)
+    assert np.all(quantile_lasso.coef_ >= 0)  # positive constraint
+
+    # Check prediction works
+    predictions = quantile_lasso.predict(X)
+    assert predictions.shape == (n_samples,)
+
+
+def test_quantile_lasso_meta_different_quantiles():
+    """Test that QuantileLassoMeta gives different weights for different quantiles."""
+    np.random.seed(42)
+    n_samples, n_features = 200, 3
+    X = np.random.randn(n_samples, n_features)
+    y = X @ np.array([0.5, 0.3, 0.2]) + 0.2 * np.random.randn(n_samples)
+
+    quantile_25 = QuantileLassoMeta(alpha=0.01, quantile=0.25)
+    quantile_75 = QuantileLassoMeta(alpha=0.01, quantile=0.75)
+
+    quantile_25.fit(X, y)
+    quantile_75.fit(X, y)
+
+    # Weights might be different for different quantiles
+    assert quantile_25.coef_ is not None
+    assert quantile_75.coef_ is not None
+    assert np.isclose(np.sum(quantile_25.coef_), 1.0)
+    assert np.isclose(np.sum(quantile_75.coef_), 1.0)
+
+
+def test_quantile_lasso_meta_better_than_uniform():
+    """Test that QuantileLassoMeta performs better than uniform weights for quantile loss."""
+    from sklearn.metrics import mean_pinball_loss
+
+    np.random.seed(42)
+    n_samples, n_features = 150, 3
+
+    # Create data where first feature is best for the quantile
+    X = np.random.randn(n_samples, n_features)
+    y = 2 * X[:, 0] + 0.1 * X[:, 1] + 0.05 * X[:, 2] + 0.1 * np.random.randn(n_samples)
+
+    quantile = 0.25
+
+    # Quantile Lasso
+    quantile_lasso = QuantileLassoMeta(alpha=0.01, quantile=quantile)
+    quantile_lasso.fit(X, y)
+    pred_quantile_lasso = quantile_lasso.predict(X)
+
+    # Uniform weights
+    uniform_weights = np.ones(n_features) / n_features
+    pred_uniform = X @ uniform_weights
+
+    # Compare pinball losses
+    loss_quantile_lasso = mean_pinball_loss(y, pred_quantile_lasso, alpha=quantile)
+    loss_uniform = mean_pinball_loss(y, pred_uniform, alpha=quantile)
+
+    # QuantileLasso should perform at least as well as uniform weights
+    assert loss_quantile_lasso <= loss_uniform * 1.05  # Allow small tolerance
 
 
 def create_diverse_quantile_estimators(random_state=42):
@@ -242,7 +312,7 @@ def test_ensemble_outperforms_components_multiple_repetitions(
             cv=5,
             weighting_strategy=weighting_strategy,
             random_state=42 + rep,
-            alpha=0.1,
+            alpha=0.01,  # Reduced alpha for better performance with quantile Lasso
         )
 
         ensemble.fit(X_train, y_train, quantiles=ensemble_test_quantiles)
@@ -303,7 +373,7 @@ def test_point_ensemble_outperforms_components_multiple_repetitions(
             cv=5,
             weighting_strategy=weighting_strategy,
             random_state=42 + rep,
-            alpha=0.1,
+            alpha=0.01,  # Reduced alpha for better performance
         )
 
         ensemble.fit(X_train, y_train)

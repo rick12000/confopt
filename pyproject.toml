@@ -47,7 +47,7 @@ docs = [
 ]
 
 [tool.setuptools]
-packages = {find = {exclude = ["tests*", "examples*", "misc*", "build*", "dist*", "*.egg-info*"]}}
+packages = {find = {exclude = ["tests*", "examples*", "misc*", "build*", "dist*", "*.egg-info*", "cache*"]}}
 include-package-data = true
 
 [tool.setuptools.package-data]

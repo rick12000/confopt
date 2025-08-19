@@ -10,6 +10,7 @@ from confopt.selection.estimators.quantile_estimation import (
 )
 from abc import ABC, abstractmethod
 from sklearn.linear_model import Lasso
+from scipy.optimize import minimize
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,113 @@ def quantile_loss(y_true: np.ndarray, y_pred: np.ndarray, quantile: float) -> fl
     """Compute the quantile loss (pinball loss) for quantile regression evaluation."""
     errors = y_true - y_pred
     return np.mean(np.maximum(quantile * errors, (quantile - 1) * errors))
+
+
+class QuantileLassoMeta:
+    """Quantile Lasso meta-learner that optimizes pinball loss with L1 regularization.
+
+    Custom implementation for ensemble meta-learning that directly optimizes
+    quantile loss (pinball loss) instead of mean squared error. Uses scipy
+    optimization for more robust convergence.
+
+    Args:
+        alpha: L1 regularization strength. Higher values promote sparsity.
+        quantile: Quantile level in [0, 1] to optimize for.
+        max_iter: Maximum iterations for optimization.
+        tol: Convergence tolerance for parameter changes.
+        positive: If True, constrain weights to be non-negative.
+    """
+
+    def __init__(
+        self,
+        alpha: float = 0.0,
+        quantile: float = 0.5,
+        max_iter: int = 1000,
+        tol: float = 1e-6,
+        positive: bool = True,
+    ):
+        self.alpha = alpha
+        self.quantile = quantile
+        self.max_iter = max_iter
+        self.tol = tol
+        self.positive = positive
+        self.coef_ = None
+
+    def _quantile_loss_objective(
+        self, weights: np.ndarray, X: np.ndarray, y: np.ndarray
+    ) -> float:
+        """Compute quantile loss + L1 penalty."""
+        y_pred = X @ weights
+        errors = y - y_pred
+        quantile_loss = np.mean(
+            np.maximum(self.quantile * errors, (self.quantile - 1) * errors)
+        )
+        l1_penalty = self.alpha * np.sum(np.abs(weights))
+        return quantile_loss + l1_penalty
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> "QuantileLassoMeta":
+        """Fit quantile lasso using scipy optimization.
+
+        Args:
+            X: Feature matrix with shape (n_samples, n_features).
+            y: Target values with shape (n_samples,).
+
+        Returns:
+            Self for method chaining.
+        """
+        n_features = X.shape[1]
+
+        # Initialize with uniform weights
+        initial_weights = np.ones(n_features) / n_features
+
+        # Set up constraints
+        bounds = [
+            (0, None) if self.positive else (None, None) for _ in range(n_features)
+        ]
+
+        # Equality constraint: weights sum to 1
+        constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
+
+        # Optimize
+        result = minimize(
+            fun=self._quantile_loss_objective,
+            x0=initial_weights,
+            args=(X, y),
+            bounds=bounds,
+            constraints=constraints,
+            method="SLSQP",
+            options={"maxiter": self.max_iter, "ftol": self.tol},
+        )
+
+        if result.success:
+            self.coef_ = result.x
+        else:
+            logger.warning("Quantile Lasso optimization failed, using uniform weights")
+            self.coef_ = np.ones(n_features) / n_features
+
+        # Ensure weights are normalized and non-negative if required
+        if self.positive:
+            self.coef_ = np.maximum(self.coef_, 0)
+
+        if np.sum(self.coef_) > 0:
+            self.coef_ = self.coef_ / np.sum(self.coef_)
+        else:
+            self.coef_ = np.ones(n_features) / n_features
+
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Generate predictions using fitted coefficients.
+
+        Args:
+            X: Feature matrix with shape (n_samples, n_features).
+
+        Returns:
+            Predictions with shape (n_samples,).
+        """
+        if self.coef_ is None:
+            raise ValueError("Must call fit before predict")
+        return X @ self.coef_
 
 
 class BaseEnsembleEstimator(ABC):
@@ -44,9 +152,10 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
     Weighting Strategies:
         - Uniform: Equal weights for all base estimators, providing simple averaging
           that reduces variance through ensemble diversity without optimization overhead.
-        - Linear Stack: Lasso-based weight optimization using cross-validation to
-          minimize quantile loss. Automatically selects the best-performing estimators
-          and handles multicollinearity through L1 regularization.
+        - Linear Stack: Quantile Lasso-based weight optimization using cross-validation to
+          minimize quantile loss (pinball loss). Automatically selects the best-performing
+          estimators and handles multicollinearity through L1 regularization, with separate
+          quantile-specific optimization for each quantile level.
 
     Args:
         estimators: List of quantile estimators to combine. Must be instances of
@@ -56,10 +165,10 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
             Higher values provide more robust weight estimates but increase computation.
             Typical range: 3-10 folds.
         weighting_strategy: Strategy for combining base estimator predictions.
-            "uniform" uses equal weights, "linear_stack" optimizes weights via Lasso.
-        random_state: Seed for reproducible cross-validation splits and Lasso fitting.
+            "uniform" uses equal weights, "linear_stack" optimizes weights via quantile Lasso.
+        random_state: Seed for reproducible cross-validation splits and quantile Lasso fitting.
             Ensures deterministic ensemble behavior across runs.
-        alpha: L1 regularization strength for Lasso weight optimization. Higher values
+        alpha: L1 regularization strength for quantile Lasso weight optimization. Higher values
             increase sparsity in ensemble weights. Range: [0.0, 1.0] with 0.0 being
             unregularized and higher values promoting sparser solutions.
 
@@ -67,7 +176,7 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
         quantiles: List of quantile levels fitted during training.
         quantile_weights: Learned weights for combining base estimator predictions.
             Shape (n_quantiles, n_estimators) with separate weights per quantile level.
-        stacker: Fitted Lasso model used for linear stacking weight computation.
+        stacker: Fitted quantile Lasso models used for linear stacking weight computation.
 
     Raises:
         ValueError: If fewer than 2 estimators provided or invalid parameter values.
@@ -168,12 +277,13 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
     def _compute_linear_stack_weights(
         self, X: np.ndarray, y: np.ndarray, quantiles: List[float]
     ) -> np.ndarray:
-        """Compute optimal ensemble weights using Lasso regression on validation predictions.
+        """Compute optimal ensemble weights using quantile Lasso regression on validation predictions.
 
-        Implements linear stacking by fitting separate Lasso regression models for each
-        quantile level to minimize quantile loss on cross-validation predictions.
+        Implements linear stacking by fitting separate quantile Lasso regression models for each
+        quantile level to minimize quantile loss (pinball loss) on cross-validation predictions.
         L1 regularization promotes sparse solutions, automatically selecting the most
-        relevant base estimators while handling multicollinearity.
+        relevant base estimators while handling multicollinearity. Uses custom quantile Lasso
+        that optimizes pinball loss instead of mean squared error.
 
         Args:
             X: Training features with shape (n_samples, n_features).
@@ -204,15 +314,15 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
 
             quantile_pred_matrix = np.column_stack(quantile_predictions)
 
-            quantile_stacker = Lasso(
-                alpha=self.alpha, fit_intercept=False, positive=True
+            quantile_stacker = QuantileLassoMeta(
+                alpha=self.alpha, quantile=quantiles[q_idx], positive=True
             )
             quantile_stacker.fit(quantile_pred_matrix, val_targets_sorted)
             quantile_weights = quantile_stacker.coef_
 
             if np.sum(quantile_weights) == 0:
                 logger.warning(
-                    f"All Lasso weights are zero for quantile {q_idx}, falling back to uniform weighting"
+                    f"All QuantileLasso weights are zero for quantile {q_idx}, falling back to uniform weighting"
                 )
                 quantile_weights = np.ones(len(self.estimators))
 
