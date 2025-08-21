@@ -1,4 +1,5 @@
 from typing import Dict, List, Optional, Literal
+import math
 import logging
 import random
 import numpy as np
@@ -180,9 +181,19 @@ def _sobol_sampling(
     if not numeric_params:
         raise ValueError("Sobol sampling requires at least one numeric parameter.")
 
-    # Generate Sobol samples for numeric parameters
+    # Generate Sobol samples for numeric parameters.
+    # SciPy's Sobol implementation expects a power-of-two sample size for balance.
+    # Use `random_base2(m)` to generate 2**m samples (power of two) and then
+    # slice to the requested `n_configurations` to avoid the UserWarning.
+    if n_configurations <= 0:
+        raise ValueError(
+            "n_configurations must be a positive integer for Sobol sampling"
+        )
     sobol_engine = qmc.Sobol(d=len(numeric_params), scramble=True, seed=random_state)
-    samples = sobol_engine.random(n_configurations)
+    # Compute the smallest m such that 2**m >= n_configurations
+    m = math.ceil(math.log2(n_configurations))
+    samples_all = sobol_engine.random_base2(m)
+    samples = samples_all[:n_configurations]
     for row in samples:
         config = {}
         # Map Sobol sample to each numeric parameter

@@ -375,7 +375,6 @@ ESTIMATOR_REGISTRY = {
                 "params": {
                     "kernel": "matern",
                     "alpha": 1e-8,
-                    "n_samples": 500,
                 },
             },
         ],
@@ -405,7 +404,6 @@ ESTIMATOR_REGISTRY = {
                 "params": {
                     "kernel": "matern",
                     "alpha": 1e-8,
-                    "n_samples": 500,
                     "random_state": None,
                 },
             },
@@ -431,13 +429,11 @@ ESTIMATOR_REGISTRY = {
         default_params={
             "kernel": "matern",
             "alpha": 1e-8,
-            "n_samples": 500,
             "random_state": None,
         },
         estimator_parameter_space={
             "kernel": CategoricalRange(choices=["rbf", "matern", "rational_quadratic"]),
             "alpha": FloatRange(min_value=1e-10, max_value=1e-6, log_scale=True),
-            "n_samples": IntRange(min_value=300, max_value=1000),
         },
     ),
 }
