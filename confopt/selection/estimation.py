@@ -159,7 +159,7 @@ class RandomTuner:
         y: np.array,
         estimator_architecture: str,
         n_searches: int,
-        train_split: float = 0.66,
+        train_split: float = 0.8,
         split_type: Literal["k_fold", "ordinal_split"] = "k_fold",
         forced_param_configurations: Optional[List[Dict]] = None,
     ) -> Dict:
@@ -199,6 +199,7 @@ class RandomTuner:
                 parameter_grid=estimator_config.estimator_parameter_space,
                 n_configurations=n_random_configs,
                 random_state=self.random_state,
+                sampling_method="sobol",
             )
             # Combine warm start and random configurations
             tuning_configurations = forced_param_configurations + random_configs

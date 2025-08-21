@@ -692,7 +692,7 @@ def comprehensive_tuning_setup(dummy_parameter_grid):
         parameter_grid=dummy_parameter_grid,
         n_configurations=3,
         random_state=123,
-        sampling_method="uniform",
+        sampling_method="sobol",
     )
     warm_start_configs = []
     for config in warm_start_configs_raw:

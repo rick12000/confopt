@@ -9,7 +9,7 @@ from confopt.selection.estimators.quantile_estimation import (
     QuantileGBM,
     QuantileForest,
     QuantileKNN,
-    GaussianProcessQuantileEstimator,
+    QuantileGP,
     QuantileLeaf,
     QuantRegWrapper,
 )
@@ -83,7 +83,7 @@ QUALITY_THRESHOLDS = {
     "estimator_class,estimator_params,estimator_type",
     [
         (
-            GaussianProcessQuantileEstimator,
+            QuantileGP,
             {"kernel": "matern", "random_state": 42},
             "single_fit",
         ),

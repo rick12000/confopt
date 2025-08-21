@@ -14,7 +14,7 @@ from confopt.selection.estimators.quantile_estimation import (
     QuantileForest,
     QuantileKNN,
     QuantileLasso,
-    GaussianProcessQuantileEstimator,
+    QuantileGP,
     QuantileLeaf,  # Added QuantileLeaf to imports
 )
 from confopt.wrapping import ParameterRange
@@ -148,16 +148,16 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileForest,
         default_params={
             "n_estimators": 50,
-            "max_depth": 3,
-            "max_features": 0.8,
-            "min_samples_split": 2,
+            "max_depth": 4,
+            "max_features": 0.7,
+            "min_samples_split": 4,
             "bootstrap": True,
             "random_state": None,  # added
         },
         estimator_parameter_space={
-            "n_estimators": IntRange(min_value=25, max_value=200),
+            "n_estimators": IntRange(min_value=25, max_value=100),
             "max_depth": IntRange(min_value=2, max_value=6),
-            "max_features": FloatRange(min_value=0.7, max_value=1.0),
+            "max_features": FloatRange(min_value=0.6, max_value=0.8),
             "min_samples_split": IntRange(min_value=2, max_value=6),
             "bootstrap": CategoricalRange(choices=[True, False]),
         },
@@ -166,7 +166,7 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QKNN_NAME,
         estimator_class=QuantileKNN,
         default_params={
-            "n_neighbors": 10,
+            "n_neighbors": 5,
         },
         estimator_parameter_space={
             "n_neighbors": IntRange(min_value=5, max_value=20),
@@ -198,20 +198,21 @@ ESTIMATOR_REGISTRY = {
         default_params={
             "learning_rate": 0.1,
             "n_estimators": 50,
-            "min_samples_split": 2,
+            "min_samples_split": 6,
             "min_samples_leaf": 1,
-            "max_depth": 3,
-            "max_features": 0.8,
+            "max_depth": 2,
+            "subsample": 0.7,
+            "max_features": 0.7,
             "random_state": None,  # added
         },
         estimator_parameter_space={
             "learning_rate": FloatRange(min_value=0.05, max_value=0.2),
-            "n_estimators": IntRange(min_value=25, max_value=200),
-            "min_samples_split": IntRange(min_value=2, max_value=6),
+            "n_estimators": IntRange(min_value=25, max_value=100),
+            "min_samples_split": IntRange(min_value=2, max_value=8),
             "min_samples_leaf": IntRange(min_value=1, max_value=3),
             "max_depth": IntRange(min_value=2, max_value=6),
-            "subsample": FloatRange(min_value=0.8, max_value=1.0),
-            "max_features": FloatRange(min_value=0.7, max_value=1.0),
+            "subsample": FloatRange(min_value=0.6, max_value=0.8),
+            "max_features": FloatRange(min_value=0.6, max_value=0.8),
         },
     ),
     QL_NAME: EstimatorConfig(
@@ -233,7 +234,7 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileEnsembleEstimator,
         default_params={
             "weighting_strategy": "linear_stack",
-            "cv": 3,
+            "cv": 5,
             "alpha": 0.001,
         },
         estimator_parameter_space={
@@ -251,7 +252,7 @@ ESTIMATOR_REGISTRY = {
             {
                 "class": QuantileKNN,
                 "params": {
-                    "n_neighbors": 10,
+                    "n_neighbors": 5,
                 },
             },
             {
@@ -259,10 +260,11 @@ ESTIMATOR_REGISTRY = {
                 "params": {
                     "learning_rate": 0.1,
                     "n_estimators": 50,
-                    "min_samples_split": 2,
+                    "min_samples_split": 6,
                     "min_samples_leaf": 1,
-                    "max_depth": 3,
-                    "max_features": 0.8,
+                    "max_depth": 2,
+                    "subsample": 0.7,
+                    "max_features": 0.7,
                     "random_state": None,
                 },
             },
@@ -273,7 +275,7 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileEnsembleEstimator,
         default_params={
             "weighting_strategy": "linear_stack",
-            "cv": 3,
+            "cv": 5,
             "alpha": 0.001,
         },
         estimator_parameter_space={
@@ -286,17 +288,23 @@ ESTIMATOR_REGISTRY = {
                 "params": {
                     "learning_rate": 0.1,
                     "n_estimators": 50,
-                    "min_samples_split": 2,
+                    "min_samples_split": 6,
                     "min_samples_leaf": 1,
-                    "max_depth": 3,
-                    "max_features": 0.8,
+                    "max_depth": 2,
+                    "subsample": 0.7,
+                    "max_features": 0.7,
                     "random_state": None,
                 },
             },
             {
-                "class": QuantileKNN,
+                "class": QuantileForest,
                 "params": {
-                    "n_neighbors": 10,
+                    "n_estimators": 50,
+                    "max_depth": 4,
+                    "max_features": 0.7,
+                    "min_samples_split": 4,
+                    "bootstrap": True,
+                    "random_state": None,
                 },
             },
         ],
@@ -306,7 +314,7 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileEnsembleEstimator,
         default_params={
             "weighting_strategy": "linear_stack",
-            "cv": 3,
+            "cv": 5,
             "alpha": 0.001,
         },
         estimator_parameter_space={
@@ -319,10 +327,11 @@ ESTIMATOR_REGISTRY = {
                 "params": {
                     "learning_rate": 0.1,
                     "n_estimators": 50,
-                    "min_samples_split": 2,
+                    "min_samples_split": 6,
                     "min_samples_leaf": 1,
-                    "max_depth": 3,
-                    "max_features": 0.8,
+                    "max_depth": 2,
+                    "subsample": 0.7,
+                    "max_features": 0.7,
                     "random_state": None,
                 },
             },
@@ -340,7 +349,7 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileEnsembleEstimator,
         default_params={
             "weighting_strategy": "linear_stack",
-            "cv": 3,
+            "cv": 5,
             "alpha": 0.001,
         },
         estimator_parameter_space={
@@ -353,15 +362,16 @@ ESTIMATOR_REGISTRY = {
                 "params": {
                     "learning_rate": 0.1,
                     "n_estimators": 50,
-                    "min_samples_split": 2,
+                    "min_samples_split": 6,
                     "min_samples_leaf": 1,
-                    "max_depth": 3,
-                    "max_features": 0.8,
+                    "max_depth": 2,
+                    "subsample": 0.7,
+                    "max_features": 0.7,
                     "random_state": None,
                 },
             },
             {
-                "class": GaussianProcessQuantileEstimator,
+                "class": QuantileGP,
                 "params": {
                     "kernel": "matern",
                     "alpha": 1e-8,
@@ -375,7 +385,7 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileEnsembleEstimator,
         default_params={
             "weighting_strategy": "linear_stack",
-            "cv": 3,
+            "cv": 5,
             "alpha": 0.001,
         },
         estimator_parameter_space={
@@ -384,22 +394,32 @@ ESTIMATOR_REGISTRY = {
         },
         ensemble_components=[
             {
-                "class": QuantileGBM,
-                "params": {
-                    "learning_rate": 0.1,
-                    "n_estimators": 50,
-                    "min_samples_split": 2,
-                    "min_samples_leaf": 1,
-                    "max_depth": 3,
-                    "max_features": 0.8,
-                    "random_state": None,
-                },
-            },
-            {
                 "class": QuantileLasso,
                 "params": {
                     "max_iter": 300,
                     "p_tol": 1e-4,
+                },
+            },
+            {
+                "class": QuantileGP,
+                "params": {
+                    "kernel": "matern",
+                    "alpha": 1e-8,
+                    "n_samples": 500,
+                    "random_state": None,
+                },
+            },
+            {
+                "class": QuantileGBM,
+                "params": {
+                    "learning_rate": 0.1,
+                    "n_estimators": 50,
+                    "min_samples_split": 6,
+                    "min_samples_leaf": 1,
+                    "max_depth": 2,
+                    "subsample": 0.7,
+                    "max_features": 0.7,
+                    "random_state": None,
                 },
             },
         ],
@@ -407,7 +427,7 @@ ESTIMATOR_REGISTRY = {
     # Add new quantile estimators
     QGP_NAME: EstimatorConfig(
         estimator_name=QGP_NAME,
-        estimator_class=GaussianProcessQuantileEstimator,
+        estimator_class=QuantileGP,
         default_params={
             "kernel": "matern",
             "alpha": 1e-8,
