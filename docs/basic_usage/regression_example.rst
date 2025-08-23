@@ -85,10 +85,10 @@ To start optimizing, first instantiate a :ref:`ConformalTuner <conformaltuner>` 
    tuner = ConformalTuner(
        objective_function=objective_function,
        search_space=search_space,
-       metric_optimization="minimize"  # Minimizing MSE
+       minimize=True  # Minimizing MSE
    )
 
-The ``metric_optimization`` parameter should be set to ``"minimize"`` for metrics where lower is better (e.g., MSE, MAE), or ``"maximize"`` for metrics where higher is better (e.g., R²).
+The ``minimize`` parameter should be set to ``True`` to minimize metrics where lower is better (e.g., MSE, MAE), or ``False`` to maximize metrics where higher is better (e.g., R²).
 
 To actually kickstart the hyperparameter search, call:
 
@@ -172,7 +172,7 @@ Here is the full tutorial code if you want to run it all together:
    tuner = ConformalTuner(
        objective_function=objective_function,
        search_space=search_space,
-      metric_optimization="minimize"  # Minimizing MSE
+      minimize=True  # Minimizing MSE
    )
 
    tuner.tune(

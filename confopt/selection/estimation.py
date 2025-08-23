@@ -199,7 +199,7 @@ class RandomTuner:
                 parameter_grid=estimator_config.estimator_parameter_space,
                 n_configurations=n_random_configs,
                 random_state=self.random_state,
-                sampling_method="sobol",
+                sampling_method="uniform",
             )
             # Combine warm start and random configurations
             tuning_configurations = forced_param_configurations + random_configs

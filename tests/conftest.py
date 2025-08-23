@@ -338,8 +338,8 @@ def tuner(mock_constant_objective_function, dummy_parameter_grid):
     return ConformalTuner(
         objective_function=mock_constant_objective_function,
         search_space=dummy_parameter_grid,
-        metric_optimization="minimize",
-        n_candidate_configurations=100,
+        minimize=True,
+        n_candidates=100,
     )
 
 
@@ -359,8 +359,8 @@ def dynamic_tuner(mock_constant_objective_function, small_parameter_grid):
     return ConformalTuner(
         objective_function=mock_constant_objective_function,
         search_space=small_parameter_grid,
-        metric_optimization="minimize",
-        n_candidate_configurations=5,
+        minimize=True,
+        n_candidates=5,
         dynamic_sampling=True,
     )
 
@@ -371,8 +371,8 @@ def static_tuner(mock_constant_objective_function, small_parameter_grid):
     return ConformalTuner(
         objective_function=mock_constant_objective_function,
         search_space=small_parameter_grid,
-        metric_optimization="minimize",
-        n_candidate_configurations=10,
+        minimize=True,
+        n_candidates=10,
         dynamic_sampling=False,
     )
 
@@ -692,7 +692,7 @@ def comprehensive_tuning_setup(dummy_parameter_grid):
         parameter_grid=dummy_parameter_grid,
         n_configurations=3,
         random_state=123,
-        sampling_method="sobol",
+        sampling_method="uniform",
     )
     warm_start_configs = []
     for config in warm_start_configs_raw:
@@ -703,9 +703,9 @@ def comprehensive_tuning_setup(dummy_parameter_grid):
         tuner = ConformalTuner(
             objective_function=optimization_objective,
             search_space=dummy_parameter_grid,
-            metric_optimization="minimize",
-            n_candidate_configurations=500,
-            warm_start_configurations=warm_start_configs,
+            minimize=True,
+            n_candidates=500,
+            warm_starts=warm_start_configs,
             dynamic_sampling=dynamic_sampling,
         )
         searcher = QuantileConformalSearcher(

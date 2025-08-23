@@ -99,8 +99,8 @@ def run_experiment(
     tuner = ConformalTuner(
         objective_function=complex_objective,
         search_space=search_space,
-        metric_optimization="minimize",
-        n_candidate_configurations=2000,
+        minimize=True,
+        n_candidates=2000,
         dynamic_sampling=True,
     )
 
@@ -183,8 +183,8 @@ def test_dtaci_parameter_evolution():
     tuner = ConformalTuner(
         objective_function=complex_objective,
         search_space=search_space,
-        metric_optimization="minimize",
-        n_candidate_configurations=500,
+        minimize=True,
+        n_candidates=500,
     )
 
     tuner.tune(

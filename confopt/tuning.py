@@ -84,10 +84,13 @@ class ConformalTuner:
     Args:
         objective_function: Function to optimize, must accept 'configuration' dict parameter
         search_space: Dictionary mapping parameter names to ParameterRange objects
-        metric_optimization: Whether to 'maximize' or 'minimize' the objective function
-        n_candidate_configurations: Size of discrete configuration pool for selection
-        warm_start_configurations: Pre-evaluated (configuration, performance) pairs
-        dynamic_sampling: Whether to dynamically resample configuration candidates
+        minimize: Whether to minimize (True) or maximize (False) the objective function
+        n_candidates: Number of candidate configurations to sample from the search space at
+            each iteration of conformal search
+        warm_starts: Pre-evaluated (configuration, performance) pairs to seed the search
+        dynamic_sampling: Whether to dynamically resample configuration candidates at each
+            iteration of conformal search
+        random_state: Random seed for reproducible results. Default: None.
 
     Attributes:
         study: Container for storing trial results and optimization history
@@ -99,20 +102,21 @@ class ConformalTuner:
         self,
         objective_function: callable,
         search_space: Dict[str, ParameterRange],
-        metric_optimization: Literal["maximize", "minimize"],
-        n_candidate_configurations: int = 10000,
-        warm_start_configurations: Optional[List[Tuple[Dict, float]]] = None,
-        dynamic_sampling: bool = False,
+        minimize: bool = True,
+        n_candidates: int = 3000,
+        warm_starts: Optional[List[Tuple[Dict, float]]] = None,
+        dynamic_sampling: bool = True,
     ) -> None:
         self.objective_function = objective_function
         self.check_objective_function()
 
         self.search_space = search_space
-        self.metric_optimization = metric_optimization
-        self.metric_sign = -1 if metric_optimization == "maximize" else 1
-        self.warm_start_configurations = warm_start_configurations
-        self.n_candidate_configurations = n_candidate_configurations
+        self.minimize = minimize
+        self.metric_sign = 1 if minimize else -1
+        self.warm_starts = warm_starts
+        self.n_candidates = n_candidates
         self.dynamic_sampling = dynamic_sampling
+        self.config_manager = None
 
     def check_objective_function(self) -> None:
         """Validate objective function signature and type annotations.
@@ -163,7 +167,7 @@ class ConformalTuner:
         The warm start configurations are treated as iteration 0 data and assigned
         the 'warm_start' acquisition source for tracking purposes.
         """
-        for idx, (config, performance) in enumerate(self.warm_start_configurations):
+        for idx, (config, performance) in enumerate(self.warm_starts):
             self.config_manager.mark_as_searched(config, performance)
             trial = Trial(
                 iteration=idx,
@@ -185,20 +189,22 @@ class ConformalTuner:
         The configuration manager type (static vs dynamic) determines whether
         the candidate pool is fixed or adaptively resampled during optimization.
         """
-        self.study = Study(metric_optimization=self.metric_optimization)
+        self.study = Study(
+            metric_optimization="minimize" if self.minimize else "maximize"
+        )
 
         if self.dynamic_sampling:
             self.config_manager = DynamicConfigurationManager(
                 search_space=self.search_space,
-                n_candidate_configurations=self.n_candidate_configurations,
+                n_candidate_configurations=self.n_candidates,
             )
         else:
             self.config_manager = StaticConfigurationManager(
                 search_space=self.search_space,
-                n_candidate_configurations=self.n_candidate_configurations,
+                n_candidate_configurations=self.n_candidates,
             )
 
-        if self.warm_start_configurations:
+        if self.warm_starts:
             self.process_warm_starts()
 
     def _evaluate_configuration(self, configuration: Dict) -> Tuple[float, float]:
@@ -239,6 +245,7 @@ class ConformalTuner:
             max_searches: Optional total iteration limit
             verbose: Whether to display progress information
         """
+
         available_configs = self.config_manager.get_searchable_configurations()
         adj_n_searches = min(max_random_iter, len(available_configs))
         if adj_n_searches == 0:
@@ -574,7 +581,7 @@ class ConformalTuner:
                 converted_lower = lower_bound * self.metric_sign
                 converted_upper = upper_bound * self.metric_sign
                 # For maximization (metric_sign = -1), swap bounds to maintain proper ordering
-                if self.metric_optimization == "maximize":
+                if not self.minimize:
                     signed_lower_bound = converted_upper  # What was upper becomes lower
                     signed_upper_bound = converted_lower  # What was lower becomes upper
                 else:
@@ -710,9 +717,7 @@ class ConformalTuner:
         self.initialize_tuning_resources()
         self.search_timer = RuntimeTracker()
 
-        n_warm_starts = (
-            len(self.warm_start_configurations) if self.warm_start_configurations else 0
-        )
+        n_warm_starts = len(self.warm_starts) if self.warm_starts else 0
         remaining_random_searches = max(0, n_random_searches - n_warm_starts)
         if remaining_random_searches > 0:
             self.random_search(

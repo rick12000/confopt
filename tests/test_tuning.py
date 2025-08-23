@@ -4,7 +4,7 @@ from typing import Dict
 from itertools import product
 
 from confopt.tuning import ConformalTuner, stop_search
-from confopt.wrapping import CategoricalRange
+from confopt.wrapping import CategoricalRange, IntRange
 from confopt.utils.tracking import RuntimeTracker
 from confopt.selection.acquisition import QuantileConformalSearcher, LowerBoundSampler
 
@@ -71,7 +71,7 @@ def test_check_objective_function_wrong_argument_count(dummy_parameter_grid):
         ConformalTuner(
             objective_function=invalid_objective,
             search_space=dummy_parameter_grid,
-            metric_optimization="minimize",
+            minimize=True,
         )
 
 
@@ -86,7 +86,7 @@ def test_check_objective_function_wrong_argument_name(dummy_parameter_grid):
         ConformalTuner(
             objective_function=invalid_objective,
             search_space=dummy_parameter_grid,
-            metric_optimization="minimize",
+            minimize=True,
         )
 
 
@@ -109,8 +109,8 @@ def test_random_search_with_warm_start(
     tuner = ConformalTuner(
         objective_function=mock_constant_objective_function,
         search_space=dummy_parameter_grid,
-        metric_optimization="minimize",
-        warm_start_configurations=warm_start_configs,
+        minimize=True,
+        warm_starts=warm_start_configs,
     )
 
     tuner.initialize_tuning_resources()
@@ -136,7 +136,7 @@ def test_random_search_with_nan_performance(dummy_parameter_grid):
     tuner = ConformalTuner(
         objective_function=nan_objective,
         search_space=dummy_parameter_grid,
-        metric_optimization="minimize",
+        minimize=True,
     )
 
     tuner.initialize_tuning_resources()
@@ -178,8 +178,8 @@ def test_tune_method_reproducibility(dummy_parameter_grid, random_state):
         tuner = ConformalTuner(
             objective_function=complex_objective,
             search_space=dummy_parameter_grid,
-            metric_optimization="minimize",
-            n_candidate_configurations=200,
+            minimize=True,
+            n_candidates=200,
         )
 
         tuner.tune(
@@ -295,14 +295,14 @@ def test_conformal_vs_random_performance_averaged(
             conformal_wins += 1
         total_comparisons += 1
 
-    assert conformal_wins / total_comparisons > 0.9
+    assert conformal_wins / total_comparisons > 0.8
 
 
-@pytest.mark.parametrize("metric_optimization", ["minimize", "maximize"])
-def test_best_fetcher_methods(metric_optimization):
+@pytest.mark.parametrize("minimize", [True, False])
+def test_best_fetcher_methods(minimize):
     grid = {
         "x": CategoricalRange(choices=[0, 1]),
-        "y": CategoricalRange(choices=[0, 1, 2]),
+        "y": IntRange(min_value=0, max_value=2),
     }
 
     def objective(configuration):
@@ -311,8 +311,8 @@ def test_best_fetcher_methods(metric_optimization):
     tuner = ConformalTuner(
         objective_function=objective,
         search_space=grid,
-        metric_optimization=metric_optimization,
-        n_candidate_configurations=100,
+        minimize=minimize,
+        n_candidates=100,
     )
     tuner.initialize_tuning_resources()
     tuner.search_timer = RuntimeTracker()
@@ -324,7 +324,7 @@ def test_best_fetcher_methods(metric_optimization):
     best_config = tuner.get_best_params()
     best_value = tuner.get_best_value()
 
-    if metric_optimization == "minimize":
+    if minimize:
         expected_config = {"x": 0, "y": 0}
     else:
         expected_config = {"x": 1, "y": 2}

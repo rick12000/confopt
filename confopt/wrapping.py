@@ -53,7 +53,7 @@ class FloatRange(BaseModel):
 class CategoricalRange(BaseModel):
     """Categorical values for hyperparameter optimization."""
 
-    choices: list[Union[str, int, float]]
+    choices: list[Union[str, int, float, bool]]
 
     @field_validator("choices")
     def non_empty_choices(cls, v):

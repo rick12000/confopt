@@ -372,7 +372,7 @@ class StaticConfigurationManager(BaseConfigurationManager):
             n_configurations=self.n_candidate_configurations
             + len(self.searched_configs),
             random_state=None,
-            sampling_method="sobol",
+            sampling_method="uniform",
         )[: self.n_candidate_configurations]
         filtered_configs = []
         for config in candidate_configurations:
@@ -453,7 +453,7 @@ class DynamicConfigurationManager(BaseConfigurationManager):
             n_configurations=self.n_candidate_configurations
             + len(self.searched_configs),
             random_state=None,
-            sampling_method="sobol",
+            sampling_method="uniform",
         )
         banned_hashes = set(create_config_hash(c) for c in self.banned_configurations)
         filtered_configs = []

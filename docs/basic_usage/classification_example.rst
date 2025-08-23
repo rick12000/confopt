@@ -90,10 +90,10 @@ To start optimizing, first instantiate a :ref:`ConformalTuner <conformaltuner>` 
    tuner = ConformalTuner(
        objective_function=objective_function,
        search_space=search_space,
-       metric_optimization="maximize"  # Use "minimize" for metrics like log loss
+       minimize=False  # Use True for metrics like log loss
    )
 
-The ``metric_optimization`` parameter should be set to ``"maximize"`` if you want to maximize your metric (eg. accuracy), or ``"minimize"`` if you want to minimize it (eg. log loss).
+The ``minimize`` parameter should be set to ``False`` if you want to maximize your metric (e.g., accuracy), or ``True`` if you want to minimize it (e.g., log loss).
 
 To actually kickstart the hyperparameter search, call:
 
@@ -185,7 +185,7 @@ Here is the full tutorial code if you want to run it all together:
    tuner = ConformalTuner(
        objective_function=objective_function,
        search_space=search_space,
-       metric_optimization="maximize"
+       minimize=False
    )
 
    tuner.tune(

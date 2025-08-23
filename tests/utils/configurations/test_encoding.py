@@ -55,13 +55,12 @@ def test_configuration_encoder():
 
     # Check boolean categorical values
     cat2_cols = [col for col in df.columns if col.startswith("cat2_")]
-    assert len(cat2_cols) == 2  # False and True mapped to 0 and 1
+    assert len(cat2_cols) == 2  # True and False
 
-    # Boolean values get sorted as str representations: False -> 'False', True -> 'True'
-    # When sorted: ['False', 'True'] -> cat2_0 for False, cat2_1 for True
-    cat2_false_col = "cat2_0"
-    cat2_true_col = "cat2_1"
+    # Boolean values are encoded with their string representation: 'cat2_True' and 'cat2_False'
+    cat2_true_col = "cat2_True"
+    cat2_false_col = "cat2_False"
 
-    # First row has cat2=True, so False=0, True=1
+    # First row has cat2=True, so True=1, False=0
     assert df.loc[0, cat2_true_col] == 1
     assert df.loc[0, cat2_false_col] == 0

@@ -56,7 +56,7 @@ Basic usage:
    tuner = ConformalTuner(
        objective_function=your_objective_function,
        search_space=search_space,
-       metric_optimization='maximize'
+       minimize=False
    )
 
    # Run optimization

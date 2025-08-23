@@ -74,7 +74,7 @@ To then pass the searcher to the tuner:
    tuner = ConformalTuner(
        objective_function=objective_function,
        search_space=search_space,
-       metric_optimization="maximize"
+       minimize=False,
    )
 
    tuner.tune(
@@ -108,7 +108,7 @@ Warm starting lets you begin optimization with configurations you've already eva
    tuner = ConformalTuner(
        objective_function=objective_function,
        search_space=search_space,
-       metric_optimization="maximize",
+       minimize=False,
        warm_start_configurations=warm_start_configs
    )
 

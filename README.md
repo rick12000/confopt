@@ -89,7 +89,7 @@ Here, we specify the search space for hyperparameters. This includes defining th
 tuner = ConformalTuner(
     objective_function=objective_function,
     search_space=search_space,
-    metric_optimization='maximize'
+    minimize=False
 )
 tuner.tune(max_searches=50, n_random_searches=10)
 ```

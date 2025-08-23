@@ -118,9 +118,8 @@ def _uniform_sampling(
             elif isinstance(param_range, CategoricalRange):
                 value = random.choice(param_range.choices)
                 # Ensure bools don't get auto type cast to numpy.bool_ or int:
-                if set(param_range.choices) == {True, False} or set(
-                    param_range.choices
-                ) == {False, True}:
+                # Check if ALL choices are actually boolean types, not just equal to True/False
+                if all(isinstance(choice, bool) for choice in param_range.choices):
                     value = bool(value)
                 config[name] = value
         config_hash = create_config_hash(config)
@@ -189,7 +188,7 @@ def _sobol_sampling(
         raise ValueError(
             "n_configurations must be a positive integer for Sobol sampling"
         )
-    sobol_engine = qmc.Sobol(d=len(numeric_params), scramble=True, seed=random_state)
+    sobol_engine = qmc.Sobol(d=len(numeric_params), scramble=False, seed=random_state)
     # Compute the smallest m such that 2**m >= n_configurations
     m = math.ceil(math.log2(n_configurations))
     samples_all = sobol_engine.random_base2(m)
@@ -205,10 +204,10 @@ def _sobol_sampling(
                     value = int(np.round(np.exp(lmin + row[dim] * (lmax - lmin))))
                     config[name] = max(pr.min_value, min(value, pr.max_value))
                 else:
+                    # Use round instead of floor for more balanced integer sampling
                     value = int(
-                        np.floor(
-                            row[dim] * (pr.max_value - pr.min_value + 1e-10)
-                            + pr.min_value
+                        np.round(
+                            row[dim] * (pr.max_value - pr.min_value) + pr.min_value
                         )
                     )
                     config[name] = max(pr.min_value, min(value, pr.max_value))
@@ -225,7 +224,8 @@ def _sobol_sampling(
         for _, name, pr in categorical_params:
             value = random.choice(pr.choices)
             # Ensure bools are Python bool, not numpy.bool_ or int
-            if set(pr.choices) == {True, False} or set(pr.choices) == {False, True}:
+            # Check if ALL choices are actually boolean types, not just equal to True/False
+            if all(isinstance(choice, bool) for choice in pr.choices):
                 value = bool(value)
             config[name] = value
         config_hash = create_config_hash(config)
