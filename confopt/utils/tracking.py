@@ -270,9 +270,11 @@ class BaseConfigurationManager:
         self,
         search_space: dict[str, ParameterRange],
         n_candidate_configurations: int,
+        encoding_method: str = "one_hot",
     ) -> None:
         self.search_space = search_space
         self.n_candidate_configurations = n_candidate_configurations
+        self.encoding_method = encoding_method
         self.searched_configs = []
         self.searched_performances = []
         self.searched_config_hashes = set()
@@ -283,7 +285,9 @@ class BaseConfigurationManager:
         """
         Initializes the configuration encoder for tabularization.
         """
-        self.encoder = ConfigurationEncoder(search_space=self.search_space)
+        self.encoder = ConfigurationEncoder(
+            search_space=self.search_space, encoding_method=self.encoding_method
+        )
 
     def mark_as_searched(self, config: dict, performance: float) -> None:
         """
@@ -298,19 +302,36 @@ class BaseConfigurationManager:
         self.searched_performances.append(performance)
         self.searched_config_hashes.add(config_hash)
 
-    def tabularize_configs(self, configs: list[dict]) -> np.array:
+    def tabularize_configs(self, configs: list[dict]):
         """
-        Converts a list of configuration dictionaries to a tabular numpy array for
-        model input.
+        Converts a list of configuration dictionaries to an EncodedData object.
+
+        Args:
+            configs: List of configuration dictionaries.
+        Returns:
+            EncodedData object with column metadata.
+        """
+        if not configs:
+            # Return empty EncodedData for consistency
+            import pandas as pd
+            from confopt.utils.configurations.encoded_data import EncodedData
+
+            return EncodedData(pd.DataFrame(), [])
+        return self.encoder.transform(configs)
+
+    def tabularize_configs_numpy(self, configs: list[dict]) -> np.array:
+        """
+        Converts a list of configuration dictionaries to a numpy array.
 
         Args:
             configs: List of configuration dictionaries.
         Returns:
             Tabularized configuration array.
         """
-        if not configs:
+        encoded_data = self.tabularize_configs(configs)
+        if len(encoded_data) == 0:
             return np.array([])
-        return self.encoder.transform(configs).to_numpy()
+        return encoded_data.to_numpy()
 
     def listify_configs(self, configs: list[dict]) -> list[list[float]]:
         """
@@ -355,8 +376,9 @@ class StaticConfigurationManager(BaseConfigurationManager):
         self,
         search_space: dict[str, ParameterRange],
         n_candidate_configurations: int,
+        encoding_method: str = "one_hot",
     ) -> None:
-        super().__init__(search_space, n_candidate_configurations)
+        super().__init__(search_space, n_candidate_configurations, encoding_method)
         self.cached_searchable_configs = []
         self._initialize_static_configs_and_encoder()
 
@@ -436,8 +458,9 @@ class DynamicConfigurationManager(BaseConfigurationManager):
         self,
         search_space: dict[str, ParameterRange],
         n_candidate_configurations: int,
+        encoding_method: str = "one_hot",
     ) -> None:
-        super().__init__(search_space, n_candidate_configurations)
+        super().__init__(search_space, n_candidate_configurations, encoding_method)
         self._setup_encoder()
 
     def get_searchable_configurations(self) -> list[dict]:

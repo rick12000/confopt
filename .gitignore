@@ -28,3 +28,4 @@ var/
 # Dev
 cache/
 _build/
+benchmarks/

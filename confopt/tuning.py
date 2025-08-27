@@ -181,27 +181,40 @@ class ConformalTuner:
             )
             self.study.append_trial(trial)
 
-    def initialize_tuning_resources(self) -> None:
+    def initialize_tuning_resources(self, searcher=None) -> None:
         """Initialize core optimization components and data structures.
 
         Sets up the study container for trial tracking, configuration manager for
         handling search space sampling, and processes any warm start configurations.
         The configuration manager type (static vs dynamic) determines whether
         the candidate pool is fixed or adaptively resampled during optimization.
+
+        Args:
+            searcher: Optional searcher to determine encoding method from.
         """
         self.study = Study(
             metric_optimization="minimize" if self.minimize else "maximize"
         )
 
+        # Determine encoding method based on searcher
+        encoding_method = "one_hot"  # default
+        if searcher is not None and hasattr(
+            searcher, "quantile_estimator_architecture"
+        ):
+            if searcher.quantile_estimator_architecture == "qgp":
+                encoding_method = "level"
+
         if self.dynamic_sampling:
             self.config_manager = DynamicConfigurationManager(
                 search_space=self.search_space,
                 n_candidate_configurations=self.n_candidates,
+                encoding_method=encoding_method,
             )
         else:
             self.config_manager = StaticConfigurationManager(
                 search_space=self.search_space,
                 n_candidate_configurations=self.n_candidates,
+                encoding_method=encoding_method,
             )
 
         if self.warm_starts:
@@ -386,6 +399,7 @@ class ConformalTuner:
         X: np.array,
         y: np.array,
         tuning_count: int,
+        parallelize: bool = False,
     ) -> Tuple[float, float]:
         """Train conformal prediction searcher on accumulated data.
 
@@ -404,10 +418,12 @@ class ConformalTuner:
             Tuple of (training_runtime, estimator_error)
         """
         runtime_tracker = RuntimeTracker()
+
         searcher.fit(
             X=X,
             y=y,
             tuning_iterations=tuning_count,
+            parallelize=parallelize,
         )
 
         training_runtime = runtime_tracker.return_runtime()
@@ -501,6 +517,7 @@ class ConformalTuner:
         max_searches: Optional[int],
         max_runtime: Optional[int],
         optimizer_framework: Optional[str] = None,
+        parallelize_fast_operations: bool = False,
     ) -> None:
         """Execute conformal prediction-guided hyperparameter search.
 
@@ -516,6 +533,7 @@ class ConformalTuner:
             max_searches: Maximum total iterations including previous phases
             max_runtime: Maximum total runtime budget in seconds
             optimizer_framework: Parameter tuning strategy
+            parallelize_fast_operations: Whether to parallelize fast operations
         """
         (
             progress_manager,
@@ -537,16 +555,37 @@ class ConformalTuner:
                 iteration_count=1 if max_searches else 0,
             )
 
-            X = self.config_manager.tabularize_configs(
-                self.config_manager.searched_configs
-            )
+            # Use EncodedData for QuantileGP, numpy arrays for others
+            if (
+                hasattr(searcher, "quantile_estimator_architecture")
+                and searcher.quantile_estimator_architecture == "qgp"
+            ):
+                X = self.config_manager.tabularize_configs(
+                    self.config_manager.searched_configs
+                )
+                searchable_configs = self.config_manager.get_searchable_configurations()
+                X_searchable = self.config_manager.tabularize_configs(
+                    searchable_configs
+                )
+            else:
+                X = self.config_manager.tabularize_configs_numpy(
+                    self.config_manager.searched_configs
+                )
+                searchable_configs = self.config_manager.get_searchable_configurations()
+                X_searchable = self.config_manager.tabularize_configs_numpy(
+                    searchable_configs
+                )
+
             y = np.array(self.config_manager.searched_performances) * self.metric_sign
 
-            searchable_configs = self.config_manager.get_searchable_configurations()
-            X_searchable = self.config_manager.tabularize_configs(searchable_configs)
-
             if search_iter == 0 or search_iter % conformal_retraining_frequency == 0:
-                training_runtime = self.retrain_searcher(searcher, X, y, tuning_count)
+                training_runtime = self.retrain_searcher(
+                    searcher,
+                    X,
+                    y,
+                    tuning_count,
+                    parallelize=parallelize_fast_operations,
+                )
 
                 (
                     tuning_count,
@@ -571,7 +610,18 @@ class ConformalTuner:
                 self.config_manager.add_to_banned_configurations(next_config)
                 continue
 
-            transformed_config = self.config_manager.tabularize_configs([next_config])
+            # Use appropriate format for transformed config
+            if (
+                hasattr(searcher, "quantile_estimator_architecture")
+                and searcher.quantile_estimator_architecture == "qgp"
+            ):
+                transformed_config = self.config_manager.tabularize_configs(
+                    [next_config]
+                )
+            else:
+                transformed_config = self.config_manager.tabularize_configs_numpy(
+                    [next_config]
+                )
 
             lower_bound, upper_bound = self.get_interval_if_applicable(
                 searcher, transformed_config
@@ -634,6 +684,7 @@ class ConformalTuner:
         conformal_retraining_frequency: int = 1,
         optimizer_framework: Optional[Literal["decaying", "fixed"]] = None,
         random_state: Optional[int] = None,
+        parallelize_fast_operations: bool = False,
         verbose: bool = True,
     ) -> None:
         """Execute hyperparameter optimization using conformal prediction surrogate models.
@@ -666,6 +717,7 @@ class ConformalTuner:
                 deterministic tuning at fixed intervals, or None for no tuning. Surrogate tuning
                 adds computational cost and is recommended only if your target model takes more
                 than 1-5 minutes to train. Default: None.
+            parallelize_fast_operations: Whether to parallelize fast operations. Default: False.
             random_state: Random seed for reproducible results. Default: None.
             verbose: Whether to enable progress display. Default: True.
 
@@ -714,7 +766,7 @@ class ConformalTuner:
                 ),
             )
 
-        self.initialize_tuning_resources()
+        self.initialize_tuning_resources(searcher=searcher)
         self.search_timer = RuntimeTracker()
 
         n_warm_starts = len(self.warm_starts) if self.warm_starts else 0
@@ -734,6 +786,7 @@ class ConformalTuner:
             max_searches=max_searches,
             max_runtime=max_runtime,
             optimizer_framework=optimizer_framework,
+            parallelize_fast_operations=parallelize_fast_operations,
         )
 
     def get_best_params(self) -> Dict:

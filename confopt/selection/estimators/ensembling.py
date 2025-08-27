@@ -4,6 +4,8 @@ import numpy as np
 from copy import deepcopy
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import KFold
+from joblib import Parallel, delayed
+import os
 from confopt.selection.estimators.quantile_estimation import (
     BaseMultiFitQuantileEstimator,
     BaseSingleFitQuantileEstimator,
@@ -204,6 +206,7 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
         weighting_strategy: Literal["uniform", "linear_stack"] = "uniform",
         random_state: Optional[int] = None,
         alpha: float = 0.0,
+        parallelize: bool = False,
     ):
         if len(estimators) < 2:
             raise ValueError("At least 2 estimators required for ensemble")
@@ -213,6 +216,7 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
         self.weighting_strategy = weighting_strategy
         self.random_state = random_state
         self.alpha = alpha
+        self.parallelize = parallelize
 
         self.quantiles = None
         self.quantile_weights = None
@@ -243,6 +247,43 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
             n_splits=self.cv, shuffle=True, random_state=self.random_state
         )
 
+        # If parallelization is requested, run folds in parallel with at most cv workers
+        if self.parallelize:
+            n_jobs = min(self.cv, max(1, os.cpu_count() or 1))
+
+            def _process_fold(train_idx, val_idx):
+                X_train_fold, X_val_fold = X[train_idx], X[val_idx]
+                y_train_fold, y_val_fold = y[train_idx], y[val_idx]
+
+                fold_predictions = []
+                for estimator in self.estimators:
+                    estimator_copy = deepcopy(estimator)
+                    if hasattr(estimator_copy, "n_jobs"):
+                        estimator_copy.n_jobs = 1
+                    estimator_copy.fit(X_train_fold, y_train_fold, quantiles)
+                    pred = estimator_copy.predict(X_val_fold)
+                    fold_predictions.append(pred)
+
+                return (
+                    val_idx,
+                    y_val_fold,
+                    np.concatenate(fold_predictions, axis=1),
+                )
+
+            results = Parallel(n_jobs=n_jobs, prefer="processes")(
+                delayed(_process_fold)(train_idx, val_idx)
+                for train_idx, val_idx in cv_strategy.split(X)
+            )
+
+            val_indices_list, val_targets_list, val_predictions_list = zip(*results)
+
+            val_indices = np.concatenate(val_indices_list)
+            val_targets = np.concatenate(val_targets_list)
+            val_predictions = np.concatenate(val_predictions_list, axis=0)
+
+            return val_indices, val_targets, val_predictions
+
+        # Fallback: sequential processing (no parallelization)
         val_indices = []
         val_targets = []
         val_predictions = []
@@ -252,17 +293,13 @@ class QuantileEnsembleEstimator(BaseEnsembleEstimator):
             y_train_fold, y_val_fold = y[train_idx], y[val_idx]
 
             fold_predictions = []
-
             for estimator in self.estimators:
                 estimator_copy = deepcopy(estimator)
                 estimator_copy.fit(X_train_fold, y_train_fold, quantiles)
                 pred = estimator_copy.predict(X_val_fold)
                 fold_predictions.append(pred)
 
-            fold_predictions_reshaped = []
-            for pred in fold_predictions:
-                fold_predictions_reshaped.append(pred)
-            fold_predictions = np.concatenate(fold_predictions_reshaped, axis=1)
+            fold_predictions = np.concatenate(fold_predictions, axis=1)
 
             val_indices.extend(val_idx)
             val_targets.extend(y_val_fold)
@@ -511,7 +548,8 @@ class PointEnsembleEstimator(BaseEnsembleEstimator):
         cv_strategy = KFold(
             n_splits=self.cv, shuffle=True, random_state=self.random_state
         )
-
+        # Sequential processing only for PointEnsembleEstimator to avoid nested
+        # parallelism and potential slowdown when base estimators already parallelize.
         val_indices = []
         val_targets = []
         val_predictions = []
@@ -521,7 +559,6 @@ class PointEnsembleEstimator(BaseEnsembleEstimator):
             y_train_fold, y_val_fold = y[train_idx], y[val_idx]
 
             fold_predictions = []
-
             for estimator in self.estimators:
                 estimator_copy = deepcopy(estimator)
                 estimator_copy.fit(X_train_fold, y_train_fold)
@@ -550,7 +587,9 @@ class PointEnsembleEstimator(BaseEnsembleEstimator):
         val_predictions_sorted = val_predictions[sorted_indices]
         val_targets_sorted = val_targets[sorted_indices]
 
-        self.stacker = Lasso(alpha=self.alpha, fit_intercept=False, positive=True)
+        # Avoid instantiating Lasso with alpha=0 which triggers warnings and may be unstable.
+        lasso_alpha = self.alpha if self.alpha and self.alpha > 0 else 1e-6
+        self.stacker = Lasso(alpha=lasso_alpha, fit_intercept=False, positive=True)
         self.stacker.fit(val_predictions_sorted, val_targets_sorted)
         weights = self.stacker.coef_
 

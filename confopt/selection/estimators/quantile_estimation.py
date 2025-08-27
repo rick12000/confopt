@@ -7,24 +7,24 @@ random forest, neural network, and Gaussian process variants optimized for uncer
 quantification in conformal prediction frameworks.
 """
 
-from typing import List, Union, Optional
-import numpy as np
-from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
-from sklearn.neighbors import NearestNeighbors
-from statsmodels.regression.quantile_regression import QuantReg
-from sklearn.base import clone
+from typing import Optional, Union, List
 from abc import ABC, abstractmethod
-from scipy.stats import norm
+import numpy as np
 from scipy.linalg import solve_triangular, cholesky, LinAlgError
-from sklearn.gaussian_process import GaussianProcessRegressor
+from scipy.stats import norm
 from sklearn.gaussian_process.kernels import (
-    RBF,
+    Kernel,
     Matern,
+    RBF,
     RationalQuadratic,
     ExpSineSquared,
     ConstantKernel as C,
-    Kernel,
 )
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.base import clone
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.neighbors import NearestNeighbors
+from statsmodels.regression.quantile_regression import QuantReg
 import warnings
 import copy
 import logging
@@ -572,6 +572,8 @@ class QuantileGP(BaseSingleFitQuantileEstimator):
         prior_lengthscale_rate: float = 1.0,
         prior_noise_concentration: float = 1.1,
         prior_noise_rate: float = 30.0,
+        use_ard: bool = True,
+        categorical_kernel_type: str = "hamming",
     ):
         super().__init__()
         self.kernel = kernel
@@ -586,6 +588,8 @@ class QuantileGP(BaseSingleFitQuantileEstimator):
         self.prior_lengthscale_rate = prior_lengthscale_rate
         self.prior_noise_concentration = prior_noise_concentration
         self.prior_noise_rate = prior_noise_rate
+        self.use_ard = use_ard
+        self.categorical_kernel_type = categorical_kernel_type
         self._ppf_cache = {}
 
         # Fitted attributes
@@ -612,32 +616,85 @@ class QuantileGP(BaseSingleFitQuantileEstimator):
         Raises:
             ValueError: If unknown kernel name provided or invalid kernel type.
         """
-        # Default to Matern kernel with proper bounds
+        # Default to Matern 2.5 kernel with ARD if enabled
         if kernel_spec is None:
+            if self.use_ard and hasattr(self, "X_train_") and self.X_train_ is not None:
+                # For mixed categorical handling, ARD only applies to continuous dimensions
+                if (
+                    self.is_categorical is not None
+                    and self.categorical_kernel_type == "hamming"
+                ):
+                    # ARD only for continuous dimensions in additive mixed kernel
+                    n_cont_dims = np.sum(~self.is_categorical)
+                    if n_cont_dims > 0:
+                        length_scale = np.ones(n_cont_dims)
+                        length_scale_bounds = [(1e-2, 1e2)] * n_cont_dims
+                    else:
+                        length_scale = 1.0
+                        length_scale_bounds = (1e-2, 1e2)
+                else:
+                    # Standard ARD for all dimensions
+                    n_dims = self.X_train_.shape[1]
+                    length_scale = np.ones(n_dims)
+                    length_scale_bounds = [(1e-2, 1e2)] * n_dims
+            else:
+                length_scale = 1.0
+                length_scale_bounds = (1e-2, 1e2)
+
             return C(1.0, (1e-3, 1e3)) * Matern(
-                length_scale=1.0,
-                length_scale_bounds=(1e-2, 1e2),
-                nu=1.5,
+                length_scale=length_scale,
+                length_scale_bounds=length_scale_bounds,
+                nu=2.5,  # Upgraded from 1.5 to 2.5 for better smoothness
             )
 
-        # String specifications with proper bounds
+        # String specifications with ARD support and proper bounds
         elif isinstance(kernel_spec, str):
+            # Determine length scale configuration
+            if self.use_ard and hasattr(self, "X_train_") and self.X_train_ is not None:
+                # For mixed categorical handling, ARD only applies to continuous dimensions
+                if (
+                    self.is_categorical is not None
+                    and self.categorical_kernel_type == "hamming"
+                ):
+                    # ARD only for continuous dimensions in additive mixed kernel
+                    n_cont_dims = np.sum(~self.is_categorical)
+                    if n_cont_dims > 0:
+                        length_scale = np.ones(n_cont_dims)
+                        length_scale_bounds = [(1e-2, 1e2)] * n_cont_dims
+                    else:
+                        length_scale = 1.0
+                        length_scale_bounds = (1e-2, 1e2)
+                else:
+                    # Standard ARD for all dimensions
+                    n_dims = self.X_train_.shape[1]
+                    length_scale = np.ones(n_dims)
+                    length_scale_bounds = [(1e-2, 1e2)] * n_dims
+            else:
+                length_scale = 1.0
+                length_scale_bounds = (1e-2, 1e2)
+
             kernel_map = {
                 "rbf": C(1.0, (1e-3, 1e3))
-                * RBF(length_scale=1.0, length_scale_bounds=(1e-2, 1e2)),
+                * RBF(
+                    length_scale=length_scale, length_scale_bounds=length_scale_bounds
+                ),
                 "matern": C(1.0, (1e-3, 1e3))
-                * Matern(length_scale=1.0, length_scale_bounds=(1e-2, 1e2), nu=1.5),
+                * Matern(
+                    length_scale=length_scale,
+                    length_scale_bounds=length_scale_bounds,
+                    nu=2.5,
+                ),
                 "rational_quadratic": C(1.0, (1e-3, 1e3))
                 * RationalQuadratic(
-                    length_scale=1.0,
-                    length_scale_bounds=(1e-2, 1e2),
+                    length_scale=length_scale,
+                    length_scale_bounds=length_scale_bounds,
                     alpha=1.0,
                     alpha_bounds=(1e-3, 1e3),
                 ),
                 "exp_sine_squared": C(1.0, (1e-3, 1e3))
                 * ExpSineSquared(
-                    length_scale=1.0,
-                    length_scale_bounds=(1e-2, 1e2),
+                    length_scale=length_scale,
+                    length_scale_bounds=length_scale_bounds,
                     periodicity=1.0,
                     periodicity_bounds=(1e-2, 1e2),
                 ),
@@ -661,6 +718,10 @@ class QuantileGP(BaseSingleFitQuantileEstimator):
         if not self.optimize_hyperparameters:
             return
 
+        # For Optuna-style unified distance, optimize on ALL dimensions
+        # The categorical handling is done in the distance computation, not here
+        X_opt = self.X_train_
+
         # Use sklearn's GaussianProcessRegressor for hyperparameter optimization
         # This provides robust optimization with proper parameter mapping
         temp_gp = GaussianProcessRegressor(
@@ -672,7 +733,7 @@ class QuantileGP(BaseSingleFitQuantileEstimator):
         )
 
         try:
-            temp_gp.fit(self.X_train_, self.y_train_)
+            temp_gp.fit(X_opt, self.y_train_)
             # Extract optimized kernel
             self.kernel_ = temp_gp.kernel_
         except Exception as e:
@@ -681,7 +742,7 @@ class QuantileGP(BaseSingleFitQuantileEstimator):
             )
             # Keep the original kernel if optimization fails
 
-    def _fit_implementation(self, X: np.ndarray, y: np.ndarray) -> "QuantileGP":
+    def _fit_implementation(self, X, y: np.ndarray) -> "QuantileGP":
         """Fit Gaussian process with proper hyperparameter optimization.
 
         Implements robust GP fitting with:
@@ -691,14 +752,39 @@ class QuantileGP(BaseSingleFitQuantileEstimator):
         - Numerical stability through Cholesky decomposition
 
         Args:
-            X: Training features with shape (n_samples, n_features).
+            X: Training features - can be EncodedData object or numpy array.
             y: Training targets with shape (n_samples,).
 
         Returns:
             Self for method chaining.
         """
-        # Store training data
-        self.X_train_ = X.copy()
+        # Handle EncodedData objects for categorical support
+        from confopt.utils.configurations.encoded_data import EncodedData
+
+        # Check if we have EncodedData stored from conformal estimator
+        if hasattr(self, "_conformal_original_X") and isinstance(
+            self._conformal_original_X, EncodedData
+        ):
+            # Use the original EncodedData from conformal estimator
+            encoded_data = self._conformal_original_X
+            self.is_categorical = (
+                encoded_data.get_is_level_mask()
+            )  # Only level-encoded are categorical for GP
+            self.X_train_ = (
+                X.copy() if hasattr(X, "copy") else np.array(X)
+            )  # Use scaled X for training
+            self._encoded_data = encoded_data  # Store original for reference
+        elif isinstance(X, EncodedData):
+            # Direct EncodedData input
+            self.is_categorical = (
+                X.get_is_level_mask()
+            )  # Only level-encoded are categorical for GP
+            self.X_train_ = X.to_numpy()
+            self._encoded_data = X  # Store for later use
+        else:
+            # Fallback to numpy array (no categorical information)
+            self.X_train_ = X.copy() if hasattr(X, "copy") else np.array(X)
+            self._encoded_data = None
 
         # Normalize targets
         self.y_train_mean_ = np.mean(y)
@@ -725,50 +811,55 @@ class QuantileGP(BaseSingleFitQuantileEstimator):
         return self
 
     def _fit_gp(self) -> None:
-        """Fit GP with current hyperparameters using Cholesky decomposition."""
-        # Compute kernel matrix
-        if self.is_categorical is not None:
-            # Custom kernel computation for categorical variables
-            # For now, use standard kernel (full categorical support would need custom kernel)
-            K = self.kernel_(self.X_train_)
+        """Fit GP with current hyperparameters using enhanced Cholesky decomposition."""
+        # Compute kernel matrix with categorical support
+        if (
+            self.is_categorical is not None
+            and self.categorical_kernel_type == "hamming"
+        ):
+            K = self._compute_mixed_kernel_matrix(self.X_train_, self.X_train_)
         else:
             K = self.kernel_(self.X_train_)
 
-        # Add noise and regularization
-        K += (self.noise_variance_ + self.alpha) * np.eye(len(self.X_train_))
+        # Add noise and regularization with enhanced stability
+        noise_level = max(self.noise_variance_, 1e-8)  # Ensure minimum noise
+        K += (noise_level + self.alpha) * np.eye(len(self.X_train_))
 
-        # Cholesky decomposition for numerical stability
-        try:
-            self.chol_factor_ = cholesky(K, lower=True)
-        except LinAlgError:
-            # Add more regularization if Cholesky fails
-            K += 1e-6 * np.eye(len(self.X_train_))
-            self.chol_factor_ = cholesky(K, lower=True)
+        # Enhanced Cholesky decomposition with multiple fallback strategies
+        self.chol_factor_ = self._robust_cholesky(K)
 
         # Solve for alpha using Cholesky decomposition
         self.alpha_ = solve_triangular(self.chol_factor_, self.y_train_, lower=True)
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
+    def predict(self, X) -> np.ndarray:
         """Generate quantile predictions using analytical Gaussian distribution.
 
         Uses the GP posterior mean and variance to compute quantiles analytically
         as q_τ(x) = μ(x) + σ(x)Φ⁻¹(τ), ensuring monotonic quantile ordering.
 
         Args:
-            X: Features for prediction with shape (n_samples, n_features).
+            X: Features for prediction - can be EncodedData object or numpy array.
 
         Returns:
             Quantile predictions with shape (n_samples, n_quantiles).
         """
-        if self.batch_size is not None and len(X) > self.batch_size:
+        # Convert EncodedData to numpy array for prediction
+        from confopt.utils.configurations.encoded_data import EncodedData
+
+        if isinstance(X, EncodedData):
+            X_array = X.to_numpy()
+        else:
+            X_array = X
+
+        if self.batch_size is not None and len(X_array) > self.batch_size:
             results = []
-            for i in range(0, len(X), self.batch_size):
-                batch_X = X[i : i + self.batch_size]
+            for i in range(0, len(X_array), self.batch_size):
+                batch_X = X_array[i : i + self.batch_size]
                 batch_result = self._predict_batch(batch_X)
                 results.append(batch_result)
             return np.vstack(results)
         else:
-            return self._predict_batch(X)
+            return self._predict_batch(X_array)
 
     def _predict_batch(self, X: np.ndarray) -> np.ndarray:
         """Compute quantiles analytically from GP posterior.
@@ -792,7 +883,7 @@ class QuantileGP(BaseSingleFitQuantileEstimator):
         return quantile_preds
 
     def _predict_mean_var(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Predict mean and variance using Cholesky-based computation.
+        """Predict mean and variance using enhanced Cholesky-based computation.
 
         Args:
             X: Features with shape (n_samples, n_features).
@@ -800,8 +891,14 @@ class QuantileGP(BaseSingleFitQuantileEstimator):
         Returns:
             Tuple of (y_mean, y_var) with shapes (n_samples,) each.
         """
-        # Compute kernel between test and training points
-        K_star = self.kernel_(X, self.X_train_)
+        # Compute kernel between test and training points with categorical support
+        if (
+            self.is_categorical is not None
+            and self.categorical_kernel_type == "hamming"
+        ):
+            K_star = self._compute_mixed_kernel_matrix(X, self.X_train_)
+        else:
+            K_star = self.kernel_(X, self.X_train_)
 
         # Compute mean prediction
         chol_solve = solve_triangular(self.chol_factor_, K_star.T, lower=True)
@@ -810,15 +907,22 @@ class QuantileGP(BaseSingleFitQuantileEstimator):
         # Denormalize mean
         y_mean = y_mean * self.y_train_std_ + self.y_train_mean_
 
-        # Compute variance
-        K_star_star = self.kernel_.diag(X)
+        # Compute variance with categorical support
+        if (
+            self.is_categorical is not None
+            and self.categorical_kernel_type == "hamming"
+        ):
+            K_star_star = self._compute_mixed_kernel_diagonal(X)
+        else:
+            K_star_star = self.kernel_.diag(X)
+
         y_var = K_star_star - np.sum(chol_solve**2, axis=0)
 
         # Add noise variance for total predictive variance
-        y_var += self.noise_variance_
+        y_var += max(self.noise_variance_, 1e-8)
 
-        # Ensure non-negative variance
-        y_var = np.maximum(y_var, 1e-12)
+        # Ensure non-negative variance with better numerical stability
+        y_var = np.maximum(y_var, 1e-10)
 
         # Denormalize variance
         y_var *= self.y_train_std_**2
@@ -837,6 +941,111 @@ class QuantileGP(BaseSingleFitQuantileEstimator):
                 [norm.ppf(q) for q in self.quantiles]
             )
         return self._ppf_cache[quantiles_key]
+
+    def _robust_cholesky(self, K: np.ndarray) -> np.ndarray:
+        """Enhanced Cholesky decomposition with multiple fallback strategies.
+
+        Args:
+            K: Kernel matrix to decompose.
+
+        Returns:
+            Lower triangular Cholesky factor.
+        """
+        try:
+            return cholesky(K, lower=True)
+        except LinAlgError:
+            # First fallback: add small regularization
+            try:
+                K_reg = K + 1e-6 * np.eye(len(K))
+                return cholesky(K_reg, lower=True)
+            except LinAlgError:
+                # Second fallback: add larger regularization
+                try:
+                    K_reg = K + 1e-4 * np.eye(len(K))
+                    return cholesky(K_reg, lower=True)
+                except LinAlgError:
+                    # Final fallback: use eigenvalue regularization
+                    eigenvals, eigenvecs = np.linalg.eigh(K)
+                    eigenvals = np.maximum(eigenvals, 1e-6)
+                    K_reg = eigenvecs @ np.diag(eigenvals) @ eigenvecs.T
+                    return cholesky(K_reg, lower=True)
+
+    def _compute_mixed_kernel_matrix(
+        self, X1: np.ndarray, X2: np.ndarray
+    ) -> np.ndarray:
+        """Compute kernel matrix with mixed continuous/categorical variables.
+
+        Uses proper mixed kernel approach with additive combination to preserve
+        positive definiteness, following GP theory for categorical features.
+
+        Args:
+            X1: First set of points with shape (n1, n_features).
+            X2: Second set of points with shape (n2, n_features).
+
+        Returns:
+            Kernel matrix with shape (n1, n2).
+        """
+        if self.is_categorical is None:
+            return self.kernel_(X1, X2)
+
+        # Split continuous and categorical dimensions
+        cont_dims = ~self.is_categorical
+        cat_dims = self.is_categorical
+
+        # Initialize kernel matrix
+        K_total = np.zeros((X1.shape[0], X2.shape[0]))
+
+        # Continuous kernel component
+        if np.any(cont_dims):
+            X1_cont = X1[:, cont_dims]
+            X2_cont = X2[:, cont_dims]
+            K_cont = self.kernel_(X1_cont, X2_cont)
+            K_total += K_cont
+
+        # Categorical kernel component using proper Hamming distance
+        if np.any(cat_dims):
+            X1_cat = X1[:, cat_dims]
+            X2_cat = X2[:, cat_dims]
+            K_cat = self._hamming_kernel(X1_cat, X2_cat)
+
+            # Additive combination preserves positive definiteness
+            kernel_scale = self._get_kernel_scale()
+            K_total += 0.5 * kernel_scale * K_cat
+
+        return K_total
+
+    def _compute_mixed_kernel_diagonal(self, X: np.ndarray) -> np.ndarray:
+        """Compute diagonal of kernel matrix for mixed variables."""
+        if self.is_categorical is None:
+            return self.kernel_.diag(X)
+
+        # Continuous diagonal
+        cont_dims = ~self.is_categorical
+        if np.any(cont_dims):
+            K_cont_diag = self.kernel_.diag(X[:, cont_dims])
+        else:
+            K_cont_diag = np.zeros(X.shape[0])
+
+        # Categorical diagonal (always 1.0 for Hamming kernel)
+        kernel_scale = self._get_kernel_scale()
+        K_cat_diag = 0.5 * kernel_scale * np.ones(X.shape[0])
+
+        return K_cont_diag + K_cat_diag
+
+    def _get_kernel_scale(self) -> float:
+        """Extract kernel scale parameter from fitted kernel."""
+        if hasattr(self.kernel_, "k1"):
+            return self.kernel_.k1.constant_value
+        elif hasattr(self.kernel_, "constant_value"):
+            return self.kernel_.constant_value
+        return 1.0
+
+    def _hamming_kernel(self, X1: np.ndarray, X2: np.ndarray) -> np.ndarray:
+        """Compute Hamming distance kernel: k(x,x') = exp(-λ * d_H(x,x'))."""
+        n_cat = X1.shape[1]
+        hamming_distances = np.sum(X1[:, None, :] != X2[None, :, :], axis=2)
+        lambda_param = 1.0 / n_cat if n_cat > 0 else 1.0
+        return np.exp(-lambda_param * hamming_distances)
 
     def _get_candidate_local_distribution(self, X: np.ndarray) -> np.ndarray:
         """Generate posterior samples for Monte Carlo quantile estimation.

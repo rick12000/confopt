@@ -417,6 +417,7 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
         y: np.array,
         tuning_iterations: Optional[int] = 0,
         random_state: Optional[int] = None,
+        parallelize: bool = False,
     ):
         """Fit the locally weighted conformal estimator for acquisition.
 
@@ -449,6 +450,7 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
             y=y,
             tuning_iterations=tuning_iterations,
             random_state=random_state,
+            parallelize=parallelize,
         )
 
     def _predict_with_pessimistic_lower_bound(self, X: np.array):
@@ -702,6 +704,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         y: np.array,
         tuning_iterations: Optional[int] = 0,
         random_state: Optional[int] = None,
+        parallelize: bool = False,
     ):
         """Fit the quantile conformal estimator for acquisition.
 
@@ -738,6 +741,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             self.median_estimator = initialize_estimator(
                 estimator_architecture=self.quantile_estimator_architecture,
                 random_state=random_state,
+                parallelize=parallelize,
             )
             self.median_estimator.fit(
                 X=X,
@@ -757,6 +761,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
                 self.point_estimator = initialize_estimator(
                     estimator_architecture="gbm",
                     random_state=random_state,
+                    parallelize=parallelize,
                 )
                 self.point_estimator.fit(X=X, y=y)
 
@@ -765,6 +770,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             y=y,
             tuning_iterations=tuning_iterations,
             random_state=random_state,
+            parallelize=parallelize,
         )
 
     def _predict_with_pessimistic_lower_bound(self, X: np.array):

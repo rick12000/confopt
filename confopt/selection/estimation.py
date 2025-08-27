@@ -11,6 +11,8 @@ import logging
 from typing import Dict, Optional, List, Union, Tuple, Any, Literal
 from copy import deepcopy
 import inspect
+from joblib import Parallel, delayed
+import os
 
 from sklearn.base import BaseEstimator
 import numpy as np
@@ -35,6 +37,7 @@ def initialize_estimator(
     estimator_architecture: str,
     initialization_params: Dict = None,
     random_state: Optional[int] = None,
+    parallelize: bool = False,
 ):
     """Initialize an estimator instance from registry with given configuration.
 
@@ -97,8 +100,15 @@ def initialize_estimator(
         # Add the fresh estimators to the parameters
         params["estimators"] = fresh_estimators
 
+    # If the estimator class supports a `parallelize` argument, propagate the
+    # global flag and/or the explicit `parallelize` parameter.
+    estimator_class = estimator_config.estimator_class
+    init_signature = inspect.signature(estimator_class.__init__)
+    if "parallelize" in init_signature.parameters:
+        params["parallelize"] = parallelize
+
     # Create and return the estimator instance
-    return estimator_config.estimator_class(**params)
+    return estimator_class(**params)
 
 
 def average_scores_across_folds(
@@ -162,6 +172,7 @@ class RandomTuner:
         train_split: float = 0.8,
         split_type: Literal["k_fold", "ordinal_split"] = "k_fold",
         forced_param_configurations: Optional[List[Dict]] = None,
+        parallelize: bool = False,
     ) -> Dict:
         """Perform hyperparameter optimization via random search with cross-validation.
 
@@ -213,6 +224,7 @@ class RandomTuner:
             y=y,
             train_split=train_split,
             split_type=split_type,
+            parallelize=parallelize,
         )
 
         # Find the configuration with the minimum score
@@ -263,6 +275,7 @@ class RandomTuner:
         y: np.array,
         train_split: float = 0.66,
         split_type: Literal["k_fold", "ordinal_split"] = "k_fold",
+        parallelize: bool = False,
     ) -> Tuple[List[Dict], List[float]]:
         """Evaluate parameter configurations via cross-validation.
 
@@ -286,26 +299,48 @@ class RandomTuner:
         fold_indices = self._create_fold_indices(X, train_split, split_type)
 
         # For each configuration, evaluate across all folds
-        for config_idx, configuration in enumerate(configurations):
-            for train_index, test_index in fold_indices:
-                X_train, X_val = X[train_index, :], X[test_index, :]
-                Y_train, Y_val = y[train_index], y[test_index]
-
-                model = initialize_estimator(
-                    estimator_architecture=estimator_config.estimator_name,
-                    initialization_params=configuration,
+        if parallelize and len(configurations) >= 4:
+            n_jobs = min(os.cpu_count(), 4, len(configurations))
+            logger.info(f"Using {n_jobs} parallel jobs for tuning.")
+            results = Parallel(n_jobs=n_jobs)(
+                delayed(_evaluate_configuration)(
+                    configuration=config,
+                    estimator_config=estimator_config,
+                    X=X,
+                    y=y,
+                    fold_indices=fold_indices,
                     random_state=self.random_state,
+                    parallelize=False,  # Inner parallelization is off
+                    fit_model_method=self._fit_model,
+                    evaluate_model_method=self._evaluate_model,
                 )
+                for config in configurations
+            )
+            # Process results from parallel execution
+            for i, (config, scores) in enumerate(results):
+                config_scores[i].extend(scores)
+        else:
+            for config_idx, configuration in enumerate(configurations):
+                for train_index, test_index in fold_indices:
+                    X_train, X_val = X[train_index, :], X[test_index, :]
+                    Y_train, Y_val = y[train_index], y[test_index]
 
-                try:
-                    self._fit_model(model, X_train, Y_train)
-                    score = self._evaluate_model(model, X_val, Y_val)
-                    config_scores[config_idx].append(score)
-                except Exception as e:
-                    logger.warning(
-                        f"Configuration {config_idx} failed on a fold. Error: {e}"
+                    model = initialize_estimator(
+                        estimator_architecture=estimator_config.estimator_name,
+                        initialization_params=configuration,
+                        random_state=self.random_state,
+                        parallelize=parallelize,
                     )
-                    config_scores[config_idx].append(np.nan)
+
+                    try:
+                        self._fit_model(model, X_train, Y_train)
+                        score = self._evaluate_model(model, X_val, Y_val)
+                        config_scores[config_idx].append(score)
+                    except Exception as e:
+                        logger.warning(
+                            f"Configuration {config_idx} failed on a fold. Error: {e}"
+                        )
+                        config_scores[config_idx].append(np.nan)
 
         # Compute average scores for each configuration
         scored_configurations = []
@@ -350,6 +385,47 @@ class RandomTuner:
         raise NotImplementedError("Subclasses must implement _evaluate_model")
 
 
+def _evaluate_configuration(
+    configuration: Dict,
+    estimator_config: "EstimatorConfig",
+    X: np.array,
+    y: np.array,
+    fold_indices: List[Tuple[np.array, np.array]],
+    random_state: Optional[int],
+    parallelize: bool,
+    fit_model_method: callable,
+    evaluate_model_method: callable,
+    quantiles: Optional[List[float]] = None,
+) -> Tuple[Dict, List[float]]:
+    """Evaluate a single parameter configuration across all cross-validation folds."""
+    config_scores = []
+    for train_index, test_index in fold_indices:
+        X_train, X_val = X[train_index, :], X[test_index, :]
+        Y_train, Y_val = y[train_index], y[test_index]
+
+        model = initialize_estimator(
+            estimator_architecture=estimator_config.estimator_name,
+            initialization_params=configuration,
+            random_state=random_state,
+            parallelize=parallelize,
+        )
+
+        try:
+            # For QuantileTuner, self._fit_model is bound and has self.quantiles
+            # No need to pass quantiles explicitly if the method doesn't take it
+            if "quantiles" in inspect.signature(fit_model_method).parameters:
+                fit_model_method(model, X_train, Y_train, quantiles=quantiles)
+            else:
+                fit_model_method(model, X_train, Y_train)
+            score = evaluate_model_method(model, X_val, Y_val)
+            config_scores.append(score)
+        except Exception as e:
+            logger.warning(f"Configuration failed on a fold. Error: {e}")
+            config_scores.append(np.nan)
+
+    return configuration, config_scores
+
+
 class PointTuner(RandomTuner):
     """Hyperparameter tuner for point estimation models using MSE evaluation.
 
@@ -384,6 +460,67 @@ class PointTuner(RandomTuner):
         y_pred = model.predict(X=X_val)
         return mean_squared_error(Y_val, y_pred)
 
+    def _score_configurations(
+        self,
+        configurations: List[Dict],
+        estimator_config: "EstimatorConfig",
+        X: np.array,
+        y: np.array,
+        train_split: float = 0.66,
+        split_type: Literal["k_fold", "ordinal_split"] = "k_fold",
+        parallelize: bool = False,
+    ) -> Tuple[List[Dict], List[float]]:
+        """Evaluate parameter configurations via cross-validation."""
+        config_scores = {i: [] for i in range(len(configurations))}
+        fold_indices = self._create_fold_indices(X, train_split, split_type)
+
+        if parallelize and len(configurations) >= 4:
+            n_jobs = min(os.cpu_count() or 1, 4, len(configurations))
+            logger.info(f"Using {n_jobs} parallel jobs for tuning.")
+            results = Parallel(n_jobs=n_jobs)(
+                delayed(_evaluate_configuration)(
+                    configuration=config,
+                    estimator_config=estimator_config,
+                    X=X,
+                    y=y,
+                    fold_indices=fold_indices,
+                    random_state=self.random_state,
+                    parallelize=False,
+                    fit_model_method=self._fit_model,
+                    evaluate_model_method=self._evaluate_model,
+                )
+                for config in configurations
+            )
+            for i, (config, scores) in enumerate(results):
+                config_scores[i].extend(scores)
+        else:
+            for config_idx, configuration in enumerate(configurations):
+                _, scores = _evaluate_configuration(
+                    configuration=configuration,
+                    estimator_config=estimator_config,
+                    X=X,
+                    y=y,
+                    fold_indices=fold_indices,
+                    random_state=self.random_state,
+                    parallelize=parallelize,
+                    fit_model_method=self._fit_model,
+                    evaluate_model_method=self._evaluate_model,
+                )
+                config_scores[config_idx].extend(scores)
+
+        # Compute average scores for each configuration
+        scored_configurations = []
+        scores = []
+        for config_idx, configuration in enumerate(configurations):
+            fold_scores = config_scores[config_idx]
+            valid_scores = [s for s in fold_scores if not np.isnan(s)]
+            if valid_scores:
+                avg_score = sum(valid_scores) / len(valid_scores)
+                scored_configurations.append(configuration)
+                scores.append(avg_score)
+
+        return scored_configurations, scores
+
 
 class QuantileTuner(RandomTuner):
     """Hyperparameter tuner for quantile regression models using pinball loss evaluation.
@@ -400,6 +537,66 @@ class QuantileTuner(RandomTuner):
     def __init__(self, quantiles: List[float], random_state: Optional[int] = None):
         super().__init__(random_state)
         self.quantiles = quantiles
+
+    def _score_configurations(
+        self,
+        configurations: List[Dict],
+        estimator_config: "EstimatorConfig",
+        X: np.array,
+        y: np.array,
+        train_split: float = 0.66,
+        split_type: Literal["k_fold", "ordinal_split"] = "k_fold",
+        parallelize: bool = False,
+    ) -> Tuple[List[Dict], List[float]]:
+        """Evaluate parameter configurations via cross-validation."""
+        config_scores = {i: [] for i in range(len(configurations))}
+        fold_indices = self._create_fold_indices(X, train_split, split_type)
+
+        if parallelize and len(configurations) >= 4:
+            n_jobs = min(os.cpu_count() or 1, 4, len(configurations))
+            logger.info(f"Using {n_jobs} parallel jobs for tuning.")
+            results = Parallel(n_jobs=n_jobs)(
+                delayed(_evaluate_configuration)(
+                    configuration=config,
+                    estimator_config=estimator_config,
+                    X=X,
+                    y=y,
+                    fold_indices=fold_indices,
+                    random_state=self.random_state,
+                    parallelize=False,
+                    fit_model_method=self._fit_model,
+                    evaluate_model_method=self._evaluate_model,
+                )
+                for config in configurations
+            )
+            for i, (config, scores) in enumerate(results):
+                config_scores[i].extend(scores)
+        else:
+            for config_idx, configuration in enumerate(configurations):
+                _, scores = _evaluate_configuration(
+                    configuration=configuration,
+                    estimator_config=estimator_config,
+                    X=X,
+                    y=y,
+                    fold_indices=fold_indices,
+                    random_state=self.random_state,
+                    parallelize=parallelize,
+                    fit_model_method=self._fit_model,
+                    evaluate_model_method=self._evaluate_model,
+                )
+                config_scores[config_idx].extend(scores)
+        # Compute average scores for each configuration
+        scored_configurations = []
+        scores = []
+        for config_idx, configuration in enumerate(configurations):
+            fold_scores = config_scores[config_idx]
+            valid_scores = [s for s in fold_scores if not np.isnan(s)]
+            if valid_scores:
+                avg_score = sum(valid_scores) / len(valid_scores)
+                scored_configurations.append(configuration)
+                scores.append(avg_score)
+
+        return scored_configurations, scores
 
     def _fit_model(
         self,

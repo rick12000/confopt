@@ -2,7 +2,6 @@ import logging
 import numpy as np
 from typing import Optional, Tuple, List, Literal
 from sklearn.model_selection import KFold
-from sklearn.preprocessing import StandardScaler
 from confopt.wrapping import ConformalBounds
 from confopt.utils.preprocessing import train_val_split
 from confopt.selection.estimation import (
@@ -106,6 +105,7 @@ class LocallyWeightedConformalEstimator:
         min_obs_for_tuning: int,
         random_state: Optional[int] = None,
         last_best_params: Optional[dict] = None,
+        parallelize: bool = False,
     ):
         """Tune and fit a component estimator with hyperparameter optimization.
 
@@ -151,6 +151,7 @@ class LocallyWeightedConformalEstimator:
                 estimator_architecture=estimator_architecture,
                 n_searches=tuning_iterations,
                 forced_param_configurations=forced_param_configurations,
+                parallelize=parallelize,
             )
         else:
             initialization_params = (
@@ -161,6 +162,7 @@ class LocallyWeightedConformalEstimator:
             estimator_architecture=estimator_architecture,
             initialization_params=initialization_params,
             random_state=random_state,
+            parallelize=parallelize,
         )
         estimator.fit(X, y)
 
@@ -206,6 +208,7 @@ class LocallyWeightedConformalEstimator:
         random_state: Optional[int],
         best_pe_config: Optional[dict],
         best_ve_config: Optional[dict],
+        parallelize: bool = False,
     ):
         """Fit locally weighted conformal estimator using cross-validation (CV).
 
@@ -280,6 +283,7 @@ class LocallyWeightedConformalEstimator:
                 min_obs_for_tuning=min_obs_for_tuning,
                 random_state=random_state if random_state else None,
                 last_best_params=best_pe_config,
+                parallelize=parallelize,
             )
 
             # Compute residuals and fit variance estimator
@@ -292,6 +296,7 @@ class LocallyWeightedConformalEstimator:
                 min_obs_for_tuning=min_obs_for_tuning,
                 random_state=random_state if random_state else None,
                 last_best_params=best_ve_config,
+                parallelize=parallelize,
             )
 
             # Compute nonconformity scores on validation fold
@@ -324,6 +329,7 @@ class LocallyWeightedConformalEstimator:
             min_obs_for_tuning=min_obs_for_tuning,
             random_state=random_state,
             last_best_params=best_pe_config,
+            parallelize=parallelize,
         )
 
         abs_pe_residuals_final = abs(y_ve_final - self.pe_estimator.predict(X_ve_final))
@@ -335,6 +341,7 @@ class LocallyWeightedConformalEstimator:
             min_obs_for_tuning=min_obs_for_tuning,
             random_state=random_state,
             last_best_params=best_ve_config,
+            parallelize=parallelize,
         )
 
         # Store aggregated nonconformity scores
@@ -349,6 +356,7 @@ class LocallyWeightedConformalEstimator:
         random_state: Optional[int],
         best_pe_config: Optional[dict],
         best_ve_config: Optional[dict],
+        parallelize: bool = False,
     ):
         """Fit locally weighted conformal estimator using train-test split calibration.
 
@@ -418,6 +426,7 @@ class LocallyWeightedConformalEstimator:
             min_obs_for_tuning=min_obs_for_tuning,
             random_state=random_state,
             last_best_params=best_pe_config,
+            parallelize=parallelize,
         )
         abs_pe_residuals = abs(y_ve - self.pe_estimator.predict(X_ve))
 
@@ -429,6 +438,7 @@ class LocallyWeightedConformalEstimator:
             min_obs_for_tuning=min_obs_for_tuning,
             random_state=random_state,
             last_best_params=best_ve_config,
+            parallelize=parallelize,
         )
 
         var_pred = self.ve_estimator.predict(X_val)
@@ -447,6 +457,7 @@ class LocallyWeightedConformalEstimator:
         random_state: Optional[int] = None,
         best_pe_config: Optional[dict] = None,
         best_ve_config: Optional[dict] = None,
+        parallelize: bool = False,
     ):
         """Fit the locally weighted conformal estimator.
 
@@ -463,9 +474,11 @@ class LocallyWeightedConformalEstimator:
             best_pe_config: Warm-start parameters for point estimator.
             best_ve_config: Warm-start parameters for variance estimator.
         """
-        # Apply feature scaling to entire dataset if requested
+        # Apply feature scaling to continuous features only if requested
         if self.normalize_features:
-            self.feature_scaler = StandardScaler()
+            from confopt.utils.configurations.scaling import CategoricalAwareScaler
+
+            self.feature_scaler = CategoricalAwareScaler()
             X_scaled = self.feature_scaler.fit_transform(X)
         else:
             X_scaled = X
@@ -483,6 +496,7 @@ class LocallyWeightedConformalEstimator:
                 random_state,
                 best_pe_config,
                 best_ve_config,
+                parallelize,
             )
         else:  # train_test_split
             self._fit_train_test_split(
@@ -493,6 +507,7 @@ class LocallyWeightedConformalEstimator:
                 random_state,
                 best_pe_config,
                 best_ve_config,
+                parallelize,
             )
 
     def predict_intervals(self, X: np.array) -> List[ConformalBounds]:
@@ -726,6 +741,25 @@ class QuantileConformalEstimator:
         self.last_best_params = None
         self.feature_scaler = None
 
+    def _initialize_quantile_estimator(
+        self, initialization_params=None, random_state=None, parallelize=False
+    ):
+        """Initialize quantile estimator."""
+        estimator = initialize_estimator(
+            estimator_architecture=self.quantile_estimator_architecture,
+            initialization_params=initialization_params,
+            random_state=random_state,
+            parallelize=parallelize,
+        )
+
+        # For QuantileGP, store the original data format for later use
+        if self.quantile_estimator_architecture == "qgp" and hasattr(
+            self, "_original_X"
+        ):
+            estimator._conformal_original_X = self._original_X
+
+        return estimator
+
     def _determine_splitting_strategy(self, total_size: int) -> str:
         """Determine optimal data splitting strategy based on dataset size and configuration.
 
@@ -767,6 +801,7 @@ class QuantileConformalEstimator:
         min_obs_for_tuning: int,
         random_state: Optional[int],
         last_best_params: Optional[dict],
+        parallelize: bool = False,
     ):
         """Fit quantile estimator without conformal calibration for small datasets.
 
@@ -826,6 +861,7 @@ class QuantileConformalEstimator:
                 estimator_architecture=self.quantile_estimator_architecture,
                 n_searches=tuning_iterations,
                 forced_param_configurations=forced_param_configurations,
+                parallelize=parallelize,
             )
             self.last_best_params = initialization_params
         else:
@@ -834,10 +870,10 @@ class QuantileConformalEstimator:
             )
             self.last_best_params = last_best_params
 
-        self.quantile_estimator = initialize_estimator(
-            estimator_architecture=self.quantile_estimator_architecture,
+        self.quantile_estimator = self._initialize_quantile_estimator(
             initialization_params=initialization_params,
             random_state=random_state,
+            parallelize=parallelize,
         )
         self.quantile_estimator.fit(X, y, quantiles=all_quantiles)
         self.conformalize_predictions = False
@@ -851,6 +887,7 @@ class QuantileConformalEstimator:
         min_obs_for_tuning: int,
         random_state: Optional[int],
         last_best_params: Optional[dict],
+        parallelize: bool = False,
     ):
         """Fit quantile conformal estimator using cross-validation (CV).
 
@@ -934,6 +971,7 @@ class QuantileConformalEstimator:
                     estimator_architecture=self.quantile_estimator_architecture,
                     n_searches=tuning_iterations,
                     forced_param_configurations=forced_param_configurations,
+                    parallelize=parallelize,
                 )
             else:
                 fold_initialization_params = (
@@ -942,10 +980,10 @@ class QuantileConformalEstimator:
                     else None
                 )
 
-            fold_estimator = initialize_estimator(
-                estimator_architecture=self.quantile_estimator_architecture,
+            fold_estimator = self._initialize_quantile_estimator(
                 initialization_params=fold_initialization_params,
                 random_state=random_state if random_state else None,
+                parallelize=parallelize,
             )
             fold_estimator.fit(X_fold_train, y_fold_train, quantiles=all_quantiles)
 
@@ -992,6 +1030,7 @@ class QuantileConformalEstimator:
                 estimator_architecture=self.quantile_estimator_architecture,
                 n_searches=tuning_iterations,
                 forced_param_configurations=forced_param_configurations,
+                parallelize=parallelize,
             )
             self.last_best_params = final_initialization_params
         else:
@@ -1004,6 +1043,7 @@ class QuantileConformalEstimator:
             estimator_architecture=self.quantile_estimator_architecture,
             initialization_params=final_initialization_params,
             random_state=random_state,
+            parallelize=parallelize,
         )
         self.quantile_estimator.fit(X, y, quantiles=all_quantiles)
         self.conformalize_predictions = True
@@ -1017,6 +1057,7 @@ class QuantileConformalEstimator:
         min_obs_for_tuning: int,
         random_state: Optional[int],
         last_best_params: Optional[dict],
+        parallelize: bool = False,
     ):
         """Fit quantile conformal estimator using train-test split calibration.
 
@@ -1093,6 +1134,7 @@ class QuantileConformalEstimator:
                 estimator_architecture=self.quantile_estimator_architecture,
                 n_searches=tuning_iterations,
                 forced_param_configurations=forced_param_configurations,
+                parallelize=parallelize,
             )
             self.last_best_params = initialization_params
         else:
@@ -1101,10 +1143,10 @@ class QuantileConformalEstimator:
             )
             self.last_best_params = last_best_params
 
-        self.quantile_estimator = initialize_estimator(
-            estimator_architecture=self.quantile_estimator_architecture,
+        self.quantile_estimator = self._initialize_quantile_estimator(
             initialization_params=initialization_params,
             random_state=random_state,
+            parallelize=parallelize,
         )
         self.quantile_estimator.fit(X_train, y_train, quantiles=all_quantiles)
 
@@ -1143,12 +1185,13 @@ class QuantileConformalEstimator:
 
     def fit(
         self,
-        X: np.array,
+        X,
         y: np.array,
         tuning_iterations: Optional[int] = 0,
         min_obs_for_tuning: int = 50,
         random_state: Optional[int] = None,
         last_best_params: Optional[dict] = None,
+        parallelize: bool = False,
     ):
         """Fit the quantile conformal estimator.
 
@@ -1158,19 +1201,34 @@ class QuantileConformalEstimator:
         including feature scaling applied to the entire dataset.
 
         Args:
-            X: Input features, shape (n_samples, n_features).
+            X: Input features - can be EncodedData object or numpy array.
             y: Target values, shape (n_samples,).
             tuning_iterations: Hyperparameter search iterations (0 disables tuning).
             min_obs_for_tuning: Minimum samples required for hyperparameter tuning.
             random_state: Random seed for reproducible initialization.
             last_best_params: Warm-start parameters from previous fitting.
         """
-        # Apply feature scaling to entire dataset if requested
-        if self.normalize_features:
-            self.feature_scaler = StandardScaler()
-            X_scaled = self.feature_scaler.fit_transform(X)
+        # Store the original X for passing to QuantileGP
+        self._original_X = X
+
+        # Convert to numpy array for feature scaling and other operations
+        from confopt.utils.configurations.encoded_data import EncodedData
+
+        if isinstance(X, EncodedData):
+            X_array = X.to_numpy()
         else:
-            X_scaled = X
+            X_array = X
+
+        # Apply feature scaling to continuous features only if requested
+        if self.normalize_features:
+            from confopt.utils.configurations.scaling import CategoricalAwareScaler
+
+            self.feature_scaler = CategoricalAwareScaler()
+            X_scaled = self.feature_scaler.fit_transform(
+                X if isinstance(X, EncodedData) else X_array
+            )
+        else:
+            X_scaled = X_array
             self.feature_scaler = None
 
         all_quantiles = []
@@ -1197,6 +1255,7 @@ class QuantileConformalEstimator:
                     min_obs_for_tuning,
                     random_state,
                     last_best_params,
+                    parallelize,
                 )
             else:  # train_test_split
                 self._fit_train_test_split(
@@ -1207,6 +1266,7 @@ class QuantileConformalEstimator:
                     min_obs_for_tuning,
                     random_state,
                     last_best_params,
+                    parallelize,
                 )
 
         else:
@@ -1218,6 +1278,7 @@ class QuantileConformalEstimator:
                 min_obs_for_tuning,
                 random_state,
                 last_best_params,
+                parallelize,
             )
 
     def predict_intervals(self, X: np.array) -> List[ConformalBounds]:
