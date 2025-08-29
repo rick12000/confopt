@@ -24,6 +24,7 @@ Integration Context:
 import logging
 from typing import Optional, Union, Literal, Tuple
 import numpy as np
+from sklearn.preprocessing import StandardScaler
 from abc import ABC, abstractmethod
 
 
@@ -43,6 +44,9 @@ from confopt.selection.sampling.entropy_samplers import (
     MaxValueEntropySearchSampler,
 )
 from confopt.selection.estimation import initialize_estimator
+from confopt.selection.estimator_configuration import (
+    QUANTILE_TO_POINT_ESTIMATOR_MAPPING,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +79,7 @@ class BaseConformalSearcher(ABC):
         y_val: Validation targets for conformal calibration.
         last_beta: Most recent coverage feedback for single-alpha samplers.
         predictions_per_interval: Cached interval predictions from last predict() call.
+        point_estimator: Fitted point estimator for optimistic Thompson sampling.
 
     Design Pattern:
         Implements Template Method pattern with strategy injection, where the
@@ -499,10 +504,12 @@ class LocallyWeightedConformalSearcher(BaseConformalSearcher):
             self.conformal_estimator.pe_estimator.predict(X)
         ).reshape(-1, 1)
         interval = self.predictions_per_interval[0]
-        width = (interval.upper_bounds - interval.lower_bounds).reshape(-1, 1) / 2
+        half_width = (
+            np.abs(interval.upper_bounds - interval.lower_bounds).reshape(-1, 1) / 2
+        )
         return self.sampler.calculate_ucb_predictions(
             point_estimates=point_estimates,
-            interval_width=width,
+            half_width=half_width,
         )
 
     def _predict_with_thompson(self, X: np.array):
@@ -687,6 +694,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         self.n_calibration_folds = n_calibration_folds
         self.calibration_split_strategy = calibration_split_strategy
         self.symmetric_adjustment = symmetric_adjustment
+        self.scaler = StandardScaler()
         self.conformal_estimator = QuantileConformalEstimator(
             quantile_estimator_architecture=self.quantile_estimator_architecture,
             alphas=self.sampler.fetch_alphas(),
@@ -733,32 +741,54 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         self.y_train = y
         random_state = random_state
 
-        # Create median estimator for bound samplers (UCB point estimates)
-        if isinstance(self.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)):
-            self.median_estimator = initialize_estimator(
-                estimator_architecture=self.quantile_estimator_architecture,
-                random_state=random_state,
-            )
-            self.median_estimator.fit(
-                X=X,
-                y=y,
-                quantiles=[0.5],  # Only estimate the median
-            )
-
-        # Create point estimator for optimistic Thompson sampling
+        # Create median/mean estimator for bound samplers (UCB point estimates) and Optimistic Thompson sampling
         if isinstance(
-            self.sampler,
-            (ThompsonSampler),
-        ):
-            if (
+            self.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)
+        ) or (
+            isinstance(self.sampler, ThompsonSampler)
+            and (
                 hasattr(self.sampler, "enable_optimistic_sampling")
                 and self.sampler.enable_optimistic_sampling
+            )
+        ):
+            # Fit scaler on training data and transform X for point estimator training
+            X_normalized = self.scaler.fit_transform(X)
+
+            if (
+                self.quantile_estimator_architecture
+                in QUANTILE_TO_POINT_ESTIMATOR_MAPPING
             ):
+                point_estimator_architecture = QUANTILE_TO_POINT_ESTIMATOR_MAPPING[
+                    self.quantile_estimator_architecture
+                ]
                 self.point_estimator = initialize_estimator(
-                    estimator_architecture="gbm",
+                    estimator_architecture=point_estimator_architecture,
                     random_state=random_state,
                 )
-                self.point_estimator.fit(X=X, y=y)
+                self.point_estimator.fit(X=X_normalized, y=y)
+            # TODO: Temporary fallback to median as point estimator for architectures that
+            # don't yet have a point counterpart in the code:
+            else:
+                self.point_estimator = initialize_estimator(
+                    estimator_architecture=self.quantile_estimator_architecture,
+                    random_state=random_state,
+                )
+                self.point_estimator.fit(
+                    X=X_normalized,
+                    y=y,
+                    quantiles=[0.5],  # Only estimate the median
+                )
+
+                # NOTE: Scrappy wrapper to align predict calls between quantile and point estimators
+                # TODO: Remove in future
+                class PointWrapper:
+                    def __init__(self, estimator: QuantileConformalEstimator):
+                        self.estimator = estimator
+
+                    def predict(self, X):
+                        return self.estimator.predict(X)[:, 0]
+
+                self.point_estimator = PointWrapper(self.point_estimator)
 
         self.conformal_estimator.fit(
             X=X,
@@ -802,21 +832,22 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             UCB acquisition values, shape (n_candidates,).
 
         Mathematical Formulation:
-            UCB(x) = median_estimate(x) - β × (interval_width(x) / 2)
-            Where median_estimate comes from dedicated 0.5 quantile estimator and
+            UCB(x) = point_estimate(x) - β × (interval_width(x) / 2)
+            Where point_estimate comes from dedicated point estimator and
             interval bounds come from quantile estimation with symmetric variance assumption.
         """
         self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
         interval = self.predictions_per_interval[0]
 
-        # Use dedicated median estimator for point estimates (index 0 since we only fit quantile 0.5)
-        point_estimates = self.median_estimator.predict(X)[:, 0]
+        # Use dedicated point estimator for point estimates (index 0 since we only fit quantile 0.5)
+        X_normalized = self.scaler.transform(X)
+        point_estimates = self.point_estimator.predict(X_normalized)
 
         # Use half the interval width for symmetric variance assumption
-        width = (interval.upper_bounds - interval.lower_bounds) / 2
+        half_width = np.abs(interval.upper_bounds - interval.lower_bounds) / 2
         return self.sampler.calculate_ucb_predictions(
             point_estimates=point_estimates,
-            interval_width=width,
+            half_width=half_width,
         )
 
     def _predict_with_thompson(self, X: np.array):
@@ -840,9 +871,8 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
         point_predictions = None
         if self.sampler.enable_optimistic_sampling:
-            point_predictor = getattr(self, "point_estimator", None)
-            if point_predictor:
-                point_predictions = point_predictor.predict(X)
+            X_normalized = self.scaler.transform(X)
+            point_predictions = self.point_estimator.predict(X_normalized)
         return self.sampler.calculate_thompson_predictions(
             predictions_per_interval=self.predictions_per_interval,
             point_predictions=point_predictions,

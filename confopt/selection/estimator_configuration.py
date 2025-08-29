@@ -59,9 +59,6 @@ KNN_NAME: str = "knn"
 RF_NAME: str = "rf"
 QKNN_NAME: str = "qknn"
 QL_NAME: str = "ql"
-SFQENS_NAME: str = "sfqens"  # Quantile ensemble model
-MFENS_NAME: str = "mfqens"  # Ensemble model name for multi-fit quantile combinations
-PENS_NAME: str = "pens"  # Point ensemble model for GBM + KNN combination
 QGP_NAME: str = "qgp"  # Gaussian Process Quantile Estimator
 QLEAF_NAME: str = "qleaf"  # New quantile estimator
 
@@ -71,6 +68,13 @@ QENS2_NAME: str = "qens2"  # Ensemble of QL + QKNN + QGBM
 QENS3_NAME: str = "qens3"  # Ensemble of QRF + QL
 QENS4_NAME: str = "qens4"  # Ensemble of QRF + QGP
 QENS5_NAME: str = "qens5"  # Ensemble of QGP + QRF + QKNN
+
+QUANTILE_TO_POINT_ESTIMATOR_MAPPING = {
+    QRF_NAME: RF_NAME,
+    QKNN_NAME: KNN_NAME,
+    QLEAF_NAME: RF_NAME,
+    QGBM_NAME: GBM_NAME,
+}
 
 # Consolidated estimator configurations
 ESTIMATOR_REGISTRY = {

@@ -188,7 +188,7 @@ class LowerBoundSampler(PessimisticLowerBoundSampler):
     def calculate_ucb_predictions(
         self,
         point_estimates: np.ndarray = None,
-        interval_width: np.ndarray = None,
+        half_width: np.ndarray = None,
     ) -> np.ndarray:
         """
         Calculate Lower Confidence Bound predictions for acquisition.
@@ -201,11 +201,11 @@ class LowerBoundSampler(PessimisticLowerBoundSampler):
         Args:
             point_estimates: Point predictions (e.g., posterior means) for each
                 candidate. These represent the exploitation component.
-            interval_width: Uncertainty estimates (e.g., interval widths) for
+            half_width: Uncertainty estimates (e.g., half interval widths) for
                 each candidate. These drive the exploration component.
 
         Returns:
             Array of LCB acquisition values. Lower values indicate more attractive
             candidates for minimization problems.
         """
-        return point_estimates - self.beta * interval_width
+        return point_estimates - self.beta * half_width
