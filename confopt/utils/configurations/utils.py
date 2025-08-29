@@ -1,10 +1,10 @@
-def create_config_hash(config: dict) -> str:
-    """Create a fast hashable representation of a configuration"""
+def create_config_hash(config: dict) -> int:
+    """Create a fast hashable representation of a configuration using tuples."""
     items = []
     for k in sorted(config.keys()):
         v = config[k]
         if isinstance(v, (int, float, bool)):
-            items.append(f"{k}:{v}")
+            items.append((k, v))
         else:
-            items.append(f"{k}:{str(v)}")
-    return "|".join(items)
+            items.append((k, str(v)))
+    return hash(tuple(items))

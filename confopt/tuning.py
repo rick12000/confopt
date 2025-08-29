@@ -11,8 +11,8 @@ from confopt.utils.tracking import (
     Trial,
     Study,
     RuntimeTracker,
-    DynamicConfigurationManager,
     StaticConfigurationManager,
+    DynamicConfigurationManager,
     ProgressBarManager,
 )
 from confopt.utils.optimization import FixedSearcherOptimizer, DecayingSearcherOptimizer
@@ -186,13 +186,14 @@ class ConformalTuner:
 
         Sets up the study container for trial tracking, configuration manager for
         handling search space sampling, and processes any warm start configurations.
-        The configuration manager type (static vs dynamic) determines whether
-        the candidate pool is fixed or adaptively resampled during optimization.
+        The configuration manager uses the optimized incremental approach for
+        maximum performance.
         """
         self.study = Study(
             metric_optimization="minimize" if self.minimize else "maximize"
         )
 
+        # Instantiate appropriate configuration manager based on dynamic_sampling setting
         if self.dynamic_sampling:
             self.config_manager = DynamicConfigurationManager(
                 search_space=self.search_space,
@@ -287,7 +288,7 @@ class ConformalTuner:
             )
             self.study.append_trial(trial)
 
-            searchable_count = len(self.config_manager.get_searchable_configurations())
+            searchable_count = self.config_manager.get_searchable_configurations_count()
             current_runtime = self.search_timer.return_runtime()
 
             stop = stop_search(
@@ -386,7 +387,7 @@ class ConformalTuner:
         X: np.array,
         y: np.array,
         tuning_count: int,
-    ) -> Tuple[float, float]:
+    ) -> float:
         """Train conformal prediction searcher on accumulated data.
 
         Fits the conformal prediction model using the provided data,
@@ -401,7 +402,7 @@ class ConformalTuner:
             tuning_count: Number of internal tuning iterations
 
         Returns:
-            Tuple of (training_runtime, estimator_error)
+            Training runtime in seconds
         """
         runtime_tracker = RuntimeTracker()
         searcher.fit(
@@ -411,7 +412,6 @@ class ConformalTuner:
         )
 
         training_runtime = runtime_tracker.return_runtime()
-
         return training_runtime
 
     def select_next_configuration(
@@ -419,7 +419,7 @@ class ConformalTuner:
         searcher: BaseConformalSearcher,
         searchable_configs: List,
         transformed_configs: np.array,
-    ) -> Tuple[Dict, int]:
+    ) -> Dict:
         """Select the most promising configuration using conformal predictions.
 
         Uses the conformal searcher to predict lower bounds for all available
@@ -478,9 +478,6 @@ class ConformalTuner:
 
         Args:
             optimizer: Multi-armed bandit optimizer instance
-            training_runtime: Time spent training the conformal model
-            tuning_count: Current internal tuning iterations
-            searcher_retuning_frequency: Current retraining frequency
             search_iter: Current search iteration number
 
         Returns:
@@ -528,6 +525,7 @@ class ConformalTuner:
 
         tuning_count = 0
         searcher_retuning_frequency = conformal_retraining_frequency
+        training_runtime = 0
 
         for search_iter in range(conformal_max_searches):
             progress_manager.update_progress(
@@ -555,6 +553,7 @@ class ConformalTuner:
                     optimizer,
                     search_iter,
                 )
+
                 if (
                     not searcher_retuning_frequency % conformal_retraining_frequency
                     == 0
@@ -563,19 +562,24 @@ class ConformalTuner:
                         "searcher_retuning_frequency must be a multiple of conformal_retraining_frequency."
                     )
 
+            # Select next configuration
             next_config = self.select_next_configuration(
                 searcher, searchable_configs, X_searchable
             )
+
+            # Evaluate configuration
             performance, _ = self._evaluate_configuration(next_config)
             if np.isnan(performance):
                 self.config_manager.add_to_banned_configurations(next_config)
                 continue
 
+            # Get interval bounds
             transformed_config = self.config_manager.tabularize_configs([next_config])
 
             lower_bound, upper_bound = self.get_interval_if_applicable(
                 searcher, transformed_config
             )
+
             # Convert bounds back to original units and handle interval orientation
             if lower_bound is not None and upper_bound is not None:
                 converted_lower = lower_bound * self.metric_sign
@@ -610,7 +614,7 @@ class ConformalTuner:
             )
             self.study.append_trial(trial)
 
-            searchable_count = len(self.config_manager.get_searchable_configurations())
+            searchable_count = self.config_manager.get_searchable_configurations_count()
             should_stop = stop_search(
                 n_remaining_configurations=searchable_count,
                 current_runtime=self.search_timer.return_runtime(),
@@ -618,6 +622,7 @@ class ConformalTuner:
                 current_iter=len(self.study.trials),
                 max_searches=max_searches,
             )
+
             if should_stop:
                 break
 

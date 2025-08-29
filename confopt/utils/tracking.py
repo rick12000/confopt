@@ -7,8 +7,8 @@ from confopt.wrapping import ParameterRange
 import numpy as np
 from confopt.utils.configurations.encoding import ConfigurationEncoder
 from confopt.utils.configurations.sampling import get_tuning_configurations
-from confopt.utils.configurations.utils import create_config_hash
 from tqdm import tqdm
+from confopt.utils.configurations.utils import create_config_hash
 
 
 logger = logging.getLogger(__name__)
@@ -349,6 +349,8 @@ class StaticConfigurationManager(BaseConfigurationManager):
 
     Precomputes and caches candidate configurations, filtering out searched and
     banned ones. Used for search strategies where the candidate pool is fixed.
+
+    Optimized with set-based tracking for O(1) operations and intelligent caching.
     """
 
     def __init__(
@@ -357,70 +359,113 @@ class StaticConfigurationManager(BaseConfigurationManager):
         n_candidate_configurations: int,
     ) -> None:
         super().__init__(search_space, n_candidate_configurations)
-        self.cached_searchable_configs = []
+
+        # Core optimization: set-based tracking for O(1) operations
+        self.searched_indices = set()
+        self.banned_indices = set()
+
+        # Pre-computed data for efficiency
+        self.all_candidate_configs = []
+        self.config_to_index = {}  # Hash -> index mapping
+
+        # Simple caching
+        self._searchable_configs_cache = None
+        self._cache_valid = False
+
         self._initialize_static_configs_and_encoder()
 
     def _initialize_static_configs_and_encoder(self) -> None:
         """
         Initializes the static candidate configuration pool and encoder.
         """
-        # NOTE: Overfill n_configurations to avoid losing configurations during
-        # searched config filtering, then filter down to actual n_configurations
-        # at the end:
-        candidate_configurations = get_tuning_configurations(
+        # Generate all candidate configurations
+        self.all_candidate_configs = get_tuning_configurations(
             parameter_grid=self.search_space,
-            n_configurations=self.n_candidate_configurations
-            + len(self.searched_configs),
+            n_configurations=self.n_candidate_configurations,
             random_state=None,
             sampling_method="uniform",
-        )[: self.n_candidate_configurations]
-        filtered_configs = []
-        for config in candidate_configurations:
-            config_hash = create_config_hash(config)
-            if config_hash not in self.searched_config_hashes:
-                filtered_configs.append(config)
-        self.cached_searchable_configs = filtered_configs
+        )
+
+        # Setup encoder
         self._setup_encoder()
 
-    def get_searchable_configurations(self) -> list[dict]:
-        """
-        Returns the list of candidate configurations not yet searched or banned.
-
-        Returns:
-            List of configuration dictionaries.
-        """
-        # Remove already searched and banned configs from cache
-        banned_hashes = set(create_config_hash(c) for c in self.banned_configurations)
-
-        # Filter cache without repeated hash computation or in-place modification
-        filtered_configs = []
-        for c in self.cached_searchable_configs:
-            config_hash = create_config_hash(c)
-            if (
-                config_hash not in self.searched_config_hashes
-                and config_hash not in banned_hashes
-            ):
-                filtered_configs.append(c)
-
-        self.cached_searchable_configs = filtered_configs
-        return self.cached_searchable_configs.copy()
+        # Build hash-to-index mapping for O(1) lookups
+        for i, config in enumerate(self.all_candidate_configs):
+            config_hash = create_config_hash(config)
+            self.config_to_index[config_hash] = i
 
     def mark_as_searched(self, config: dict, performance: float) -> None:
         """
-        Marks a configuration as searched and removes it from the static cache.
+        Marks a configuration as searched using optimized O(1) operations.
 
         Args:
             config: Configuration dictionary.
             performance: Observed performance value.
         """
-        super().mark_as_searched(config, performance)
-        # Remove from cache if present
         config_hash = create_config_hash(config)
-        self.cached_searchable_configs = [
-            c
-            for c in self.cached_searchable_configs
-            if create_config_hash(c) != config_hash
+
+        # Use index tracking for pre-computed configs
+        if config_hash in self.config_to_index:
+            idx = self.config_to_index[config_hash]
+            self.searched_indices.add(idx)
+
+        # Update base class tracking
+        super().mark_as_searched(config, performance)
+
+        # Invalidate cache
+        self._cache_valid = False
+
+    def add_to_banned_configurations(self, config: dict) -> None:
+        """
+        Adds a configuration to the banned list using O(1) operations.
+
+        Args:
+            config: Configuration dictionary to ban.
+        """
+        config_hash = create_config_hash(config)
+
+        # Use index tracking for pre-computed configs
+        if config_hash in self.config_to_index:
+            idx = self.config_to_index[config_hash]
+            self.banned_indices.add(idx)
+
+        # Update base class tracking
+        super().add_to_banned_configurations(config)
+
+        # Invalidate cache
+        self._cache_valid = False
+
+    def get_searchable_configurations(self) -> list[dict]:
+        """
+        Returns the list of candidate configurations not yet searched or banned
+        using optimized set operations and caching.
+
+        Returns:
+            List of configuration dictionaries.
+        """
+        if self._cache_valid and self._searchable_configs_cache is not None:
+            return self._searchable_configs_cache.copy()
+
+        # Use set operations for O(1) filtering
+        excluded_indices = self.searched_indices | self.banned_indices
+        self._searchable_configs_cache = [
+            self.all_candidate_configs[i]
+            for i in range(len(self.all_candidate_configs))
+            if i not in excluded_indices
         ]
+        self._cache_valid = True
+
+        return self._searchable_configs_cache.copy()
+
+    def get_searchable_configurations_count(self) -> int:
+        """
+        Returns the count of searchable configurations using O(1) set operations.
+
+        Returns:
+            Number of searchable configurations remaining.
+        """
+        excluded_count = len(self.searched_indices | self.banned_indices)
+        return len(self.all_candidate_configs) - excluded_count
 
 
 class DynamicConfigurationManager(BaseConfigurationManager):
@@ -438,6 +483,7 @@ class DynamicConfigurationManager(BaseConfigurationManager):
         n_candidate_configurations: int,
     ) -> None:
         super().__init__(search_space, n_candidate_configurations)
+        self.current_searchable_configs = []
         self._setup_encoder()
 
     def get_searchable_configurations(self) -> list[dict]:
@@ -455,8 +501,10 @@ class DynamicConfigurationManager(BaseConfigurationManager):
             random_state=None,
             sampling_method="uniform",
         )
+
         banned_hashes = set(create_config_hash(c) for c in self.banned_configurations)
         filtered_configs = []
+
         for config in candidate_configurations:
             config_hash = create_config_hash(config)
             if (
@@ -466,4 +514,17 @@ class DynamicConfigurationManager(BaseConfigurationManager):
                 filtered_configs.append(config)
                 if len(filtered_configs) >= self.n_candidate_configurations:
                     break
+
+        # Store current searchable configs for count method
+        self.current_searchable_configs = filtered_configs
         return filtered_configs
+
+    def get_searchable_configurations_count(self) -> int:
+        """
+        Returns the count of searchable configurations from the last call to
+        get_searchable_configurations().
+
+        Returns:
+            Number of searchable configurations remaining.
+        """
+        return len(self.current_searchable_configs)
