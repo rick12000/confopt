@@ -25,6 +25,13 @@ var/
 .installed.cfg
 *.egg
 
+# Cython compiled files:
+# Generated C files from Cython
+confopt/selection/sampling/*.c
+# Compiled extension modules
+*.pyd
+*.so
+
 # Dev
 cache/
 _build/

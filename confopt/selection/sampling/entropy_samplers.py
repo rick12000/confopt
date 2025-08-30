@@ -71,7 +71,7 @@ def calculate_entropy(
     if np.all(samples == samples[0]):
         return 0.0
     try:
-        from confopt.selection.sampling import cy_differential_entropy
+        from confopt.selection.sampling.cy_entropy import cy_differential_entropy
 
         return cy_differential_entropy(samples, method)
     except ImportError:
@@ -277,7 +277,7 @@ class MaxValueEntropySearchSampler:
             optimums[i] = np.min(sampled_values)
 
         try:
-            from confopt.selection.sampling import cy_differential_entropy
+            from confopt.selection.sampling.cy_entropy import cy_differential_entropy
 
             entropy_of_optimum = cy_differential_entropy(optimums, self.entropy_method)
         except ImportError:
@@ -313,7 +313,7 @@ class MaxValueEntropySearchSampler:
                     adjusted_optimums = np.minimum(optimums, y)
 
                     try:
-                        from confopt.selection.sampling import (
+                        from confopt.selection.sampling.cy_entropy import (
                             cy_differential_entropy,
                         )
 

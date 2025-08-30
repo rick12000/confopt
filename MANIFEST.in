@@ -9,7 +9,7 @@ prune examples
 prune misc
 
 # Include Cython source file
-include confopt/utils/cy_entropy.pyx
+include confopt/selection/sampling/cy_entropy.pyx
 
 # Include license and readme
 include LICENSE
