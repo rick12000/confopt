@@ -78,7 +78,7 @@ python -c "
 import confopt;
 import os;
 import glob;
-print('✅ Package imported successfully');
+print('Package imported successfully');
 
 # Check for compiled extensions
 confopt_path = os.path.dirname(confopt.__file__);
@@ -90,7 +90,7 @@ compiled_extensions = pyd_files + so_files;
 if not compiled_extensions:
   raise AssertionError(f'No compiled Cython extensions found in wheel! Expected cy_entropy.pyd/.so in {sampling_path}');
 
-print(f'✅ Found compiled extensions: {[os.path.basename(f) for f in compiled_extensions]}');
+print(f'Found compiled extensions: {[os.path.basename(f) for f in compiled_extensions]}');
 
 try:
   from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE;
@@ -100,9 +100,9 @@ try:
     raise AssertionError('CYTHON_AVAILABLE is False despite compiled extensions being present in wheel');
 
   result = calculate_entropy(np.array([1.0, 2.0, 3.0, 4.0, 5.0]));
-  print(f'✅ Entropy calculation works! Cython available: {CYTHON_AVAILABLE}, Result: {result}');
+  print(f'Entropy calculation works! Cython available: {CYTHON_AVAILABLE}, Result: {result}');
 except Exception as e:
-  print(f'❌ Entropy calculation failed: {e}');
+  print(f'Entropy calculation failed: {e}');
   raise;
 "
 """

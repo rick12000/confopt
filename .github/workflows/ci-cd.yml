@@ -313,17 +313,17 @@ jobs:
 
     - name: List built packages
       run: |
-        echo "📦 Built packages:"
+        echo "Built packages:"
         ls -la dist/
         echo ""
-        echo "📊 Package summary:"
+        echo "Package summary:"
         echo "Source distributions: $(ls dist/*.tar.gz 2>/dev/null | wc -l)"
         echo "Wheels: $(ls dist/*.whl 2>/dev/null | wc -l)"
         echo ""
-        echo "🐍 Python versions covered:"
+        echo "Python versions covered:"
         ls dist/*.whl 2>/dev/null | grep -oE 'cp[0-9]+' | sort -u || echo "None"
         echo ""
-        echo "🖥️ Platforms covered:"
+        echo "Platforms covered:"
         ls dist/*.whl 2>/dev/null | grep -oE '(win_amd64|macosx_[0-9_]+|linux_x86_64)' | sort -u || echo "None"
 
     - name: Test source distribution installation
@@ -339,9 +339,9 @@ jobs:
         python -c "
         import confopt;
         from confopt.selection.sampling.entropy_samplers import CYTHON_AVAILABLE;
-        print(f'✅ Source distribution installed. Cython available: {CYTHON_AVAILABLE}');
+        print(f'Source distribution installed. Cython available: {CYTHON_AVAILABLE}');
         if not CYTHON_AVAILABLE:
-            print('✅ Pure Python fallback working as expected');
+            print('Pure Python fallback working as expected');
         "
         deactivate
         rm -rf test_sdist_env
@@ -401,7 +401,7 @@ jobs:
         match = re.search(r'version = "([^"]+)"', content)
 
         if not match:
-            print("❌ ERROR: Could not find version in pyproject.toml")
+            print("ERROR: Could not find version in pyproject.toml")
             sys.exit(1)
 
         version = match.group(1)
@@ -415,7 +415,7 @@ jobs:
         VERSION=${{ steps.get_version.outputs.version }}
 
         # Test 1: Standard wheel installation (should use Cython)
-        echo "🔄 Test 1: Standard wheel installation from TestPyPI..."
+        echo "Test 1: Standard wheel installation from TestPyPI..."
         python -m venv test_wheel_env
         source test_wheel_env/bin/activate
         pip install --upgrade pip
@@ -431,8 +431,8 @@ jobs:
         from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE
         import numpy as np
 
-        print('📊 Wheel Installation:')
-        print(f'  - Package imported: ✅')
+        print('Wheel Installation:')
+        print('  - Package imported: OK')
 
         # Find the package installation directory
         confopt_path = os.path.dirname(confopt.__file__)
@@ -452,7 +452,7 @@ jobs:
         if not compiled_extensions:
             raise AssertionError(f'No compiled Cython extensions found! Expected cy_entropy.pyd/.so in {sampling_path}')
 
-        print(f'  - Compiled Cython extensions: ✅ Found {len(compiled_extensions)} file(s)')
+        print(f'  - Compiled Cython extensions: Found {len(compiled_extensions)} file(s)')
 
         # Verify CYTHON_AVAILABLE flag matches reality
         print(f'  - CYTHON_AVAILABLE flag: {CYTHON_AVAILABLE}')
@@ -466,14 +466,14 @@ jobs:
             print(f'  - Entropy ({method}): {result:.4f}')
             assert result > 0, f'Entropy calculation failed for {method}'
 
-        print(f'  - Cython extensions validation: ✅')
+        print('  - Cython extensions validation: OK')
         "
 
         deactivate
         rm -rf test_wheel_env
 
         # Test 2: Force build from source WITH compilation tools (should use Cython)
-        echo "🔄 Test 2: Source build with compilation tools..."
+        echo "Test 2: Source build with compilation tools..."
         python -m venv test_source_cython_env
         source test_source_cython_env/bin/activate
         pip install --upgrade pip
@@ -489,8 +489,8 @@ jobs:
         from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE
         import numpy as np
 
-        print('📊 Source Build with Cython:')
-        print(f'  - Package imported: ✅')
+        print('Source Build with Cython:')
+        print('  - Package imported: OK')
 
         # Find the package installation directory
         confopt_path = os.path.dirname(confopt.__file__)
@@ -507,7 +507,7 @@ jobs:
         if not compiled_extensions:
             raise AssertionError(f'No compiled Cython extensions found! CONFOPT_FORCE_CYTHON=1 should have built extensions in {sampling_path}')
 
-        print(f'  - Compiled Cython extensions: ✅ Found {len(compiled_extensions)} file(s)')
+        print(f'  - Compiled Cython extensions: Found {len(compiled_extensions)} file(s)')
 
         # Verify CYTHON_AVAILABLE flag
         print(f'  - CYTHON_AVAILABLE flag: {CYTHON_AVAILABLE}')
@@ -521,14 +521,14 @@ jobs:
             print(f'  - Entropy ({method}): {result:.4f}')
             assert result > 0, f'Entropy calculation failed for {method}'
 
-        print(f'  - Forced Cython build validation: ✅')
+        print('  - Forced Cython build validation: OK')
         "
 
         deactivate
         rm -rf test_source_cython_env
 
         # Test 3: Force build from source WITHOUT compilation tools (should use Python fallback)
-        echo "🔄 Test 3: Source build without compilation tools..."
+        echo "Test 3: Source build without compilation tools..."
         python -m venv test_source_python_env
         source test_source_python_env/bin/activate
         pip install --upgrade pip
@@ -544,8 +544,8 @@ jobs:
         from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE
         import numpy as np
 
-        print('📊 Source Build Pure Python:')
-        print(f'  - Package imported: ✅')
+        print('Source Build Pure Python:')
+        print('  - Package imported: OK')
 
         # Find the package installation directory
         confopt_path = os.path.dirname(confopt.__file__)
@@ -563,7 +563,7 @@ jobs:
         if compiled_extensions:
             raise AssertionError(f'Found unexpected compiled extensions {compiled_extensions}! Pure Python build should have no .pyd/.so files')
 
-        print(f'  - No compiled extensions: ✅ Pure Python fallback confirmed')
+        print('  - No compiled extensions: Pure Python fallback confirmed')
 
         # Verify CYTHON_AVAILABLE flag matches reality
         print(f'  - CYTHON_AVAILABLE flag: {CYTHON_AVAILABLE}')
@@ -577,13 +577,13 @@ jobs:
             print(f'  - Entropy ({method}): {result:.4f}')
             assert result > 0, f'Entropy calculation failed for {method}'
 
-        print(f'  - Pure Python fallback validation: ✅')
+        print('  - Pure Python fallback validation: OK')
         "
 
         deactivate
         rm -rf test_source_python_env
 
-        echo "✅ All TestPyPI installation scenarios validated successfully!"
+        echo "All TestPyPI installation scenarios validated successfully!"
   #
   # publish:
   #   name: Publish to PyPI

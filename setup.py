@@ -43,12 +43,12 @@ def build_extensions():
             extensions, compiler_directives={"language_level": 3}
         )
 
-        print("✅ Building Cython extensions from .pyx source...")
-        print("✅ Extension module: confopt.selection.sampling.cy_entropy")
-        print(f"✅ Cython source file: {pyx_file}")
-        print(f"✅ NumPy include dir: {np.get_include()}")
-        print(f"✅ Force Cython: {force_cython}")
-        print(f"✅ Cythonized {len(cythonized_extensions)} extension(s)")
+        print("Building Cython extensions from .pyx source...")
+        print("Extension module: confopt.selection.sampling.cy_entropy")
+        print(f"Cython source file: {pyx_file}")
+        print(f"NumPy include dir: {np.get_include()}")
+        print(f"Force Cython: {force_cython}")
+        print(f"Cythonized {len(cythonized_extensions)} extension(s)")
         return cythonized_extensions
 
     except ImportError as e:
