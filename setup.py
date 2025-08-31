@@ -7,27 +7,6 @@ to pure Python if compilation fails. All other metadata is defined in pyproject.
 
 import os
 from setuptools import Extension, setup
-from setuptools.command.build_ext import build_ext as _build_ext
-
-
-class CustomBuildExt(_build_ext):
-    """Custom build_ext command that handles Cython compilation with fallback."""
-
-    def run(self):
-        """Run the build_ext command with Cython fallback logic."""
-        # Check if we're forcing Cython compilation (e.g., for cibuildwheel)
-        force_cython = os.environ.get("CONFOPT_FORCE_CYTHON", "0") == "1"
-
-        try:
-            super().run()
-        except Exception as e:
-            if force_cython:
-                print(
-                    f"Error: Extension building failed with CONFOPT_FORCE_CYTHON=1: {e}"
-                )
-                raise
-            print(f"Warning: Extension building failed: {e}")
-            print("Continuing with pure Python fallback.")
 
 
 def build_extensions():
@@ -61,7 +40,10 @@ def build_extensions():
 
         # Cythonize the extensions
         cythonized_extensions = cythonize(
-            extensions, compiler_directives={"language_level": 3}
+            extensions,
+            compiler_directives={"language_level": 3},
+            build_dir="build",
+            annotate=False,
         )
 
         print("Building Cython extensions from .pyx source...")
@@ -103,6 +85,5 @@ except Exception as e:
 # Use setup() with minimal configuration - pyproject.toml handles the rest
 setup(
     ext_modules=ext_modules,
-    cmdclass={"build_ext": CustomBuildExt},
     zip_safe=False,  # Important for Cython extensions
 )

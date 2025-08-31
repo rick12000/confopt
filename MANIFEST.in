@@ -4,9 +4,8 @@ include README.md
 include requirements.txt
 include pytest.ini
 
-# Include Cython files (source and generated C for source distributions)
+# Include Cython source files
 include confopt/selection/sampling/cy_entropy.pyx
-include confopt/selection/sampling/cy_entropy.c
 
 # Exclude build artifacts and temporary files
 prune build

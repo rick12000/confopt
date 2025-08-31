@@ -1,10 +1,10 @@
 [build-system]
 requires = ["setuptools>=61.0", "wheel", "numpy>=1.20.0", "cython>=0.29.24"]
-build-backend = "setuptools.build_meta"
+build-backend = "setuptools.build_meta:__legacy__"
 
 [project]
 name = "confopt"
-version = "1.1.5"
+version = "1.1.6"
 description = "Conformal hyperparameter optimization tool"
 readme = "README.md"
 authors = [
@@ -66,11 +66,15 @@ before-build = [
     "pip install numpy>=1.20.0 cython>=0.29.24",
     "python -c 'import numpy; print(f\"NumPy version: {numpy.__version__}\")'",
     "python -c 'import Cython; print(f\"Cython version: {Cython.__version__}\")'",
-    "echo 'CONFOPT_FORCE_CYTHON is set to:' $CONFOPT_FORCE_CYTHON"
+    "echo 'CONFOPT_FORCE_CYTHON is set to:' $CONFOPT_FORCE_CYTHON",
+    "ls -la confopt/selection/sampling/cy_entropy.*"
 ]
 
 # Environment variables to ensure Cython compilation
 environment = { CONFOPT_FORCE_CYTHON = "1" }
+
+# Force rebuild from source to ensure our setup.py gets called
+build-verbosity = 1
 
 # Test that the wheel can be imported and Cython extensions are present
 test-command = """
