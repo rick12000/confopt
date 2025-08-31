@@ -14,18 +14,29 @@ def build_extensions():
     # Check if we're forcing Cython compilation (e.g., for cibuildwheel)
     force_cython = os.environ.get("CONFOPT_FORCE_CYTHON", "0") == "1"
 
+    # Always try to build Cython extensions if dependencies are available
+    # This ensures they're built in CI environments
+    print("Attempting to build Cython extensions...")
+    print(f"CONFOPT_FORCE_CYTHON: {force_cython}")
+    print(f"Current working directory: {os.getcwd()}")
+
     try:
         import numpy as np
         from Cython.Build import cythonize
 
+        print("NumPy and Cython imported successfully")
+
         # Check if Cython source file exists
         pyx_file = "confopt/selection/sampling/cy_entropy.pyx"
+        print(f"Looking for Cython source file: {pyx_file}")
         if not os.path.exists(pyx_file):
             msg = f"Cython source file {pyx_file} not found. Skipping Cython extension."
             if force_cython:
                 raise RuntimeError(f"CONFOPT_FORCE_CYTHON=1 but {msg}")
             print(f"Warning: {msg}")
             return []
+
+        print(f"Found Cython source file: {pyx_file}")
 
         # Define Cython extensions
         extensions = [
@@ -39,6 +50,7 @@ def build_extensions():
         ]
 
         # Cythonize the extensions
+        print("Cythonizing extensions...")
         cythonized_extensions = cythonize(
             extensions,
             compiler_directives={"language_level": 3},
@@ -46,7 +58,7 @@ def build_extensions():
             annotate=False,
         )
 
-        print("Building Cython extensions from .pyx source...")
+        print("SUCCESS: Building Cython extensions from .pyx source...")
         print("Extension module: confopt.selection.sampling.cy_entropy")
         print(f"Cython source file: {pyx_file}")
         print(f"NumPy include dir: {np.get_include()}")
@@ -56,6 +68,7 @@ def build_extensions():
 
     except ImportError as e:
         msg = f"Could not import required dependencies for Cython compilation: {e}"
+        print(f"ImportError: {msg}")
         if force_cython:
             raise RuntimeError(f"CONFOPT_FORCE_CYTHON=1 but {msg}")
         print(f"Warning: {msg}")
@@ -63,6 +76,7 @@ def build_extensions():
         return []
     except Exception as e:
         msg = f"Cython extension compilation failed: {e}"
+        print(f"Exception: {msg}")
         if force_cython:
             raise RuntimeError(f"CONFOPT_FORCE_CYTHON=1 but {msg}")
         print(f"Warning: {msg}")
