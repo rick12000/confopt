@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta:__legacy__"
 
 [project]
 name = "confopt"
-version = "1.1.9"
+version = "1.2.1"
 description = "Conformal hyperparameter optimization tool"
 readme = "README.md"
 authors = [
@@ -65,7 +65,7 @@ skip = "*-win32 *-musllinux* *-manylinux_i686 *-linux_i686"
 
 # Install NumPy and Cython in the build environment to enable Cython compilation
 before-build = [
-    "pip install numpy>=1.20.0 cython>=0.29.24 delvewheel auditwheel delocate",
+    "pip install numpy>=1.20.0 cython>=0.29.24",
     "python -c \"import numpy; print('NumPy version:', numpy.__version__)\"",
     "python -c \"import Cython; print('Cython version:', Cython.__version__)\"",
     "python -c \"import os; print('CONFOPT_FORCE_CYTHON:', os.environ.get('CONFOPT_FORCE_CYTHON', 'not set'))\"",
@@ -118,10 +118,34 @@ test-skip = "*-*linux_aarch64 *-*linux_ppc64le *-*linux_s390x"
 
 # Platform-specific configurations
 [tool.cibuildwheel.linux]
+before-build = [
+    "pip install numpy>=1.20.0 cython>=0.29.24 auditwheel",
+    "python -c \"import numpy; print('NumPy version:', numpy.__version__)\"",
+    "python -c \"import Cython; print('Cython version:', Cython.__version__)\"",
+    "python -c \"import os; print('CONFOPT_FORCE_CYTHON:', os.environ.get('CONFOPT_FORCE_CYTHON', 'not set'))\"",
+    "python -c \"import os; files = [f for f in os.listdir('confopt/selection/sampling') if 'cy_entropy' in f]; print('Cython files:', files)\""
+]
+environment = { CONFOPT_FORCE_CYTHON = "1" }
 repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.macos]
+before-build = [
+    "pip install numpy>=1.20.0 cython>=0.29.24 delocate",
+    "python -c \"import numpy; print('NumPy version:', numpy.__version__)\"",
+    "python -c \"import Cython; print('Cython version:', Cython.__version__)\"",
+    "python -c \"import os; print('CONFOPT_FORCE_CYTHON:', os.environ.get('CONFOPT_FORCE_CYTHON', 'not set'))\"",
+    "python -c \"import os; files = [f for f in os.listdir('confopt/selection/sampling') if 'cy_entropy' in f]; print('Cython files:', files)\""
+]
+environment = { CONFOPT_FORCE_CYTHON = "1" }
 repair-wheel-command = "delocate-wheel -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.windows]
+before-build = [
+    "pip install numpy>=1.20.0 cython>=0.29.24 delvewheel",
+    "python -c \"import numpy; print('NumPy version:', numpy.__version__)\"",
+    "python -c \"import Cython; print('Cython version:', Cython.__version__)\"",
+    "python -c \"import os; print('CONFOPT_FORCE_CYTHON:', os.environ.get('CONFOPT_FORCE_CYTHON', 'not set'))\"",
+    "python -c \"import os; files = [f for f in os.listdir('confopt/selection/sampling') if 'cy_entropy' in f]; print('Cython files:', files)\""
+]
+environment = { CONFOPT_FORCE_CYTHON = "1" }
 repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
