@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta:__legacy__"
 
 [project]
 name = "confopt"
-version = "1.2.1"
+version = "1.2.2"
 description = "Conformal hyperparameter optimization tool"
 readme = "README.md"
 authors = [
@@ -118,6 +118,7 @@ test-skip = "*-*linux_aarch64 *-*linux_ppc64le *-*linux_s390x"
 
 # Platform-specific configurations
 [tool.cibuildwheel.linux]
+build = "cp39-*linux* cp310-*linux* cp311-*linux* cp312-*linux*"
 before-build = [
     "pip install numpy>=1.20.0 cython>=0.29.24 auditwheel",
     "python -c \"import numpy; print('NumPy version:', numpy.__version__)\"",
@@ -129,6 +130,7 @@ environment = { CONFOPT_FORCE_CYTHON = "1" }
 repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.macos]
+build = "cp39-*macosx* cp310-*macosx* cp311-*macosx* cp312-*macosx*"
 before-build = [
     "pip install numpy>=1.20.0 cython>=0.29.24 delocate",
     "python -c \"import numpy; print('NumPy version:', numpy.__version__)\"",
@@ -140,6 +142,7 @@ environment = { CONFOPT_FORCE_CYTHON = "1" }
 repair-wheel-command = "delocate-wheel -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.windows]
+build = "cp39-*win* cp310-*win* cp311-*win* cp312-*win*"
 before-build = [
     "pip install numpy>=1.20.0 cython>=0.29.24 delvewheel",
     "python -c \"import numpy; print('NumPy version:', numpy.__version__)\"",
