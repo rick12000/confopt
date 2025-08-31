@@ -158,3 +158,33 @@ def cy_differential_entropy(double[::1] samples, str method='distance'):
 
     else:
         raise ValueError(f"Unknown entropy estimation method: {method}")
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def cy_batch_differential_entropy(double[:, ::1] samples_matrix, str method='distance'):
+    """
+    Batch differential entropy calculation for multiple sample sets.
+
+    Parameters:
+    -----------
+    samples_matrix : 2D memoryview of double
+        Matrix where each row is a separate sample set for entropy calculation
+    method : str
+        Method to use ('distance' or 'histogram')
+
+    Returns:
+    --------
+    ndarray: Array of entropy values for each row
+    """
+    cdef int n_sets = samples_matrix.shape[0]
+    cdef int n_samples = samples_matrix.shape[1]
+    cdef double[::1] results = np.zeros(n_sets, dtype=np.float64)
+    cdef int i
+
+    # Process each row using the existing single-sample function
+    for i in range(n_sets):
+        results[i] = cy_differential_entropy(samples_matrix[i, :], method)
+
+    return np.asarray(results)

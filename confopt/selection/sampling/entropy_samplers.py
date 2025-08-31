@@ -40,7 +40,10 @@ logger = logging.getLogger(__name__)
 
 # Try to import Cython implementation once at module level
 try:
-    from confopt.selection.sampling.cy_entropy import cy_differential_entropy
+    from confopt.selection.sampling.cy_entropy import (
+        cy_differential_entropy,
+        cy_batch_differential_entropy,
+    )
 
     CYTHON_AVAILABLE = True
 except ImportError:
@@ -48,6 +51,7 @@ except ImportError:
         "Cython differential entropy implementation not available. Using pure Python fallback."
     )
     cy_differential_entropy = None
+    cy_batch_differential_entropy = None
     CYTHON_AVAILABLE = False
 
 
@@ -274,16 +278,25 @@ class MaxValueEntropySearchSampler:
         n_observations = len(predictions_per_interval[0].lower_bounds)
         all_bounds = flatten_conformal_bounds(predictions_per_interval)
 
-        optimums = np.zeros(self.n_paths)
-        for i in range(self.n_paths):
-            # For each Monte Carlo path, sample one value from each observation's intervals
-            sampled_values = np.zeros(n_observations)
-            for obs_idx in range(n_observations):
-                # Sample uniformly from this observation's available bounds (all columns)
-                col_idx = np.random.randint(0, all_bounds.shape[1])
-                sampled_values[obs_idx] = all_bounds[obs_idx, col_idx]
-            # Find the minimum across this coherent set of samples
-            optimums[i] = np.min(sampled_values)
+        # Optimized Monte Carlo sampling using vectorized operations
+        # Sample column indices for all paths and observations at once
+        col_indices = np.random.randint(
+            0, all_bounds.shape[1], size=(self.n_paths, n_observations)
+        )
+
+        # Use meshgrid-like approach for fully vectorized indexing
+        # Create row indices that match the shape of col_indices
+        row_indices = np.arange(n_observations)[np.newaxis, :].repeat(
+            self.n_paths, axis=0
+        )
+
+        # Vectorized sampling: use advanced indexing to sample all at once
+        sampled_matrix = all_bounds[row_indices.ravel(), col_indices.ravel()].reshape(
+            self.n_paths, n_observations
+        )
+
+        # Find minimum across observations for each path (vectorized)
+        optimums = np.min(sampled_matrix, axis=1)
 
         if CYTHON_AVAILABLE:
             entropy_of_optimum = cy_differential_entropy(optimums, self.entropy_method)
@@ -302,6 +315,7 @@ class MaxValueEntropySearchSampler:
                 )
                 y_samples = all_bounds[idx, y_idxs]
 
+                # Conservative optimization: keep original logic with minimal vectorization
                 conditional_optimum_entropies = np.zeros(self.n_y_candidates_per_x)
                 for j in range(self.n_y_candidates_per_x):
                     y = y_samples[j]

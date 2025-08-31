@@ -37,7 +37,11 @@ def build_extensions():
             )
         ]
 
-        print("Building Cython extensions...")
+        print("✅ Building Cython extensions...")
+        print("✅ Extension module: confopt.selection.sampling.cy_entropy")
+        print(f"✅ Source file: {c_file}")
+        print(f"✅ NumPy include dir: {np.get_include()}")
+        print(f"✅ Force Cython: {force_cython}")
         return extensions
 
     except ImportError as e:

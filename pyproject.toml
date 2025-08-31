@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "confopt"
-version = "1.1.2"
+version = "1.1.4"
 description = "Conformal hyperparameter optimization tool"
 readme = "README.md"
 authors = [
@@ -62,7 +62,12 @@ build = "cp39-* cp310-* cp311-* cp312-*"
 skip = "*-win32 *-musllinux* *-manylinux_i686 *-linux_i686"
 
 # Install NumPy and Cython in the build environment to enable Cython compilation
-before-build = "pip install numpy>=1.20.0 cython>=0.29.24"
+before-build = [
+    "pip install numpy>=1.20.0 cython>=0.29.24",
+    "python -c 'import numpy; print(f\"NumPy version: {numpy.__version__}\")'",
+    "python -c 'import Cython; print(f\"Cython version: {Cython.__version__}\")'",
+    "echo 'CONFOPT_FORCE_CYTHON is set to:' $CONFOPT_FORCE_CYTHON"
+]
 
 # Environment variables to ensure Cython compilation
 environment = { CONFOPT_FORCE_CYTHON = "1" }

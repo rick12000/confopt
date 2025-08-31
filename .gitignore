@@ -28,6 +28,8 @@ var/
 # Compiled extension modules
 *.pyd
 *.so
+*.c
+*.whl
 
 # Dev
 cache/
