@@ -58,10 +58,11 @@ confopt = ["selection/sampling/cy_entropy.pyx", "selection/sampling/cy_entropy.c
 build = "cp39-* cp310-* cp311-* cp312-*"
 
 # Skip 32-bit builds and musllinux for simplicity (can be enabled later if needed)
-skip = "*-win32 *-musllinux*"
+# Also skip i686 due to scikit-learn dependency issues on 32-bit
+skip = "*-win32 *-musllinux* *-manylinux_i686 *-linux_i686"
 
 # Install NumPy and Cython in the build environment to enable Cython compilation
-before-build = "pip install --upgrade pip && pip install numpy>=1.20.0 cython>=0.29.24"
+before-build = "pip install numpy>=1.20.0 cython>=0.29.24"
 
 # Environment variables to ensure Cython compilation
 environment = { CONFOPT_FORCE_CYTHON = "1" }
@@ -85,7 +86,7 @@ except Exception as e:
 # Skip testing on emulated architectures (they're slow and we have fallbacks)
 test-skip = "*-*linux_aarch64 *-*linux_ppc64le *-*linux_s390x"
 
-# Repair wheel commands for each platform
+# Platform-specific configurations
 [tool.cibuildwheel.linux]
 repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
 
@@ -93,4 +94,6 @@ repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
 repair-wheel-command = "delocate-wheel -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.windows]
+# Windows-specific build configuration
+before-build = "python -m pip install numpy>=1.20.0 cython>=0.29.24"
 repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
