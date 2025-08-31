@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel", "Cython>=0.29.24", "numpy>=1.20.0", "setuptools-cythonize>=1.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -47,13 +47,47 @@ docs = [
 ]
 
 [tool.setuptools]
-packages = {find = {exclude = ["tests*", "examples*", "misc*", "build*", "dist*", "*.egg-info*", "cache*"]}}
+packages = { find = { where = ["."] , include = ["confopt*"] } }
 include-package-data = true
 
 [tool.setuptools.package-data]
-confopt = ["selection/sampling/cy_entropy.pyx"]
+confopt = ["selection/sampling/cy_entropy.pyx", "selection/sampling/cy_entropy.c"]
 
-[tool.cythonize]
-modules = [
-    {include = ["confopt/selection/sampling/cy_entropy.pyx"]}
-]
+[tool.cibuildwheel]
+# Build only the Python versions we support
+build = "cp39-* cp310-* cp311-* cp312-*"
+
+# Skip 32-bit builds and musllinux for simplicity (can be enabled later if needed)
+skip = "*-win32 *-musllinux*"
+
+# Install NumPy and Cython in the build environment to enable Cython compilation
+before-build = "pip install numpy>=1.20.0 cython>=0.29.24"
+
+# Test that the wheel can be imported and Cython extension works
+test-command = """
+python -c "
+import confopt;
+print('✅ Package imported successfully');
+try:
+  from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE;
+  import numpy as np;
+  result = calculate_entropy(np.array([1.0, 2.0, 3.0, 4.0, 5.0]));
+  print(f'✅ Entropy calculation works! Cython available: {CYTHON_AVAILABLE}, Result: {result}');
+except Exception as e:
+  print(f'⚠️ Entropy calculation failed: {e}');
+  raise;
+"
+"""
+
+# Skip testing on emulated architectures (they're slow and we have fallbacks)
+test-skip = "*-*linux_aarch64 *-*linux_ppc64le *-*linux_s390x"
+
+# Repair wheel commands for each platform
+[tool.cibuildwheel.linux]
+repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
+
+[tool.cibuildwheel.macos]
+repair-wheel-command = "delocate-wheel -w {dest_dir} {wheel}"
+
+[tool.cibuildwheel.windows]
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"

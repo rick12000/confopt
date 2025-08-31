@@ -38,6 +38,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Try to import Cython implementation once at module level
+try:
+    from confopt.selection.sampling.cy_entropy import cy_differential_entropy
+
+    CYTHON_AVAILABLE = True
+except ImportError:
+    logger.info(
+        "Cython differential entropy implementation not available. Using pure Python fallback."
+    )
+    cy_differential_entropy = None
+    CYTHON_AVAILABLE = False
+
 
 def calculate_entropy(
     samples: np.ndarray, method: Literal["distance", "histogram"] = "distance"
@@ -70,66 +82,63 @@ def calculate_entropy(
         return 0.0
     if np.all(samples == samples[0]):
         return 0.0
-    try:
-        from confopt.selection.sampling.cy_entropy import cy_differential_entropy
 
+    if CYTHON_AVAILABLE:
         return cy_differential_entropy(samples, method)
-    except ImportError:
-        logger.warning(
-            "Cython differential entropy implementation not found. Falling back to pure Python. This may hurt performance significantly."
-        )
-        if method == "distance":
-            # Vasicek estimator using k-nearest neighbor spacing
-            k = int(np.sqrt(n_samples))
-            if k >= n_samples:
-                k = max(1, n_samples // 2)
 
-            sorted_samples = np.sort(samples)
-            total_log_spacing = 0.0
+    # Pure Python fallback
+    if method == "distance":
+        # Vasicek estimator using k-nearest neighbor spacing
+        k = int(np.sqrt(n_samples))
+        if k >= n_samples:
+            k = max(1, n_samples // 2)
 
-            for i in range(n_samples):
-                # Calculate k-nearest neighbor distance
-                left_idx = max(0, i - k // 2)
-                right_idx = min(n_samples - 1, i + k // 2)
+        sorted_samples = np.sort(samples)
+        total_log_spacing = 0.0
 
-                # Ensure we have k neighbors
-                if right_idx - left_idx + 1 < k:
-                    if left_idx == 0:
-                        right_idx = min(n_samples - 1, left_idx + k - 1)
-                    else:
-                        left_idx = max(0, right_idx - k + 1)
+        for i in range(n_samples):
+            # Calculate k-nearest neighbor distance
+            left_idx = max(0, i - k // 2)
+            right_idx = min(n_samples - 1, i + k // 2)
 
-                spacing = max(
-                    sorted_samples[right_idx] - sorted_samples[left_idx],
-                    np.finfo(float).eps,
-                )
-                total_log_spacing += np.log(spacing * n_samples / k)
+            # Ensure we have k neighbors
+            if right_idx - left_idx + 1 < k:
+                if left_idx == 0:
+                    right_idx = min(n_samples - 1, left_idx + k - 1)
+                else:
+                    left_idx = max(0, right_idx - k + 1)
 
-            entropy = total_log_spacing / n_samples
-
-        elif method == "histogram":
-            std = np.std(samples)
-            if std == 0:
-                return 0.0
-            bin_width = 3.49 * std * (n_samples ** (-1 / 3))
-            data_range = np.max(samples) - np.min(samples)
-            n_bins = max(1, int(np.ceil(data_range / bin_width)))
-            hist, bin_edges = np.histogram(samples, bins=n_bins)
-            probs = hist / n_samples
-
-            # Calculate discrete entropy only for positive probabilities
-            discrete_entropy = 0.0
-            for prob in probs:
-                if prob > 0:
-                    discrete_entropy -= prob * np.log(prob)
-
-            bin_widths = np.diff(bin_edges)
-            avg_bin_width = np.mean(bin_widths)
-            entropy = discrete_entropy + np.log(avg_bin_width)
-        else:
-            raise ValueError(
-                f"Unknown entropy estimation method: {method}. Choose from 'distance' or 'histogram'."
+            spacing = max(
+                sorted_samples[right_idx] - sorted_samples[left_idx],
+                np.finfo(float).eps,
             )
+            total_log_spacing += np.log(spacing * n_samples / k)
+
+        entropy = total_log_spacing / n_samples
+
+    elif method == "histogram":
+        std = np.std(samples)
+        if std == 0:
+            return 0.0
+        bin_width = 3.49 * std * (n_samples ** (-1 / 3))
+        data_range = np.max(samples) - np.min(samples)
+        n_bins = max(1, int(np.ceil(data_range / bin_width)))
+        hist, bin_edges = np.histogram(samples, bins=n_bins)
+        probs = hist / n_samples
+
+        # Calculate discrete entropy only for positive probabilities
+        discrete_entropy = 0.0
+        for prob in probs:
+            if prob > 0:
+                discrete_entropy -= prob * np.log(prob)
+
+        bin_widths = np.diff(bin_edges)
+        avg_bin_width = np.mean(bin_widths)
+        entropy = discrete_entropy + np.log(avg_bin_width)
+    else:
+        raise ValueError(
+            f"Unknown entropy estimation method: {method}. Choose from 'distance' or 'histogram'."
+        )
 
     return entropy
 
@@ -276,14 +285,9 @@ class MaxValueEntropySearchSampler:
             # Find the minimum across this coherent set of samples
             optimums[i] = np.min(sampled_values)
 
-        try:
-            from confopt.selection.sampling.cy_entropy import cy_differential_entropy
-
+        if CYTHON_AVAILABLE:
             entropy_of_optimum = cy_differential_entropy(optimums, self.entropy_method)
-        except ImportError:
-            logger.warning(
-                "Cython differential entropy implementation not found. Falling back to pure Python. This may hurt performance significantly."
-            )
+        else:
             entropy_of_optimum = calculate_entropy(optimums, method=self.entropy_method)
 
         optimum_min = np.min(optimums)
@@ -312,18 +316,11 @@ class MaxValueEntropySearchSampler:
 
                     adjusted_optimums = np.minimum(optimums, y)
 
-                    try:
-                        from confopt.selection.sampling.cy_entropy import (
-                            cy_differential_entropy,
-                        )
-
+                    if CYTHON_AVAILABLE:
                         conditional_optimum_entropies[j] = cy_differential_entropy(
                             adjusted_optimums, self.entropy_method
                         )
-                    except ImportError:
-                        logger.warning(
-                            "Cython differential entropy implementation not found. Falling back to pure Python. This may hurt performance significantly."
-                        )
+                    else:
                         conditional_optimum_entropies[j] = calculate_entropy(
                             adjusted_optimums, method=self.entropy_method
                         )
