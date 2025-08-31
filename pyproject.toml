@@ -95,5 +95,5 @@ repair-wheel-command = "delocate-wheel -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.windows]
 # Windows-specific build configuration
-before-build = "python -m pip install numpy>=1.20.0 cython>=0.29.24"
+before-build = "python -m pip install numpy>=1.20.0 cython>=0.29.24 delvewheel"
 repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
