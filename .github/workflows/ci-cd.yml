@@ -422,31 +422,51 @@ jobs:
 
         pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==$VERSION
 
-        # Validate Cython usage
+        # Validate Cython extensions are actually built and present
         python -c "
         import confopt
+        import os
+        import glob
+        import sys
         from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE
         import numpy as np
 
         print('📊 Wheel Installation:')
         print(f'  - Package imported: ✅')
-        print(f'  - Cython available: {CYTHON_AVAILABLE}')
-        print(f'  - Expected Cython: True')
+
+        # Find the package installation directory
+        confopt_path = os.path.dirname(confopt.__file__)
+        sampling_path = os.path.join(confopt_path, 'selection', 'sampling')
+
+        # Check for compiled Cython extensions (.pyd on Windows, .so on Linux/Mac)
+        pyd_files = glob.glob(os.path.join(sampling_path, 'cy_entropy*.pyd'))
+        so_files = glob.glob(os.path.join(sampling_path, 'cy_entropy*.so'))
+        compiled_extensions = pyd_files + so_files
+
+        print(f'  - Searching for extensions in: {sampling_path}')
+        print(f'  - Found .pyd files: {len(pyd_files)}')
+        print(f'  - Found .so files: {len(so_files)}')
+        print(f'  - Compiled extensions: {[os.path.basename(f) for f in compiled_extensions]}')
+
+        # HARD CHECK: Compiled extensions must exist
+        if not compiled_extensions:
+            raise AssertionError(f'No compiled Cython extensions found! Expected cy_entropy.pyd/.so in {sampling_path}')
+
+        print(f'  - Compiled Cython extensions: ✅ Found {len(compiled_extensions)} file(s)')
+
+        # Verify CYTHON_AVAILABLE flag matches reality
+        print(f'  - CYTHON_AVAILABLE flag: {CYTHON_AVAILABLE}')
+        if not CYTHON_AVAILABLE:
+            raise AssertionError('CYTHON_AVAILABLE is False despite compiled extensions being present')
 
         # Validate entropy calculation works
         test_data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-
-        # Test both entropy methods
         for method in ['distance', 'histogram']:
             result = calculate_entropy(test_data, method=method)
             print(f'  - Entropy ({method}): {result:.4f}')
             assert result > 0, f'Entropy calculation failed for {method}'
 
-        # Verify Cython expectation
-        if not CYTHON_AVAILABLE:
-            raise AssertionError('Expected Cython but got pure Python in Wheel Installation')
-
-        print(f'  - Cython usage validation: ✅')
+        print(f'  - Cython extensions validation: ✅')
         "
 
         deactivate
@@ -461,31 +481,47 @@ jobs:
 
         CONFOPT_FORCE_CYTHON=1 pip install --no-binary=confopt --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==$VERSION
 
-        # Validate Cython usage
+        # Validate Cython extensions are actually built and present
         python -c "
         import confopt
+        import os
+        import glob
         from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE
         import numpy as np
 
         print('📊 Source Build with Cython:')
         print(f'  - Package imported: ✅')
-        print(f'  - Cython available: {CYTHON_AVAILABLE}')
-        print(f'  - Expected Cython: True')
+
+        # Find the package installation directory
+        confopt_path = os.path.dirname(confopt.__file__)
+        sampling_path = os.path.join(confopt_path, 'selection', 'sampling')
+
+        # Check for compiled Cython extensions
+        pyd_files = glob.glob(os.path.join(sampling_path, 'cy_entropy*.pyd'))
+        so_files = glob.glob(os.path.join(sampling_path, 'cy_entropy*.so'))
+        compiled_extensions = pyd_files + so_files
+
+        print(f'  - Compiled extensions: {[os.path.basename(f) for f in compiled_extensions]}')
+
+        # HARD CHECK: Compiled extensions must exist for forced Cython build
+        if not compiled_extensions:
+            raise AssertionError(f'No compiled Cython extensions found! CONFOPT_FORCE_CYTHON=1 should have built extensions in {sampling_path}')
+
+        print(f'  - Compiled Cython extensions: ✅ Found {len(compiled_extensions)} file(s)')
+
+        # Verify CYTHON_AVAILABLE flag
+        print(f'  - CYTHON_AVAILABLE flag: {CYTHON_AVAILABLE}')
+        if not CYTHON_AVAILABLE:
+            raise AssertionError('CYTHON_AVAILABLE is False despite CONFOPT_FORCE_CYTHON=1 and compiled extensions present')
 
         # Validate entropy calculation works
         test_data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-
-        # Test both entropy methods
         for method in ['distance', 'histogram']:
             result = calculate_entropy(test_data, method=method)
             print(f'  - Entropy ({method}): {result:.4f}')
             assert result > 0, f'Entropy calculation failed for {method}'
 
-        # Verify Cython expectation
-        if not CYTHON_AVAILABLE:
-            raise AssertionError('Expected Cython but got pure Python in Source Build with Cython')
-
-        print(f'  - Cython usage validation: ✅')
+        print(f'  - Forced Cython build validation: ✅')
         "
 
         deactivate
@@ -500,31 +536,48 @@ jobs:
 
         pip install --no-binary=confopt --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==$VERSION
 
-        # Validate Python fallback
+        # Validate Python fallback (no compiled extensions should exist)
         python -c "
         import confopt
+        import os
+        import glob
         from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE
         import numpy as np
 
         print('📊 Source Build Pure Python:')
         print(f'  - Package imported: ✅')
-        print(f'  - Cython available: {CYTHON_AVAILABLE}')
-        print(f'  - Expected Cython: False')
 
-        # Validate entropy calculation works
+        # Find the package installation directory
+        confopt_path = os.path.dirname(confopt.__file__)
+        sampling_path = os.path.join(confopt_path, 'selection', 'sampling')
+
+        # Check for compiled Cython extensions (should be NONE)
+        pyd_files = glob.glob(os.path.join(sampling_path, 'cy_entropy*.pyd'))
+        so_files = glob.glob(os.path.join(sampling_path, 'cy_entropy*.so'))
+        compiled_extensions = pyd_files + so_files
+
+        print(f'  - Searching for extensions in: {sampling_path}')
+        print(f'  - Found compiled extensions: {[os.path.basename(f) for f in compiled_extensions]}')
+
+        # HARD CHECK: NO compiled extensions should exist for pure Python fallback
+        if compiled_extensions:
+            raise AssertionError(f'Found unexpected compiled extensions {compiled_extensions}! Pure Python build should have no .pyd/.so files')
+
+        print(f'  - No compiled extensions: ✅ Pure Python fallback confirmed')
+
+        # Verify CYTHON_AVAILABLE flag matches reality
+        print(f'  - CYTHON_AVAILABLE flag: {CYTHON_AVAILABLE}')
+        if CYTHON_AVAILABLE:
+            raise AssertionError('CYTHON_AVAILABLE is True but no compiled extensions found - flag should be False')
+
+        # Validate entropy calculation works with pure Python
         test_data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-
-        # Test both entropy methods
         for method in ['distance', 'histogram']:
             result = calculate_entropy(test_data, method=method)
             print(f'  - Entropy ({method}): {result:.4f}')
             assert result > 0, f'Entropy calculation failed for {method}'
 
-        # Verify Python fallback expectation
-        if CYTHON_AVAILABLE:
-            raise AssertionError('Expected pure Python but got Cython in Source Build Pure Python')
-
-        print(f'  - Python fallback validation: ✅')
+        print(f'  - Pure Python fallback validation: ✅')
         "
 
         deactivate

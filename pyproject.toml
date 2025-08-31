@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel", "numpy>=1.20.0"]
+requires = ["setuptools>=61.0", "wheel", "numpy>=1.20.0", "cython>=0.29.24"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "confopt"
-version = "1.1.0"
+version = "1.1.1"
 description = "Conformal hyperparameter optimization tool"
 readme = "README.md"
 authors = [
@@ -67,18 +67,37 @@ before-build = "pip install numpy>=1.20.0 cython>=0.29.24"
 # Environment variables to ensure Cython compilation
 environment = { CONFOPT_FORCE_CYTHON = "1" }
 
-# Test that the wheel can be imported and Cython extension works
+# Test that the wheel can be imported and Cython extensions are present
 test-command = """
 python -c "
 import confopt;
+import os;
+import glob;
 print('✅ Package imported successfully');
+
+# Check for compiled extensions
+confopt_path = os.path.dirname(confopt.__file__);
+sampling_path = os.path.join(confopt_path, 'selection', 'sampling');
+pyd_files = glob.glob(os.path.join(sampling_path, 'cy_entropy*.pyd'));
+so_files = glob.glob(os.path.join(sampling_path, 'cy_entropy*.so'));
+compiled_extensions = pyd_files + so_files;
+
+if not compiled_extensions:
+  raise AssertionError(f'No compiled Cython extensions found in wheel! Expected cy_entropy.pyd/.so in {sampling_path}');
+
+print(f'✅ Found compiled extensions: {[os.path.basename(f) for f in compiled_extensions]}');
+
 try:
   from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE;
   import numpy as np;
+
+  if not CYTHON_AVAILABLE:
+    raise AssertionError('CYTHON_AVAILABLE is False despite compiled extensions being present in wheel');
+
   result = calculate_entropy(np.array([1.0, 2.0, 3.0, 4.0, 5.0]));
   print(f'✅ Entropy calculation works! Cython available: {CYTHON_AVAILABLE}, Result: {result}');
 except Exception as e:
-  print(f'⚠️ Entropy calculation failed: {e}');
+  print(f'❌ Entropy calculation failed: {e}');
   raise;
 "
 """
