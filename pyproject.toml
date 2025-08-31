@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0", "wheel", "numpy>=1.20.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "confopt"
-version = "1.0.2"
+version = "1.1.0"
 description = "Conformal hyperparameter optimization tool"
 readme = "README.md"
 authors = [
@@ -61,7 +61,10 @@ build = "cp39-* cp310-* cp311-* cp312-*"
 skip = "*-win32 *-musllinux*"
 
 # Install NumPy and Cython in the build environment to enable Cython compilation
-before-build = "pip install numpy>=1.20.0 cython>=0.29.24"
+before-build = "pip install --upgrade pip && pip install numpy>=1.20.0 cython>=0.29.24"
+
+# Environment variables to ensure Cython compilation
+environment = { CONFOPT_FORCE_CYTHON = "1" }
 
 # Test that the wheel can be imported and Cython extension works
 test-command = """

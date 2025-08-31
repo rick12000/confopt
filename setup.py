@@ -11,15 +11,19 @@ from setuptools import Extension, setup
 
 def build_extensions():
     """Attempt to build Cython extensions with graceful fallback."""
+    # Check if we're forcing Cython compilation (e.g., for cibuildwheel)
+    force_cython = os.environ.get("CONFOPT_FORCE_CYTHON", "0") == "1"
+
     try:
         import numpy as np
 
         # Check if C source file exists
         c_file = "confopt/selection/sampling/cy_entropy.c"
         if not os.path.exists(c_file):
-            print(
-                f"Warning: C source file {c_file} not found. Skipping Cython extension."
-            )
+            msg = f"C source file {c_file} not found. Skipping Cython extension."
+            if force_cython:
+                raise RuntimeError(f"CONFOPT_FORCE_CYTHON=1 but {msg}")
+            print(f"Warning: {msg}")
             return []
 
         # Define Cython extensions
@@ -37,13 +41,17 @@ def build_extensions():
         return extensions
 
     except ImportError as e:
-        print(
-            f"Warning: Could not import required dependencies for Cython compilation: {e}"
-        )
+        msg = f"Could not import required dependencies for Cython compilation: {e}"
+        if force_cython:
+            raise RuntimeError(f"CONFOPT_FORCE_CYTHON=1 but {msg}")
+        print(f"Warning: {msg}")
         print("Falling back to pure Python implementation.")
         return []
     except Exception as e:
-        print(f"Warning: Cython extension compilation failed: {e}")
+        msg = f"Cython extension compilation failed: {e}"
+        if force_cython:
+            raise RuntimeError(f"CONFOPT_FORCE_CYTHON=1 but {msg}")
+        print(f"Warning: {msg}")
         print("Falling back to pure Python implementation.")
         return []
 
@@ -52,6 +60,10 @@ def build_extensions():
 try:
     ext_modules = build_extensions()
 except Exception as e:
+    force_cython = os.environ.get("CONFOPT_FORCE_CYTHON", "0") == "1"
+    if force_cython:
+        print(f"Error: Extension building failed with CONFOPT_FORCE_CYTHON=1: {e}")
+        raise
     print(f"Warning: Extension building failed: {e}")
     print("Installing without Cython extensions.")
     ext_modules = []
