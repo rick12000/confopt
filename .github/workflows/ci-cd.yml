@@ -332,7 +332,8 @@ jobs:
         python -m venv test_sdist_env
         source test_sdist_env/bin/activate
         pip install --upgrade pip
-        # Install dependencies but not build dependencies to test fallback
+        # Install wheel and dependencies but not build dependencies to test fallback
+        pip install wheel
         pip install scikit-learn scipy pandas tqdm pydantic joblib statsmodels
         pip install dist/*.tar.gz --no-build-isolation
         python -c "
