@@ -356,7 +356,6 @@ jobs:
     name: Publish to TestPyPI
     runs-on: ubuntu-latest
     needs: [verify_builds]
-    environment: test-release
 
     steps:
     - name: Download build artifacts
@@ -370,6 +369,7 @@ jobs:
       with:
         repository-url: https://test.pypi.org/legacy/
         password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        skip-existing: true  # Skip if version already exists
   verify-testpypi:
     name: Verify TestPyPI Installation
     runs-on: ubuntu-latest
@@ -413,22 +413,34 @@ jobs:
         test_install() {
           python -m venv test_env
           source test_env/bin/activate
+          pip install --upgrade pip
+          # Try to install from TestPyPI with fallback to PyPI for dependencies
           pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==${{ steps.get_version.outputs.version }}
-          python -c "import confopt; print('✅ TestPyPI installation successful')"
+          python -c "
+          import confopt;
+          print('✅ TestPyPI installation successful');
+          try:
+            from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE;
+            import numpy as np;
+            result = calculate_entropy(np.array([1.0, 2.0, 3.0, 4.0, 5.0]));
+            print(f'✅ Cython extensions working! Available: {CYTHON_AVAILABLE}, Result: {result}');
+          except Exception as e:
+            print(f'⚠️ Cython test failed (expected if pure Python): {e}');
+          "
           deactivate
           rm -rf test_env
         }
 
-        # Retry with exponential backoff (max 2 attempts to save costs)
-        for attempt in {1..2}; do
+        # Retry with exponential backoff (max 3 attempts with longer delays for TestPyPI propagation)
+        for attempt in {1..3}; do
           echo "🔄 Attempt $attempt: Testing TestPyPI installation..."
           if test_install; then
             echo "✅ TestPyPI verification completed successfully!"
             exit 0
           else
-            if [ $attempt -lt 2 ]; then
-              wait_time=$((attempt * 60))
-              echo "⏳ Attempt $attempt failed. Waiting ${wait_time}s before retry..."
+            if [ $attempt -lt 3 ]; then
+              wait_time=$((attempt * 90))  # 90s, 180s delays for TestPyPI propagation
+              echo "⏳ Attempt $attempt failed. Waiting ${wait_time}s for TestPyPI propagation..."
               sleep $wait_time
             fi
           fi
@@ -441,7 +453,6 @@ jobs:
   #   name: Publish to PyPI
   #   runs-on: ubuntu-latest
   #   needs: [verify-testpypi, version-check]
-  #   environment: release
   #
   #   steps:
   #   - name: Download build artifacts
