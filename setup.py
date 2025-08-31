@@ -16,11 +16,12 @@ def build_extensions():
 
     try:
         import numpy as np
+        from Cython.Build import cythonize
 
-        # Check if C source file exists
-        c_file = "confopt/selection/sampling/cy_entropy.c"
-        if not os.path.exists(c_file):
-            msg = f"C source file {c_file} not found. Skipping Cython extension."
+        # Check if Cython source file exists
+        pyx_file = "confopt/selection/sampling/cy_entropy.pyx"
+        if not os.path.exists(pyx_file):
+            msg = f"Cython source file {pyx_file} not found. Skipping Cython extension."
             if force_cython:
                 raise RuntimeError(f"CONFOPT_FORCE_CYTHON=1 but {msg}")
             print(f"Warning: {msg}")
@@ -30,19 +31,25 @@ def build_extensions():
         extensions = [
             Extension(
                 "confopt.selection.sampling.cy_entropy",
-                sources=[c_file],
+                sources=[pyx_file],
                 include_dirs=[np.get_include()],
                 define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")],
                 language="c",
             )
         ]
 
-        print("✅ Building Cython extensions...")
+        # Cythonize the extensions
+        cythonized_extensions = cythonize(
+            extensions, compiler_directives={"language_level": 3}
+        )
+
+        print("✅ Building Cython extensions from .pyx source...")
         print("✅ Extension module: confopt.selection.sampling.cy_entropy")
-        print(f"✅ Source file: {c_file}")
+        print(f"✅ Cython source file: {pyx_file}")
         print(f"✅ NumPy include dir: {np.get_include()}")
         print(f"✅ Force Cython: {force_cython}")
-        return extensions
+        print(f"✅ Cythonized {len(cythonized_extensions)} extension(s)")
+        return cythonized_extensions
 
     except ImportError as e:
         msg = f"Could not import required dependencies for Cython compilation: {e}"

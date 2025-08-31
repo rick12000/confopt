@@ -51,7 +51,7 @@ packages = { find = { where = ["."] , include = ["confopt*"] } }
 include-package-data = true
 
 [tool.setuptools.package-data]
-confopt = ["selection/sampling/cy_entropy.pyx", "selection/sampling/cy_entropy.c"]
+confopt = ["selection/sampling/cy_entropy.pyx"]
 
 [tool.cibuildwheel]
 # Build only the Python versions we support
