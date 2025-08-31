@@ -370,6 +370,9 @@ jobs:
         repository-url: https://test.pypi.org/legacy/
         password: ${{ secrets.TEST_PYPI_API_TOKEN }}
         skip-existing: true  # Skip if version already exists
+
+    - name: Wait for TestPyPI propagation
+      run: sleep 10
   verify-testpypi:
     name: Verify TestPyPI Installation
     runs-on: ubuntu-latest
@@ -407,47 +410,87 @@ jobs:
         print(f"Current version: {version}")
         EOF
 
-    - name: Test installation from TestPyPI
+    - name: Test installation scenarios from TestPyPI
       run: |
-        # Function to test installation
-        test_install() {
-          python -m venv test_env
-          source test_env/bin/activate
-          pip install --upgrade pip
-          # Try to install from TestPyPI with fallback to PyPI for dependencies
-          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==${{ steps.get_version.outputs.version }}
+        VERSION=${{ steps.get_version.outputs.version }}
+
+        # Comprehensive test function that validates Cython usage
+        validate_cython_usage() {
+          local test_name="$1"
+          local expected_cython="$2"
+
+          echo "🧪 Testing: $test_name"
+
+          # Test basic import and functionality
           python -c "
-          import confopt;
-          print('✅ TestPyPI installation successful');
-          try:
-            from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE;
-            import numpy as np;
-            result = calculate_entropy(np.array([1.0, 2.0, 3.0, 4.0, 5.0]));
-            print(f'✅ Cython extensions working! Available: {CYTHON_AVAILABLE}, Result: {result}');
-          except Exception as e:
-            print(f'⚠️ Cython test failed (expected if pure Python): {e}');
+          import confopt
+          from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE
+          import numpy as np
+
+          print(f'📊 {test_name}:')
+          print(f'  - Package imported: ✅')
+          print(f'  - Cython available: {CYTHON_AVAILABLE}')
+          print(f'  - Expected Cython: $expected_cython')
+
+          # Validate entropy calculation works
+          test_data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+
+          # Test both entropy methods
+          for method in ['distance', 'histogram']:
+            result = calculate_entropy(test_data, method=method)
+            print(f'  - Entropy ({method}): {result:.4f}')
+            assert result > 0, f'Entropy calculation failed for {method}'
+
+          # Verify Cython expectation
+          if '$expected_cython' == 'True' and not CYTHON_AVAILABLE:
+            raise AssertionError(f'Expected Cython but got pure Python in {test_name}')
+          elif '$expected_cython' == 'False' and CYTHON_AVAILABLE:
+            raise AssertionError(f'Expected pure Python but got Cython in {test_name}')
+
+          print(f'  - Cython usage validation: ✅')
+          print()
           "
-          deactivate
-          rm -rf test_env
         }
 
-        # Retry with exponential backoff (max 3 attempts with longer delays for TestPyPI propagation)
-        for attempt in {1..3}; do
-          echo "🔄 Attempt $attempt: Testing TestPyPI installation..."
-          if test_install; then
-            echo "✅ TestPyPI verification completed successfully!"
-            exit 0
-          else
-            if [ $attempt -lt 3 ]; then
-              wait_time=$((attempt * 90))  # 90s, 180s delays for TestPyPI propagation
-              echo "⏳ Attempt $attempt failed. Waiting ${wait_time}s for TestPyPI propagation..."
-              sleep $wait_time
-            fi
-          fi
-        done
+        # Test 1: Standard wheel installation (should use Cython)
+        echo "🔄 Test 1: Standard wheel installation from TestPyPI..."
+        python -m venv test_wheel_env
+        source test_wheel_env/bin/activate
+        pip install --upgrade pip
 
-        echo "❌ All TestPyPI verification attempts failed"
-        exit 1
+        pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==$VERSION
+        validate_cython_usage "Wheel Installation" "True"
+
+        deactivate
+        rm -rf test_wheel_env
+
+        # Test 2: Force build from source WITH compilation tools (should use Cython)
+        echo "🔄 Test 2: Source build with compilation tools..."
+        python -m venv test_source_cython_env
+        source test_source_cython_env/bin/activate
+        pip install --upgrade pip
+        pip install numpy>=1.20.0 cython>=0.29.24  # Install build deps
+
+        CONFOPT_FORCE_CYTHON=1 pip install --no-binary=confopt --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==$VERSION
+        validate_cython_usage "Source Build with Cython" "True"
+
+        deactivate
+        rm -rf test_source_cython_env
+
+        # Test 3: Force build from source WITHOUT compilation tools (should use Python fallback)
+        echo "🔄 Test 3: Source build without compilation tools..."
+        python -m venv test_source_python_env
+        source test_source_python_env/bin/activate
+        pip install --upgrade pip
+        # Deliberately DON'T install numpy/cython build dependencies
+
+        pip install --no-binary=confopt --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==$VERSION
+        validate_cython_usage "Source Build Pure Python" "False"
+
+        deactivate
+        rm -rf test_source_python_env
+
+        echo "✅ All TestPyPI installation scenarios validated successfully!"
   #
   # publish:
   #   name: Publish to PyPI
