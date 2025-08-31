@@ -414,44 +414,6 @@ jobs:
       run: |
         VERSION=${{ steps.get_version.outputs.version }}
 
-        # Comprehensive test function that validates Cython usage
-        validate_cython_usage() {
-          local test_name="$1"
-          local expected_cython="$2"
-
-          echo "🧪 Testing: $test_name"
-
-          # Test basic import and functionality
-          python -c "
-          import confopt
-          from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE
-          import numpy as np
-
-          print(f'📊 {test_name}:')
-          print(f'  - Package imported: ✅')
-          print(f'  - Cython available: {CYTHON_AVAILABLE}')
-          print(f'  - Expected Cython: $expected_cython')
-
-          # Validate entropy calculation works
-          test_data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-
-          # Test both entropy methods
-          for method in ['distance', 'histogram']:
-            result = calculate_entropy(test_data, method=method)
-            print(f'  - Entropy ({method}): {result:.4f}')
-            assert result > 0, f'Entropy calculation failed for {method}'
-
-          # Verify Cython expectation
-          if '$expected_cython' == 'True' and not CYTHON_AVAILABLE:
-            raise AssertionError(f'Expected Cython but got pure Python in {test_name}')
-          elif '$expected_cython' == 'False' and CYTHON_AVAILABLE:
-            raise AssertionError(f'Expected pure Python but got Cython in {test_name}')
-
-          print(f'  - Cython usage validation: ✅')
-          print()
-          "
-        }
-
         # Test 1: Standard wheel installation (should use Cython)
         echo "🔄 Test 1: Standard wheel installation from TestPyPI..."
         python -m venv test_wheel_env
@@ -459,7 +421,33 @@ jobs:
         pip install --upgrade pip
 
         pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==$VERSION
-        validate_cython_usage "Wheel Installation" "True"
+
+        # Validate Cython usage
+        python -c "
+        import confopt
+        from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE
+        import numpy as np
+
+        print('📊 Wheel Installation:')
+        print(f'  - Package imported: ✅')
+        print(f'  - Cython available: {CYTHON_AVAILABLE}')
+        print(f'  - Expected Cython: True')
+
+        # Validate entropy calculation works
+        test_data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+
+        # Test both entropy methods
+        for method in ['distance', 'histogram']:
+            result = calculate_entropy(test_data, method=method)
+            print(f'  - Entropy ({method}): {result:.4f}')
+            assert result > 0, f'Entropy calculation failed for {method}'
+
+        # Verify Cython expectation
+        if not CYTHON_AVAILABLE:
+            raise AssertionError('Expected Cython but got pure Python in Wheel Installation')
+
+        print(f'  - Cython usage validation: ✅')
+        "
 
         deactivate
         rm -rf test_wheel_env
@@ -472,7 +460,33 @@ jobs:
         pip install numpy>=1.20.0 cython>=0.29.24  # Install build deps
 
         CONFOPT_FORCE_CYTHON=1 pip install --no-binary=confopt --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==$VERSION
-        validate_cython_usage "Source Build with Cython" "True"
+
+        # Validate Cython usage
+        python -c "
+        import confopt
+        from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE
+        import numpy as np
+
+        print('📊 Source Build with Cython:')
+        print(f'  - Package imported: ✅')
+        print(f'  - Cython available: {CYTHON_AVAILABLE}')
+        print(f'  - Expected Cython: True')
+
+        # Validate entropy calculation works
+        test_data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+
+        # Test both entropy methods
+        for method in ['distance', 'histogram']:
+            result = calculate_entropy(test_data, method=method)
+            print(f'  - Entropy ({method}): {result:.4f}')
+            assert result > 0, f'Entropy calculation failed for {method}'
+
+        # Verify Cython expectation
+        if not CYTHON_AVAILABLE:
+            raise AssertionError('Expected Cython but got pure Python in Source Build with Cython')
+
+        print(f'  - Cython usage validation: ✅')
+        "
 
         deactivate
         rm -rf test_source_cython_env
@@ -485,7 +499,33 @@ jobs:
         # Deliberately DON'T install numpy/cython build dependencies
 
         pip install --no-binary=confopt --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==$VERSION
-        validate_cython_usage "Source Build Pure Python" "False"
+
+        # Validate Python fallback
+        python -c "
+        import confopt
+        from confopt.selection.sampling.entropy_samplers import calculate_entropy, CYTHON_AVAILABLE
+        import numpy as np
+
+        print('📊 Source Build Pure Python:')
+        print(f'  - Package imported: ✅')
+        print(f'  - Cython available: {CYTHON_AVAILABLE}')
+        print(f'  - Expected Cython: False')
+
+        # Validate entropy calculation works
+        test_data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+
+        # Test both entropy methods
+        for method in ['distance', 'histogram']:
+            result = calculate_entropy(test_data, method=method)
+            print(f'  - Entropy ({method}): {result:.4f}')
+            assert result > 0, f'Entropy calculation failed for {method}'
+
+        # Verify Python fallback expectation
+        if CYTHON_AVAILABLE:
+            raise AssertionError('Expected pure Python but got Cython in Source Build Pure Python')
+
+        print(f'  - Python fallback validation: ✅')
+        "
 
         deactivate
         rm -rf test_source_python_env
