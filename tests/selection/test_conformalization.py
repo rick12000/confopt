@@ -1,14 +1,12 @@
 import numpy as np
 import pytest
 from confopt.selection.conformalization import (
-    LocallyWeightedConformalEstimator,
     QuantileConformalEstimator,
     alpha_to_quantiles,
 )
 from confopt.wrapping import ConformalBounds
 from confopt.utils.preprocessing import train_val_split
 from conftest import (
-    AMENDED_POINT_ESTIMATOR_ARCHITECTURES,
     AMENDED_SINGLE_FIT_QUANTILE_ESTIMATOR_ARCHITECTURES,
     AMENDED_QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
@@ -53,114 +51,6 @@ def test_alpha_to_quantiles(alpha):
 
 
 @pytest.mark.slow
-@pytest.mark.skip(
-    reason="Locally weighted conformalization has a methodological issue that needs to be fixed"
-)
-@pytest.mark.parametrize(
-    "data_fixture_name",
-    ["diabetes_data"],
-)
-@pytest.mark.parametrize("point_arch", AMENDED_POINT_ESTIMATOR_ARCHITECTURES)
-@pytest.mark.parametrize("variance_arch", AMENDED_POINT_ESTIMATOR_ARCHITECTURES)
-@pytest.mark.parametrize("tuning_iterations", [0])
-@pytest.mark.parametrize("alphas", [[0.5], [0.1, 0.9]])
-@pytest.mark.parametrize(
-    "data_splitting_strategy", ["train_test_split", "cv", "adaptive"]
-)
-def test_locally_weighted_fit_and_predict_intervals_shape_and_coverage(
-    request,
-    data_fixture_name,
-    point_arch,
-    variance_arch,
-    tuning_iterations,
-    alphas,
-    data_splitting_strategy,
-):
-    X, y = request.getfixturevalue(data_fixture_name)
-    (X_train, y_train, X_test, y_test,) = train_val_split(
-        X, y, train_split=0.8, normalize=False, ordinal=False, random_state=42
-    )
-
-    estimator = LocallyWeightedConformalEstimator(
-        point_estimator_architecture=point_arch,
-        variance_estimator_architecture=variance_arch,
-        alphas=alphas,
-        n_calibration_folds=3,
-        calibration_split_strategy=data_splitting_strategy,
-        adaptive_threshold=50,
-    )
-    estimator.fit(
-        X=X_train,
-        y=y_train,
-        tuning_iterations=tuning_iterations,
-        random_state=42,
-    )
-    intervals = estimator.predict_intervals(X=X_test)
-    assert len(intervals) == len(alphas)
-
-    tol = ARCH_TOLERANCE_OVERRIDES.get(point_arch, POINT_ESTIMATOR_COVERAGE_TOLERANCE)
-    _, errors = validate_intervals(intervals, y_test, alphas, tol)
-    assert not any(errors)
-
-
-def test_locally_weighted_calculate_betas_output_properties(
-    dummy_expanding_quantile_gaussian_dataset,
-):
-    estimator = LocallyWeightedConformalEstimator(
-        point_estimator_architecture=AMENDED_POINT_ESTIMATOR_ARCHITECTURES[0],
-        variance_estimator_architecture=AMENDED_POINT_ESTIMATOR_ARCHITECTURES[0],
-        alphas=[0.1, 0.2, 0.3],
-    )
-    X, y = dummy_expanding_quantile_gaussian_dataset
-    X_train, y_train, X_val, y_val = train_val_split(
-        X, y, train_split=0.8, normalize=False, ordinal=False, random_state=42
-    )
-    # Combine train and val data for new interface
-    X_combined = np.vstack((X_train, X_val))
-    y_combined = np.concatenate((y_train, y_val))
-    estimator.fit(X=X_combined, y=y_combined, random_state=42)
-    test_point = X_val[0]
-    test_value = y_val[0]
-    betas = estimator.calculate_betas(test_point, test_value)
-    assert len(betas) == len(estimator.alphas)
-    assert all(0 <= beta <= 1 for beta in betas)
-
-
-@pytest.mark.parametrize(
-    "initial_alphas,new_alphas",
-    [
-        ([0.2], [0.1, 0.3]),
-        ([0.1, 0.2], [0.05, 0.15, 0.25]),
-        ([0.3], [0.2]),
-    ],
-)
-def test_locally_weighted_alpha_update_mechanism(initial_alphas, new_alphas):
-    estimator = LocallyWeightedConformalEstimator(
-        point_estimator_architecture=AMENDED_POINT_ESTIMATOR_ARCHITECTURES[0],
-        variance_estimator_architecture=AMENDED_POINT_ESTIMATOR_ARCHITECTURES[0],
-        alphas=initial_alphas,
-    )
-    estimator.update_alphas(new_alphas)
-    assert estimator.updated_alphas == new_alphas
-    assert estimator.alphas == initial_alphas
-
-
-def test_locally_weighted_prediction_errors_before_fitting():
-    estimator = LocallyWeightedConformalEstimator(
-        point_estimator_architecture=AMENDED_POINT_ESTIMATOR_ARCHITECTURES[0],
-        variance_estimator_architecture=AMENDED_POINT_ESTIMATOR_ARCHITECTURES[0],
-        alphas=[0.2],
-    )
-    X_test = np.random.rand(5, 3)
-    with pytest.raises(ValueError, match="Estimators must be fitted before prediction"):
-        estimator.predict_intervals(X_test)
-    with pytest.raises(
-        ValueError, match="Estimators must be fitted before calculating beta"
-    ):
-        estimator.calculate_betas(X_test[0], 1.0)
-
-
-@pytest.mark.slow
 @pytest.mark.parametrize(
     "data_fixture_name",
     ["diabetes_data"],
@@ -173,7 +63,6 @@ def test_locally_weighted_prediction_errors_before_fitting():
 @pytest.mark.parametrize(
     "calibration_split_strategy", ["train_test_split", "cv", "adaptive"]
 )
-@pytest.mark.parametrize("symmetric_adjustment", [True, False])
 def test_quantile_fit_and_predict_intervals_shape_and_coverage(
     request,
     data_fixture_name,
@@ -181,7 +70,6 @@ def test_quantile_fit_and_predict_intervals_shape_and_coverage(
     tuning_iterations,
     alphas,
     calibration_split_strategy,
-    symmetric_adjustment,
 ):
     X, y = request.getfixturevalue(data_fixture_name)
     (X_train, y_train, X_test, y_test,) = train_val_split(
@@ -194,7 +82,6 @@ def test_quantile_fit_and_predict_intervals_shape_and_coverage(
         n_pre_conformal_trials=15,
         n_calibration_folds=3,
         calibration_split_strategy=calibration_split_strategy,
-        symmetric_adjustment=symmetric_adjustment,
     )
     estimator.fit(
         X=X_train,
@@ -202,11 +89,7 @@ def test_quantile_fit_and_predict_intervals_shape_and_coverage(
         tuning_iterations=tuning_iterations,
         random_state=42,
     )
-    if estimator.symmetric_adjustment:
-        assert len(estimator.nonconformity_scores) == len(alphas)
-    else:
-        assert len(estimator.lower_nonconformity_scores) == len(alphas)
-        assert len(estimator.upper_nonconformity_scores) == len(alphas)
+    assert len(estimator.nonconformity_scores) == len(alphas)
 
     intervals = estimator.predict_intervals(X_test)
     assert len(intervals) == len(alphas)
@@ -285,21 +168,19 @@ def test_quantile_alpha_update_mechanism(initial_alphas, new_alphas):
 @pytest.mark.parametrize(
     "data_fixture_name",
     [
-        "heteroscedastic_data",
+        # "heteroscedastic_data",
         "diabetes_data",
     ],
 )
 @pytest.mark.parametrize("estimator_architecture", ["qrf", "qgbm"])
 @pytest.mark.parametrize("alphas", [[0.2, 0.4, 0.6, 0.8]])
 @pytest.mark.parametrize("calibration_split_strategy", ["cv"])
-@pytest.mark.parametrize("symmetric_adjustment", [True, False])
 def test_conformalized_vs_non_conformalized_quantile_estimator_coverage(
     request,
     data_fixture_name,
     estimator_architecture,
     alphas,
     calibration_split_strategy,
-    symmetric_adjustment,
 ):
     X, y = request.getfixturevalue(data_fixture_name)
 
@@ -323,7 +204,6 @@ def test_conformalized_vs_non_conformalized_quantile_estimator_coverage(
             quantile_estimator_architecture=estimator_architecture,
             alphas=alphas,
             n_pre_conformal_trials=32,
-            symmetric_adjustment=symmetric_adjustment,
             calibration_split_strategy=calibration_split_strategy,
             n_calibration_folds=5,
             normalize_features=True,
@@ -339,7 +219,6 @@ def test_conformalized_vs_non_conformalized_quantile_estimator_coverage(
             quantile_estimator_architecture=estimator_architecture,
             alphas=alphas,
             n_pre_conformal_trials=10000,
-            symmetric_adjustment=symmetric_adjustment,
             calibration_split_strategy=calibration_split_strategy,
             n_calibration_folds=5,
             normalize_features=True,

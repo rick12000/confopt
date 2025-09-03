@@ -167,12 +167,12 @@ The following diagram shows the complete end-to-end flow with class and method i
 
        subgraph "Acquisition Layer"
            BCS["BaseConformalSearcher<br/>predict()<br/>update()<br/>get_interval()"]
-           LWCS["LocallyWeightedConformalSearcher<br/>fit()<br/>_predict_with_*()"]
+
            QCS["QuantileConformalSearcher<br/>fit()<br/>_predict_with_*()"]
        end
 
        subgraph "Conformal Prediction"
-           LWCE["LocallyWeightedConformalEstimator<br/>fit()<br/>predict_intervals()<br/>_tune_fit_component_estimator()"]
+
            QCE["QuantileConformalEstimator<br/>fit()<br/>predict_intervals()<br/>calculate_betas()"]
            DTACI["DtACI<br/>update_alpha()<br/>_calculate_pinball_loss()"]
        end
@@ -357,23 +357,15 @@ Configuration management happens through either ``StaticConfigurationManager`` (
 
 **Step 2: Acquisition Function Setup**
 
-The system selects between two main acquisition approaches:
+The system uses quantile-based conformal prediction for acquisition:
 
-* ``LocallyWeightedConformalSearcher`` - uses variance-adaptive prediction intervals
 * ``QuantileConformalSearcher`` - uses direct quantile estimation
 
-Both inherit from ``BaseConformalSearcher`` which provides the common interface for ``predict()``, ``update()``, and ``get_interval()`` methods.
+This inherits from ``BaseConformalSearcher`` which provides the common interface for ``predict()``, ``update()``, and ``get_interval()`` methods.
 
 **Conformal Estimator Initialization:**
 
-``LocallyWeightedConformalEstimator`` implements a two-stage process:
-
-.. code-block:: text
-
-   LocallyWeightedConformalEstimator
-   ├── Point Estimator (for conditional mean)
-   ├── Variance Estimator (for conditional variance)
-   └── Nonconformity Score Calculation
+``QuantileConformalEstimator`` implements quantile-based conformal prediction:
 
 ``QuantileConformalEstimator`` uses direct quantile estimation with conformal adjustment for coverage guarantees.
 
@@ -381,10 +373,9 @@ Both inherit from ``BaseConformalSearcher`` which provides the common interface 
 
 Raw input data flows through ``train_val_split()`` which creates training, validation, and calibration sets. This split data structure maintains proper separation required for conformal prediction coverage guarantees.
 
-For ``LocallyWeightedConformalEstimator``, the training data gets further split:
+For ``QuantileConformalEstimator``, the training data gets processed as:
 
-* Point estimation subset → trains the mean predictor
-* Variance estimation subset → trains the variance predictor using residuals from point predictor
+* Quantile estimation → trains quantile regression models for prediction intervals
 * Validation set → generates nonconformity scores for conformal calibration
 
 **Step 4: Hyperparameter Tuning Layer**

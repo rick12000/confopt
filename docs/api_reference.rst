@@ -47,13 +47,6 @@ Acquisition Functions
 
 .. currentmodule:: confopt.selection.acquisition
 
-LocallyWeightedConformalSearcher
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. autoclass:: LocallyWeightedConformalSearcher
-   :members:
-   :exclude-members: __init__
-   :noindex:
-
 QuantileConformalSearcher
 ~~~~~~~~~~~~~~~~~~~~~~~~
 .. autoclass:: QuantileConformalSearcher

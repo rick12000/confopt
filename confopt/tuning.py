@@ -1,6 +1,6 @@
 import logging
 import random
-from typing import Optional, Dict, Tuple, get_type_hints, Literal, Union, List
+from typing import Optional, Dict, Tuple, get_type_hints, Literal, List
 from confopt.wrapping import ParameterRange
 
 import numpy as np
@@ -17,7 +17,6 @@ from confopt.utils.tracking import (
 )
 from confopt.utils.optimization import FixedSearcherOptimizer, DecayingSearcherOptimizer
 from confopt.selection.acquisition import (
-    LocallyWeightedConformalSearcher,
     QuantileConformalSearcher,
     LowerBoundSampler,
     PessimisticLowerBoundSampler,
@@ -632,9 +631,7 @@ class ConformalTuner:
         self,
         max_searches: Optional[int] = 100,
         max_runtime: Optional[int] = None,
-        searcher: Optional[
-            Union[LocallyWeightedConformalSearcher, QuantileConformalSearcher]
-        ] = None,
+        searcher: Optional[QuantileConformalSearcher] = None,
         n_random_searches: int = 15,
         conformal_retraining_frequency: int = 1,
         optimizer_framework: Optional[Literal["decaying", "fixed"]] = None,

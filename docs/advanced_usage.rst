@@ -12,7 +12,6 @@ A searcher is made up of a quantile estimator (surrogate model) and a sampler (a
 **Searcher Types**
 
 * ``QuantileConformalSearcher``: Uses quantile regression for prediction intervals.
-* ``LocallyWeightedConformalSearcher``: Uses separate point and variance estimators with locality weighting.
 
 **Samplers**
 
@@ -38,12 +37,7 @@ For ``QuantileConformalSearcher``, you can choose from the following architectur
 * ``"qgp"``: Quantile Gaussian Process
 * ``"ql"``: Quantile Lasso
 
-For ``LocallyWeightedConformalSearcher``, you can choose from the following architectures:
 
-* ``"rf"``: Random Forest
-* ``"gbm"``: Gradient Boosting Machine
-* ``"knn"``: K-Nearest Neighbors
-* ``"gp"``: Gaussian Process
 
 **Example:**
 

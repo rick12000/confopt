@@ -12,7 +12,6 @@ coverage guarantees while optimizing for different exploration-exploitation trad
 
 Key Components:
     - BaseConformalSearcher: Abstract interface for conformal acquisition functions
-    - LocallyWeightedConformalSearcher: Variance-adapted conformal acquisition
     - QuantileConformalSearcher: Quantile-based conformal acquisition
 
 Integration Context:
@@ -29,7 +28,6 @@ from abc import ABC, abstractmethod
 
 
 from confopt.selection.conformalization import (
-    LocallyWeightedConformalEstimator,
     QuantileConformalEstimator,
 )
 from confopt.selection.sampling.bound_samplers import (
@@ -98,9 +96,7 @@ class BaseConformalSearcher(ABC):
         ],
     ):
         self.sampler = sampler
-        self.conformal_estimator: Optional[
-            Union[LocallyWeightedConformalEstimator, QuantileConformalEstimator]
-        ] = None
+        self.conformal_estimator: Optional[QuantileConformalEstimator] = None
         self.X_train = None
         self.y_train = None
         self.last_beta = None
@@ -345,287 +341,6 @@ class BaseConformalSearcher(ABC):
 PointEstimatorArchitecture = Literal["gbm", "rf", "knn", "kr", "pens"]
 
 
-class LocallyWeightedConformalSearcher(BaseConformalSearcher):
-    """Conformal acquisition function using locally weighted variance adaptation.
-
-    Implements acquisition functions based on locally weighted conformal prediction,
-    where prediction intervals adapt to local variance patterns in the objective
-    function. Combines point estimation with variance estimation to create
-    heteroscedastic prediction intervals that guide optimization effectively.
-
-    This approach excels when the objective function exhibits varying uncertainty
-    across the parameter space, as it can narrow intervals in low-noise regions
-    while expanding them in high-uncertainty areas.
-
-    Args:
-        point_estimator_architecture: Architecture identifier for the point estimator
-            that models the conditional mean. Must be registered in ESTIMATOR_REGISTRY.
-        variance_estimator_architecture: Architecture identifier for the variance
-            estimator that models prediction uncertainty. Must be registered in
-            ESTIMATOR_REGISTRY.
-        sampler: Acquisition strategy that defines point selection behavior.
-
-    Attributes:
-        point_estimator_architecture: Point estimator configuration.
-        variance_estimator_architecture: Variance estimator configuration.
-        conformal_estimator: Fitted LocallyWeightedConformalEstimator instance.
-
-
-    Mathematical Foundation:
-        Uses locally weighted conformal prediction where intervals have the form:
-        [μ̂(x) - q₁₋ₐ(R) × σ̂(x), μ̂(x) + q₁₋ₐ(R) × σ̂(x)]
-
-        Where:
-        - μ̂(x): Point estimate at location x
-        - σ̂(x): Variance estimate at location x
-        - R: Nonconformity scores |yᵢ - μ̂(xᵢ)| / σ̂(xᵢ)
-        - q₁₋ₐ(R): (1-α)-quantile of nonconformity scores
-
-    Coverage Adaptation:
-        Supports adaptive alpha adjustment through sampler feedback mechanisms,
-        allowing dynamic coverage control based on optimization progress and
-        coverage performance monitoring.
-    """
-
-    def __init__(
-        self,
-        point_estimator_architecture: PointEstimatorArchitecture,
-        variance_estimator_architecture: PointEstimatorArchitecture,
-        sampler: Union[
-            LowerBoundSampler,
-            ThompsonSampler,
-            PessimisticLowerBoundSampler,
-            ExpectedImprovementSampler,
-            MaxValueEntropySearchSampler,
-        ],
-        n_calibration_folds: int = 3,
-        calibration_split_strategy: Literal[
-            "cv", "train_test_split", "adaptive"
-        ] = "adaptive",
-    ):
-        super().__init__(sampler)
-        self.point_estimator_architecture = point_estimator_architecture
-        self.variance_estimator_architecture = variance_estimator_architecture
-        self.n_calibration_folds = n_calibration_folds
-        self.calibration_split_strategy = calibration_split_strategy
-        self.conformal_estimator = LocallyWeightedConformalEstimator(
-            point_estimator_architecture=self.point_estimator_architecture,
-            variance_estimator_architecture=self.variance_estimator_architecture,
-            alphas=self.sampler.fetch_alphas(),
-            n_calibration_folds=self.n_calibration_folds,
-            calibration_split_strategy=self.calibration_split_strategy,
-        )
-
-    def fit(
-        self,
-        X: np.array,
-        y: np.array,
-        tuning_iterations: Optional[int] = 0,
-        random_state: Optional[int] = None,
-    ):
-        """Fit the locally weighted conformal estimator for acquisition.
-
-        Trains both point and variance estimators using the provided data,
-        following the locally weighted conformal prediction methodology.
-        Sets up the acquisition function for subsequent optimization.
-
-        Args:
-            X: Input features for estimator fitting, shape (n_samples, n_features).
-            y: Target values for estimator fitting, shape (n_samples,).
-            tuning_iterations: Number of hyperparameter tuning iterations (0 disables tuning).
-            random_state: Random seed for reproducible results.
-
-        Implementation Process:
-            1. Store data for potential use by acquisition strategies
-            2. Set default random state for Information Gain Sampler if not provided
-            3. Fit LocallyWeightedConformalEstimator with internal data splitting
-            4. Store point estimator validation error for performance monitoring
-
-        Data Usage:
-            - X, y: Processed internally by conformalization module for proper splitting
-            - Ensures proper separation required for conformal prediction guarantees
-        """
-        # Store data for potential use by samplers (though splitting is now internal)
-        self.X_train = X  # For backwards compatibility
-        self.y_train = y
-
-        self.conformal_estimator.fit(
-            X=X,
-            y=y,
-            tuning_iterations=tuning_iterations,
-            random_state=random_state,
-        )
-
-    def _predict_with_pessimistic_lower_bound(self, X: np.array):
-        """Generate pessimistic lower bound acquisition values.
-
-        Returns the lower bounds of prediction intervals as acquisition values,
-        implementing a conservative exploration strategy that prioritizes
-        configurations with potentially good worst-case performance.
-
-        Args:
-            X: Candidate points for evaluation, shape (n_candidates, n_features).
-
-        Returns:
-            Lower bounds of prediction intervals, shape (n_candidates,).
-
-        Acquisition Strategy:
-            Selects points based on interval lower bounds, encouraging exploration
-            of regions where even pessimistic estimates suggest good performance.
-            Naturally balances exploration and exploitation through interval width.
-        """
-        self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
-        return self.predictions_per_interval[0].lower_bounds
-
-    def _predict_with_ucb(self, X: np.array):
-        """Generate upper confidence bound acquisition values.
-
-        Implements upper confidence bound (UCB) acquisition using point estimates
-        adjusted by exploration terms based on prediction uncertainty. Combines
-        locally weighted variance estimates with adaptive exploration control.
-
-        Args:
-            X: Candidate points for evaluation, shape (n_candidates, n_features).
-
-        Returns:
-            UCB acquisition values, shape (n_candidates,).
-
-        Mathematical Formulation:
-            UCB(x) = μ̂(x) - β × σ̂(x)/2
-            Where β is the exploration parameter that decays over time.
-
-        Implementation Details:
-            Uses point estimator predictions as mean estimates and interval
-            half-widths as uncertainty measures. The beta parameter controls
-            exploration-exploitation trade-off and adapts over optimization steps.
-        """
-        self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
-        point_estimates = np.array(
-            self.conformal_estimator.pe_estimator.predict(X)
-        ).reshape(-1, 1)
-        interval = self.predictions_per_interval[0]
-        half_width = (
-            np.abs(interval.upper_bounds - interval.lower_bounds).reshape(-1, 1) / 2
-        )
-        return self.sampler.calculate_ucb_predictions(
-            point_estimates=point_estimates,
-            half_width=half_width,
-        )
-
-    def _predict_with_thompson(self, X: np.array):
-        """Generate Thompson sampling acquisition values.
-
-        Implements Thompson sampling by drawing random samples from prediction
-        intervals, optionally incorporating point predictions for optimistic bias.
-        Provides natural exploration through posterior sampling.
-
-        Args:
-            X: Candidate points for evaluation, shape (n_candidates, n_features).
-
-        Returns:
-            Thompson sampling acquisition values, shape (n_candidates,).
-
-        Sampling Strategy:
-            Randomly samples from prediction intervals to represent epistemic
-            uncertainty. When optimistic sampling is enabled, samples are
-            constrained by point predictions to bias toward exploitation.
-
-        Implementation Details:
-            Uses locally weighted intervals for sampling, with optional
-            point prediction constraints for optimistic Thompson sampling.
-        """
-        self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
-        point_predictions = None
-        if self.sampler.enable_optimistic_sampling:
-            point_predictions = self.conformal_estimator.pe_estimator.predict(X)
-        return self.sampler.calculate_thompson_predictions(
-            predictions_per_interval=self.predictions_per_interval,
-            point_predictions=point_predictions,
-        )
-
-    def _predict_with_expected_improvement(self, X: np.array):
-        """Generate expected improvement acquisition values.
-
-        Calculates expected improvement over the current best observed value
-        using locally weighted prediction intervals. Balances exploitation
-        of promising regions with exploration of uncertain areas.
-
-        Args:
-            X: Candidate points for evaluation, shape (n_candidates, n_features).
-
-        Returns:
-            Expected improvement acquisition values, shape (n_candidates,).
-
-        Acquisition Strategy:
-            Computes expected improvement by integrating improvement probabilities
-            over locally weighted prediction intervals, naturally accounting for
-            heteroscedastic uncertainty in the objective function.
-        """
-        self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
-        return self.sampler.calculate_expected_improvement(
-            predictions_per_interval=self.predictions_per_interval
-        )
-
-    def _predict_with_max_value_entropy_search(self, X: np.array):
-        """Generate max-value entropy search acquisition values.
-
-        Implements max-value entropy search (MES) acquisition that focuses
-        on reducing uncertainty about the global optimum location. Uses
-        locally weighted intervals for uncertainty representation.
-
-        Args:
-            X: Candidate points for evaluation, shape (n_candidates, n_features).
-
-        Returns:
-            MES acquisition values, shape (n_candidates,).
-
-        Max-Value Strategy:
-            Prioritizes points that provide maximal information about the
-            location of the global optimum, using locally adaptive uncertainty
-            estimates to guide the search toward promising regions.
-        """
-        self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
-        return self.sampler.calculate_information_gain(
-            predictions_per_interval=self.predictions_per_interval,
-            n_jobs=1,
-        )
-
-    def _calculate_betas(self, X: np.array, y_true: float) -> list[float]:
-        """Calculate coverage feedback (beta values) for adaptive alpha updating.
-
-        Computes the proportion of calibration points with nonconformity scores
-        greater than or equal to the observed nonconformity for the new point.
-        Provides coverage feedback for adaptive interval width adjustment.
-
-        Args:
-            X: Configuration where observation was made, shape (n_features,).
-            y_true: Observed performance value at the configuration.
-
-        Returns:
-            List of beta values, one per alpha level, representing coverage feedback.
-
-        Beta Calculation:
-            For each alpha level, beta represents the quantile position of the
-            new observation's nonconformity in the calibration distribution.
-            Used for adaptive alpha adjustment in coverage control.
-        """
-        return self.conformal_estimator.calculate_betas(X, y_true)
-
-
-QuantileEstimatorArchitecture = Literal[
-    "qrf",
-    "qgbm",
-    "qknn",
-    "ql",
-    "qgp",
-    "qens1",
-    "qens2",
-    "qens3",
-    "qens4",
-    "qens5",
-]
-
-
 class QuantileConformalSearcher(BaseConformalSearcher):
     """Conformal acquisition function using quantile-based prediction intervals.
 
@@ -673,7 +388,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
 
     def __init__(
         self,
-        quantile_estimator_architecture: QuantileEstimatorArchitecture,
+        quantile_estimator_architecture: str,
         sampler: Union[
             LowerBoundSampler,
             ThompsonSampler,
@@ -686,14 +401,13 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         calibration_split_strategy: Literal[
             "cv", "train_test_split", "adaptive"
         ] = "adaptive",
-        symmetric_adjustment: bool = True,
     ):
         super().__init__(sampler)
         self.quantile_estimator_architecture = quantile_estimator_architecture
         self.n_pre_conformal_trials = n_pre_conformal_trials
         self.n_calibration_folds = n_calibration_folds
         self.calibration_split_strategy = calibration_split_strategy
-        self.symmetric_adjustment = symmetric_adjustment
+
         self.scaler = StandardScaler()
         self.conformal_estimator = QuantileConformalEstimator(
             quantile_estimator_architecture=self.quantile_estimator_architecture,
@@ -701,7 +415,6 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             n_pre_conformal_trials=self.n_pre_conformal_trials,
             n_calibration_folds=self.n_calibration_folds,
             calibration_split_strategy=self.calibration_split_strategy,
-            symmetric_adjustment=self.symmetric_adjustment,
         )
 
     def fit(
