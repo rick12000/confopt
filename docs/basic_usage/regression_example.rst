@@ -160,8 +160,8 @@ Here is the full tutorial code if you want to run it all together:
 
        model.fit(X_train, y_train)
        predictions = model.predict(X_test)
-      mse = mean_squared_error(y_test, predictions)
-      return mse  # Lower is better (minimize MSE)
+       mse = mean_squared_error(y_test, predictions)
+       return mse  # Lower is better (minimize MSE)
 
    search_space = {
        'n_estimators': IntRange(min_value=50, max_value=200),
@@ -172,7 +172,7 @@ Here is the full tutorial code if you want to run it all together:
    tuner = ConformalTuner(
        objective_function=objective_function,
        search_space=search_space,
-      minimize=True  # Minimizing MSE
+       minimize=True  # Minimizing MSE
    )
 
    tuner.tune(
@@ -182,8 +182,7 @@ Here is the full tutorial code if you want to run it all together:
    )
 
    best_params = tuner.get_best_params()
-   best_neg_mse = tuner.get_best_value()
-      best_mse = tuner.get_best_value()
+   best_mse = tuner.get_best_value()
 
    tuned_model = RandomForestRegressor(**best_params, random_state=42)
    tuned_model.fit(*train_test_split(load_diabetes(return_X_y=True)[0], load_diabetes(return_X_y=True)[1], test_size=0.3, random_state=42)[:2])
@@ -209,9 +208,9 @@ Here is the full tutorial code if you want to run it all together:
 Alternative Metrics
 -------------------
 
-You can optimize for different regression metrics by changing the objective function and setting the appropriate ``metric_optimization`` parameter:
+You can optimize for different regression metrics by changing the objective function and setting the appropriate ``minimize`` parameter:
 
-**R² Score (Coefficient of Determination):** (set ``metric_optimization='maximize'``)
+**R² Score (Coefficient of Determination):** (set ``minimize=False``)
 
 .. code-block:: python
 
@@ -227,7 +226,7 @@ You can optimize for different regression metrics by changing the objective func
        predictions = model.predict(X_test)
        return r2_score(y_test, predictions)
 
-**Mean Absolute Error (MAE):** (set ``metric_optimization='minimize'``)
+**Mean Absolute Error (MAE):** (set ``minimize=True``)
 
 .. code-block:: python
 
@@ -244,7 +243,7 @@ You can optimize for different regression metrics by changing the objective func
        mae = mean_absolute_error(y_test, predictions)
        return mae
 
-**Root Mean Squared Error (RMSE):** (set ``metric_optimization='minimize'``)
+**Root Mean Squared Error (RMSE):** (set ``minimize=True``)
 
 .. code-block:: python
 

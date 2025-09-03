@@ -38,9 +38,7 @@ from confopt.selection.sampling.thompson_samplers import ThompsonSampler
 from confopt.selection.sampling.expected_improvement_samplers import (
     ExpectedImprovementSampler,
 )
-from confopt.selection.sampling.entropy_samplers import (
-    MaxValueEntropySearchSampler,
-)
+
 from confopt.selection.estimation import initialize_estimator
 from confopt.selection.estimator_configuration import (
     QUANTILE_TO_POINT_ESTIMATOR_MAPPING,
@@ -92,7 +90,6 @@ class BaseConformalSearcher(ABC):
             ThompsonSampler,
             PessimisticLowerBoundSampler,
             ExpectedImprovementSampler,
-            MaxValueEntropySearchSampler,
         ],
     ):
         self.sampler = sampler
@@ -129,7 +126,7 @@ class BaseConformalSearcher(ABC):
             - PessimisticLowerBoundSampler: Conservative lower bound selection
             - ExpectedImprovementSampler: Expected improvement over current best
 
-            - MaxValueEntropySearchSampler: Maximum value entropy search
+
         """
         if isinstance(self.sampler, LowerBoundSampler):
             return self._predict_with_ucb(X)
@@ -140,8 +137,6 @@ class BaseConformalSearcher(ABC):
         elif isinstance(self.sampler, ExpectedImprovementSampler):
             return self._predict_with_expected_improvement(X)
 
-        elif isinstance(self.sampler, MaxValueEntropySearchSampler):
-            return self._predict_with_max_value_entropy_search(X)
         else:
             raise ValueError(f"Unsupported sampler type: {type(self.sampler)}")
 
@@ -199,20 +194,6 @@ class BaseConformalSearcher(ABC):
 
         Returns:
             Expected improvement acquisition values, shape (n_candidates,).
-        """
-
-    @abstractmethod
-    def _predict_with_max_value_entropy_search(self, X: np.array):
-        """Generate max-value entropy search acquisition values.
-
-        Subclasses must implement max-value entropy search acquisition
-        using their specific conformal prediction approach.
-
-        Args:
-            X: Candidate points for evaluation, shape (n_candidates, n_features).
-
-        Returns:
-            MES acquisition values, shape (n_candidates,).
         """
 
     @abstractmethod
@@ -321,7 +302,6 @@ class BaseConformalSearcher(ABC):
                     (
                         ThompsonSampler,
                         ExpectedImprovementSampler,
-                        MaxValueEntropySearchSampler,
                     ),
                 ):
                     self.sampler.update_interval_width(betas=betas)
@@ -394,7 +374,6 @@ class QuantileConformalSearcher(BaseConformalSearcher):
             ThompsonSampler,
             PessimisticLowerBoundSampler,
             ExpectedImprovementSampler,
-            MaxValueEntropySearchSampler,
         ],
         n_pre_conformal_trials: int = 32,
         n_calibration_folds: int = 3,
@@ -612,30 +591,6 @@ class QuantileConformalSearcher(BaseConformalSearcher):
         self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
         return self.sampler.calculate_expected_improvement(
             predictions_per_interval=self.predictions_per_interval
-        )
-
-    def _predict_with_max_value_entropy_search(self, X: np.array):
-        """Generate max-value entropy search acquisition values.
-
-        Implements max-value entropy search using quantile-based uncertainty
-        estimates. Focuses on reducing uncertainty about global optimum
-        location using asymmetric quantile-based intervals.
-
-        Args:
-            X: Candidate points for evaluation, shape (n_candidates, n_features).
-
-        Returns:
-            MES acquisition values, shape (n_candidates,).
-
-        Quantile-Based MES:
-            Leverages quantile-based uncertainty representation for
-            max-value entropy search, naturally handling skewed or
-            asymmetric uncertainty patterns in optimum location inference.
-        """
-        self.predictions_per_interval = self.conformal_estimator.predict_intervals(X)
-        return self.sampler.calculate_information_gain(
-            predictions_per_interval=self.predictions_per_interval,
-            n_jobs=1,
         )
 
     def _calculate_betas(self, X: np.array, y_true: float) -> list[float]:

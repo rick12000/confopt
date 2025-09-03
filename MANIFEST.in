@@ -4,8 +4,7 @@ include README.md
 include requirements.txt
 include pytest.ini
 
-# Include Cython source files
-include confopt/selection/sampling/cy_entropy.pyx
+
 
 # Exclude build artifacts and temporary files
 prune build
@@ -14,10 +13,7 @@ prune *.egg-info
 prune __pycache__
 global-exclude *.pyc
 global-exclude *.pyo
-# Exclude compiled extensions from source distributions (sdist)
-# They should only be in wheels (bdist_wheel)
-global-exclude *.pyd
-global-exclude *.so
+
 global-exclude .DS_Store
 
 # Exclude development and testing directories

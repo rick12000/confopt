@@ -11,9 +11,7 @@ from confopt.selection.sampling.thompson_samplers import ThompsonSampler
 from confopt.selection.sampling.expected_improvement_samplers import (
     ExpectedImprovementSampler,
 )
-from confopt.selection.sampling.entropy_samplers import (
-    MaxValueEntropySearchSampler,
-)
+
 from conftest import (
     QUANTILE_ESTIMATOR_ARCHITECTURES,
 )
@@ -26,7 +24,6 @@ from conftest import (
         (LowerBoundSampler, {"interval_width": 0.8}),
         (ThompsonSampler, {"n_quantiles": 4}),
         (ExpectedImprovementSampler, {"n_quantiles": 4}),
-        (MaxValueEntropySearchSampler, {"n_quantiles": 4}),
     ],
 )
 @pytest.mark.parametrize("quantile_arch", QUANTILE_ESTIMATOR_ARCHITECTURES[:1])
@@ -137,36 +134,6 @@ def test_quantile_searcher_prediction_methods(big_toy_dataset):
     )
     plb_predictions = plb_searcher.predict(X_test)
     assert len(plb_predictions) == len(X_test)
-
-
-def test_quantile_searcher_with_advanced_samplers(big_toy_dataset):
-    X, y = big_toy_dataset
-    X_train, y_train = X[:7], y[:7]
-    X_val, y_val = X[7:], y[7:]
-    X_test = X_val[:2]
-
-    # Combine train and val data for new interface
-    X_combined = np.vstack((X_train, X_val))
-    y_combined = np.concatenate((y_train, y_val))
-
-    mes_sampler = MaxValueEntropySearchSampler(
-        n_quantiles=4,
-        n_paths=10,
-        n_y_candidates_per_x=5,
-    )
-    mes_searcher = QuantileConformalSearcher(
-        quantile_estimator_architecture="ql",
-        sampler=mes_sampler,
-        n_pre_conformal_trials=5,
-    )
-    mes_searcher.fit(
-        X=X_combined,
-        y=y_combined,
-        tuning_iterations=0,
-        random_state=42,
-    )
-    mes_predictions = mes_searcher.predict(X_test)
-    assert len(mes_predictions) == len(X_test)
 
 
 @pytest.mark.parametrize("current_best_value", [0.0, 0.5, 1.0, 10.0])

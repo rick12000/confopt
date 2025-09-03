@@ -37,7 +37,7 @@ Below let's define a simple example with one of each type of hyperparameter:
    search_space = {
        'n_estimators': IntRange(min_value=50, max_value=200),
        'max_features': FloatRange(min_value=0.1, max_value=1.0),
-       'criterion': CategoricalRange(categories=['gini', 'entropy', 'log_loss'])
+       'criterion': CategoricalRange(choices=['gini', 'entropy', 'log_loss'])
    }
 
 
@@ -179,7 +179,7 @@ Here is the full tutorial code if you want to run it all together:
    search_space = {
        'n_estimators': IntRange(min_value=50, max_value=200),
        'max_features': FloatRange(min_value=0.1, max_value=1.0),
-       'criterion': CategoricalRange(categories=['gini', 'entropy', 'log_loss'])
+       'criterion': CategoricalRange(choices=['gini', 'entropy', 'log_loss'])
    }
 
    tuner = ConformalTuner(

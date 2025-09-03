@@ -21,7 +21,7 @@ Regardless of searcher type, you can use the following samplers:
 * ``LowerBoundSampler``: Lower confidence bounds with exploration decay (good for fast convergence on simple problems)
 * ``ThompsonSampler``: Posterior sampling for exploration (good for balancing exploration and exploitation)
 * ``ExpectedImprovementSampler``: Expected improvement over current best (good for both fast convergence and exploration)
-* ``MaxValueEntropySearchSampler``: Maximum value entropy search (good for complex problems)
+
 
 
 **Estimator Architectures**
@@ -46,7 +46,7 @@ Let's use a ``QuantileConformalSearcher`` with a ``LowerBoundSampler`` and a ``Q
 .. code-block:: python
 
    from confopt.selection.acquisition import QuantileConformalSearcher
-   from confopt.selection.sampling import LowerBoundSampler
+   from confopt.selection.sampling.bound_samplers import LowerBoundSampler
 
    searcher = QuantileConformalSearcher(
        quantile_estimator_architecture="qrf",
@@ -103,7 +103,7 @@ Warm starting lets you begin optimization with configurations you've already eva
        objective_function=objective_function,
        search_space=search_space,
        minimize=False,
-       warm_start_configurations=warm_start_configs
+       warm_starts=warm_start_configs
    )
 
    tuner.tune(n_random_searches=10, max_searches=50)

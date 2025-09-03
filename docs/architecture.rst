@@ -43,7 +43,7 @@ Module paths are shown without the ``confopt.`` prefix for clarity.
                selection_sampling_bound_samplers["selection.sampling.bound_samplers"]
                selection_sampling_thompson_samplers["selection.sampling.thompson_samplers"]
                selection_sampling_expected_improvement_samplers["selection.sampling.expected_improvement_samplers"]
-               selection_sampling_entropy_samplers["selection.sampling.entropy_samplers"]
+
                selection_sampling_utils["selection.sampling.utils"]
            end
        end
@@ -70,7 +70,7 @@ Module paths are shown without the ``confopt.`` prefix for clarity.
        selection_acquisition --> selection_sampling_bound_samplers
        selection_acquisition --> selection_sampling_thompson_samplers
        selection_acquisition --> selection_sampling_expected_improvement_samplers
-       selection_acquisition --> selection_sampling_entropy_samplers
+
        selection_acquisition --> selection_estimation
 
        selection_conformalization --> wrapping
@@ -95,10 +95,7 @@ Module paths are shown without the ``confopt.`` prefix for clarity.
        selection_sampling_thompson_samplers --> selection_sampling_utils
        selection_sampling_expected_improvement_samplers --> wrapping
        selection_sampling_expected_improvement_samplers --> selection_sampling_utils
-       selection_sampling_entropy_samplers --> wrapping
-       selection_sampling_entropy_samplers --> selection_sampling_thompson_samplers
-       selection_sampling_entropy_samplers --> selection_sampling_expected_improvement_samplers
-       selection_sampling_entropy_samplers --> selection_sampling_utils
+
 
        selection_sampling_utils --> selection_adaptation
        selection_sampling_utils --> wrapping
@@ -208,7 +205,7 @@ The following diagram shows the complete end-to-end flow with class and method i
            TS["ThompsonSampler<br/>sample()<br/>_update_posterior()"]
            EIS["ExpectedImprovementSampler<br/>sample()<br/>_calculate_expected_improvement()"]
 
-           MVES["MaxValueEntropySearchSampler<br/>sample()<br/>_calculate_max_value_entropy()"]
+
        end
 
        subgraph "Sampling Utilities"
@@ -240,10 +237,8 @@ The following diagram shows the complete end-to-end flow with class and method i
        CT --> PBM
        CT --> SCM
        CT --> DCM
-       CT --> LWCS
        CT --> QCS
        CT --> TVS
-       CT --> RIO
        CT --> DSO
        CT --> FSO
        CT --> STOP
@@ -258,21 +253,13 @@ The following diagram shows the complete end-to-end flow with class and method i
        DCM --> DSO
 
        %% Acquisition Flow
-       LWCS --> LWCE
        QCS --> QCE
        BCS --> LBS
        BCS --> PLBS
        BCS --> TS
        BCS --> EIS
-       BCS --> ESS
-       BCS --> MVES
 
        %% Conformal Prediction Flow
-       LWCE --> PT
-       LWCE --> QT
-       LWCE --> IE
-       LWCE --> TVS
-       LWCE --> DTACI
        QCE --> QT
        QCE --> IE
        QCE --> DTACI
@@ -315,10 +302,6 @@ The following diagram shows the complete end-to-end flow with class and method i
        EIS --> IQA
        EIS --> UMIW
        EIS --> USIW
-       ESS --> IQA
-       ESS --> FCB
-       MVES --> IQA
-       MVES --> FCB
 
        %% Adaptive Flow
        IMA --> DTACI
@@ -328,20 +311,15 @@ The following diagram shows the complete end-to-end flow with class and method i
 
        %% Data Structure Flow
        CT --> PR
-       LWCE --> CB
        QCE --> CB
        LBS --> CB
        PLBS --> CB
        TS --> CB
        EIS --> CB
-       ESS --> CB
-       MVES --> CB
 
        %% Styling
        style CT fill:#ff6b6b
-       style LWCS fill:#4ecdc4
        style QCS fill:#4ecdc4
-       style LWCE fill:#45b7d1
        style QCE fill:#45b7d1
        style DSO fill:#96ceb4
        style STUDY fill:#feca57
@@ -365,9 +343,7 @@ This inherits from ``BaseConformalSearcher`` which provides the common interface
 
 **Conformal Estimator Initialization:**
 
-``QuantileConformalEstimator`` implements quantile-based conformal prediction:
-
-``QuantileConformalEstimator`` uses direct quantile estimation with conformal adjustment for coverage guarantees.
+``QuantileConformalEstimator`` implements quantile-based conformal prediction using direct quantile estimation with conformal adjustment for coverage guarantees.
 
 **Step 3: Data Processing Pipeline**
 
@@ -433,9 +409,7 @@ The ``BaseConformalSearcher.predict()`` method routes to strategy-specific imple
    ├── LowerBoundSampler (Upper Confidence Bound)
    ├── PessimisticLowerBoundSampler (Conservative Lower Bound)
    ├── ThompsonSampler (Posterior Sampling)
-   ├── ExpectedImprovementSampler (Expected Improvement)
-
-   └── MaxValueEntropySearchSampler (Maximum Value Entropy)
+   └── ExpectedImprovementSampler (Expected Improvement)
 
 Each strategy calls specific methods:
 

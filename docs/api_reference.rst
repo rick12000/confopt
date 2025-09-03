@@ -99,16 +99,3 @@ ExpectedImprovementSampler
    :members:
    :exclude-members: __init__
    :noindex:
-
-Entropy Sampling
-----------------
-
-.. currentmodule:: confopt.selection.sampling.entropy_samplers
-
-
-MaxValueEntropySearchSampler
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. autoclass:: MaxValueEntropySearchSampler
-   :members:
-   :exclude-members: __init__
-   :noindex:

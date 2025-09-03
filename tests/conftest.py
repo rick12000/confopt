@@ -622,32 +622,6 @@ def test_predictions_and_widths():
 
 
 @pytest.fixture
-def entropy_samples_gaussian():
-    """Gaussian samples for entropy calculation testing."""
-    np.random.seed(42)
-    return np.random.normal(0, 1, 100)
-
-
-@pytest.fixture
-def entropy_samples_uniform():
-    """Uniform samples for entropy calculation testing."""
-    np.random.seed(42)
-    return np.random.uniform(-2, 2, 50)
-
-
-@pytest.fixture
-def entropy_samples_identical():
-    """Identical samples for entropy edge case testing."""
-    return np.array([3.14, 3.14, 3.14, 3.14, 3.14])
-
-
-@pytest.fixture
-def entropy_samples_linear():
-    """Linear samples for deterministic entropy testing."""
-    return np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-
-
-@pytest.fixture
 def conformal_bounds_deterministic():
     """Deterministic conformal bounds for reproducible testing."""
     lower_bounds1 = np.array([1.0, 2.0, 3.0, 4.0])
@@ -655,22 +629,6 @@ def conformal_bounds_deterministic():
 
     lower_bounds2 = np.array([0.8, 1.8, 2.8, 3.8])
     upper_bounds2 = np.array([1.3, 2.3, 3.3, 4.3])
-
-    return [
-        ConformalBounds(lower_bounds=lower_bounds1, upper_bounds=upper_bounds1),
-        ConformalBounds(lower_bounds=lower_bounds2, upper_bounds=upper_bounds2),
-    ]
-
-
-@pytest.fixture
-def monte_carlo_bounds_simple():
-    """Simple bounds for Monte Carlo entropy testing."""
-    # Create bounds that will yield predictable minimum values
-    lower_bounds1 = np.array([10.0, 20.0, 5.0])  # min will be 5.0
-    upper_bounds1 = np.array([15.0, 25.0, 8.0])
-
-    lower_bounds2 = np.array([12.0, 18.0, 6.0])  # min will be 6.0
-    upper_bounds2 = np.array([17.0, 23.0, 9.0])
 
     return [
         ConformalBounds(lower_bounds=lower_bounds1, upper_bounds=upper_bounds1),
