@@ -298,9 +298,9 @@ jobs:
         from confopt.wrapping import IntRange, FloatRange
 
         # Minimal synthetic test
-        def simple_objective(config):
+        def simple_objective(configuration):
             # Simple quadratic function with noise
-            x, y = config['x'], config['y']
+            x, y = configuration['x'], configuration['y']
             return (x - 2)**2 + (y - 3)**2 + np.random.normal(0, 0.1)
 
         search_space = {
@@ -341,9 +341,9 @@ jobs:
         from confopt.wrapping import IntRange, FloatRange
 
         # Minimal synthetic test
-        def simple_objective(config):
+        def simple_objective(configuration):
             # Simple quadratic function with noise
-            x, y = config['x'], config['y']
+            x, y = configuration['x'], configuration['y']
             return (x - 2)**2 + (y - 3)**2 + np.random.normal(0, 0.1)
 
         search_space = {
@@ -444,9 +444,9 @@ jobs:
         from confopt.wrapping import IntRange, FloatRange
 
         # Minimal synthetic test
-        def simple_objective(config):
+        def simple_objective(configuration):
             # Simple quadratic function with noise
-            x, y = config['x'], config['y']
+            x, y = configuration['x'], configuration['y']
             return (x - 2)**2 + (y - 3)**2 + np.random.normal(0, 0.1)
 
         search_space = {
@@ -488,9 +488,9 @@ jobs:
         from confopt.wrapping import IntRange, FloatRange
 
         # Minimal synthetic test
-        def simple_objective(config):
+        def simple_objective(configuration):
             # Simple quadratic function with noise
-            x, y = config['x'], config['y']
+            x, y = configuration['x'], configuration['y']
             return (x - 2)**2 + (y - 3)**2 + np.random.normal(0, 0.1)
 
         search_space = {
