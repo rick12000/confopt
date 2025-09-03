@@ -79,21 +79,12 @@ test-skip = "*-*linux_aarch64 *-*linux_ppc64le *-*linux_s390x"
 # Platform-specific configurations
 [tool.cibuildwheel.linux]
 build = "cp39-*linux* cp310-*linux* cp311-*linux* cp312-*linux*"
-before-build = [
-    "python -c \"import numpy; print('NumPy version:', numpy.__version__)\""
-]
 repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.macos]
 build = "cp39-*macosx* cp310-*macosx* cp311-*macosx* cp312-*macosx*"
-before-build = [
-    "python -c \"import numpy; print('NumPy version:', numpy.__version__)\""
-]
 repair-wheel-command = "delocate-wheel -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.windows]
 build = "cp39-*win* cp310-*win* cp311-*win* cp312-*win*"
-before-build = [
-    "python -c \"import numpy; print('NumPy version:', numpy.__version__)\""
-]
 repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
