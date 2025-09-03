@@ -223,8 +223,8 @@ jobs:
   #         sys.exit(1)
   #       EOF
 
-  build_sdist:
-    name: Build source distribution
+  build:
+    name: Build Python Package
     runs-on: ubuntu-latest
     needs: [test, lint]
 
@@ -242,75 +242,37 @@ jobs:
         python -m pip install --upgrade pip
         pip install build twine
 
-    - name: Build source distribution
-      run: python -m build --sdist
+    - name: Build package (wheel and sdist)
+      run: python -m build
 
-    - name: Verify source distribution
-      run: twine check dist/*.tar.gz
+    - name: Verify built packages
+      run: twine check dist/*
 
-    - name: Upload source distribution
+    - name: Upload built packages
       uses: actions/upload-artifact@v4
       with:
-        name: python-package-sdist
-        path: dist/*.tar.gz
+        name: python-package-distributions
+        path: dist/
         retention-days: 2
-
-  build_wheels:
-    name: Build wheels on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    needs: [test, lint]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-13, macos-latest]
+  verify_package:
+    name: Verify Package Installation
+    runs-on: ubuntu-latest
+    needs: [build]
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-
-    - name: Install cibuildwheel
-      run: python -m pip install cibuildwheel==2.21.3
-
-    - name: Build wheels
-      run: python -m cibuildwheel --output-dir wheelhouse
-      # Configuration is now in pyproject.toml [tool.cibuildwheel] section
-
-    - name: Upload wheels
-      uses: actions/upload-artifact@v4
-      with:
-        name: python-package-wheels-${{ matrix.os }}
-        path: wheelhouse/*.whl
-        retention-days: 2
-  verify_builds:
-    name: Verify built packages
-    runs-on: ubuntu-latest
-    needs: [build_sdist, build_wheels]
-
-    steps:
-    - name: Download all artifacts
+    - name: Download build artifacts
       uses: actions/download-artifact@v4
       with:
-        pattern: python-package-*
+        name: python-package-distributions
         path: dist/
-        merge-multiple: true
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: ${{ env.PYTHON_VERSION }}
-
-    - name: Install verification tools
-      run: |
-        python -m pip install --upgrade pip
-        pip install twine
-
-    - name: Verify all packages
-      run: twine check dist/*
 
     - name: List built packages
       run: |
@@ -320,37 +282,96 @@ jobs:
         echo "Package summary:"
         echo "Source distributions: $(ls dist/*.tar.gz 2>/dev/null | wc -l)"
         echo "Wheels: $(ls dist/*.whl 2>/dev/null | wc -l)"
-        echo ""
-        echo "Python versions covered:"
-        ls dist/*.whl 2>/dev/null | grep -oE 'cp[0-9]+' | sort -u || echo "None"
-        echo ""
-        echo "Platforms covered:"
-        ls dist/*.whl 2>/dev/null | grep -oE '(win_amd64|macosx_[0-9_]+|linux_x86_64)' | sort -u || echo "None"
+
+    - name: Test wheel installation
+      run: |
+        # Test wheel installation
+        python -m venv test_wheel_env
+        source test_wheel_env/bin/activate
+        pip install --upgrade pip
+        pip install dist/*.whl
+
+        # Run minimal confopt test
+        python -c "
+        import numpy as np
+        from confopt.tuning import ConformalTuner
+        from confopt.wrapping import IntRange, FloatRange
+
+        # Minimal synthetic test
+        def simple_objective(config):
+            # Simple quadratic function with noise
+            x, y = config['x'], config['y']
+            return (x - 2)**2 + (y - 3)**2 + np.random.normal(0, 0.1)
+
+        search_space = {
+            'x': FloatRange(min_value=0.0, max_value=5.0),
+            'y': FloatRange(min_value=0.0, max_value=5.0)
+        }
+
+        tuner = ConformalTuner(
+            objective_function=simple_objective,
+            search_space=search_space,
+            minimize=True
+        )
+
+        tuner.tune(max_searches=5, n_random_searches=3, verbose=False)
+        best_params = tuner.get_best_params()
+        best_value = tuner.get_best_value()
+
+        print(f'Wheel installation and basic functionality test successful!')
+        print(f'Best params: {best_params}')
+        print(f'Best value: {best_value:.4f}')
+        "
+
+        deactivate
+        rm -rf test_wheel_env
 
     - name: Test source distribution installation
       run: |
-        # Test that sdist can be installed
+        # Test source installation
         python -m venv test_sdist_env
         source test_sdist_env/bin/activate
         pip install --upgrade pip
         pip install dist/*.tar.gz
+
+        # Run minimal confopt test
         python -c "
-        import confopt;
-        print('Source distribution installed successfully');
+        import numpy as np
+        from confopt.tuning import ConformalTuner
+        from confopt.wrapping import IntRange, FloatRange
+
+        # Minimal synthetic test
+        def simple_objective(config):
+            # Simple quadratic function with noise
+            x, y = config['x'], config['y']
+            return (x - 2)**2 + (y - 3)**2 + np.random.normal(0, 0.1)
+
+        search_space = {
+            'x': FloatRange(min_value=0.0, max_value=5.0),
+            'y': FloatRange(min_value=0.0, max_value=5.0)
+        }
+
+        tuner = ConformalTuner(
+            objective_function=simple_objective,
+            search_space=search_space,
+            minimize=True
+        )
+
+        tuner.tune(max_searches=5, n_random_searches=3, verbose=False)
+        best_params = tuner.get_best_params()
+        best_value = tuner.get_best_value()
+
+        print(f'Source distribution installation and basic functionality test successful!')
+        print(f'Best params: {best_params}')
+        print(f'Best value: {best_value:.4f}')
         "
+
         deactivate
         rm -rf test_sdist_env
-
-    - name: Upload final artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: python-package-distributions
-        path: dist/
-        retention-days: 2
   test-publish:
     name: Publish to TestPyPI
     runs-on: ubuntu-latest
-    needs: [verify_builds]
+    needs: [verify_package]
 
     steps:
     - name: Download build artifacts
@@ -418,8 +439,34 @@ jobs:
         pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==$VERSION
 
         python -c "
-        import confopt
-        print('Wheel installation successful')
+        import numpy as np
+        from confopt.tuning import ConformalTuner
+        from confopt.wrapping import IntRange, FloatRange
+
+        # Minimal synthetic test
+        def simple_objective(config):
+            # Simple quadratic function with noise
+            x, y = config['x'], config['y']
+            return (x - 2)**2 + (y - 3)**2 + np.random.normal(0, 0.1)
+
+        search_space = {
+            'x': FloatRange(min_value=0.0, max_value=5.0),
+            'y': FloatRange(min_value=0.0, max_value=5.0)
+        }
+
+        tuner = ConformalTuner(
+            objective_function=simple_objective,
+            search_space=search_space,
+            minimize=True
+        )
+
+        tuner.tune(max_searches=5, n_random_searches=3, verbose=False)
+        best_params = tuner.get_best_params()
+        best_value = tuner.get_best_value()
+
+        print('TestPyPI wheel installation and functionality test successful!')
+        print(f'Best params: {best_params}')
+        print(f'Best value: {best_value:.4f}')
         "
 
         deactivate
@@ -436,8 +483,34 @@ jobs:
         pip install --no-binary=confopt --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==$VERSION
 
         python -c "
-        import confopt
-        print('Source installation successful')
+        import numpy as np
+        from confopt.tuning import ConformalTuner
+        from confopt.wrapping import IntRange, FloatRange
+
+        # Minimal synthetic test
+        def simple_objective(config):
+            # Simple quadratic function with noise
+            x, y = config['x'], config['y']
+            return (x - 2)**2 + (y - 3)**2 + np.random.normal(0, 0.1)
+
+        search_space = {
+            'x': FloatRange(min_value=0.0, max_value=5.0),
+            'y': FloatRange(min_value=0.0, max_value=5.0)
+        }
+
+        tuner = ConformalTuner(
+            objective_function=simple_objective,
+            search_space=search_space,
+            minimize=True
+        )
+
+        tuner.tune(max_searches=5, n_random_searches=3, verbose=False)
+        best_params = tuner.get_best_params()
+        best_value = tuner.get_best_value()
+
+        print('TestPyPI source installation and functionality test successful!')
+        print(f'Best params: {best_params}')
+        print(f'Best value: {best_value:.4f}')
         "
 
         deactivate

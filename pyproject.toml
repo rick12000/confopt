@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel", "numpy>=1.20.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -49,42 +49,3 @@ docs = [
 [tool.setuptools]
 packages = { find = { where = ["."] , include = ["confopt*"] } }
 include-package-data = true
-
-
-
-
-
-[tool.cibuildwheel]
-# Platform-specific build configurations below - no global build to avoid conflicts
-
-# Skip 32-bit builds and musllinux for simplicity (can be enabled later if needed)
-# Also skip i686 due to scikit-learn dependency issues on 32-bit
-skip = "*-win32 *-musllinux* *-manylinux_i686 *-linux_i686"
-
-# All build configurations moved to platform-specific sections below
-
-build-verbosity = 1
-
-# Test that the wheel can be imported
-test-command = """
-python -c "
-import confopt;
-print('Package imported successfully');
-"
-"""
-
-# Skip testing on emulated architectures (they're slow and we have fallbacks)
-test-skip = "*-*linux_aarch64 *-*linux_ppc64le *-*linux_s390x"
-
-# Platform-specific configurations
-[tool.cibuildwheel.linux]
-build = "cp39-*linux* cp310-*linux* cp311-*linux* cp312-*linux*"
-repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
-
-[tool.cibuildwheel.macos]
-build = "cp39-*macosx* cp310-*macosx* cp311-*macosx* cp312-*macosx*"
-repair-wheel-command = "delocate-wheel -w {dest_dir} {wheel}"
-
-[tool.cibuildwheel.windows]
-build = "cp39-*win* cp310-*win* cp311-*win* cp312-*win*"
-repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
