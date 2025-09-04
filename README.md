@@ -6,11 +6,12 @@
 
 <div align="center">
 
+[![Downloads](https://pepy.tech/badge/YOUR_PACKAGE_NAME)](https://pepy.tech/project/YOUR_PACKAGE_NAME)
+[![Downloads](https://pepy.tech/badge/YOUR_PACKAGE_NAME/month)](https://pepy.tech/project/YOUR_PACKAGE_NAME)
 [![PyPI version](https://badge.fury.io/py/confopt.svg)](https://badge.fury.io/py/confopt)
-[![PyPI downloads](https://img.shields.io/pypi/dm/confopt.svg)](https://pypi.org/project/confopt/)
 [![Documentation](https://img.shields.io/badge/docs-latest-brightgreen.svg)](https://confopt.readthedocs.io/)
-[![Python versions](https://img.shields.io/pypi/pyversions/confopt.svg)](https://pypi.org/project/confopt/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Python versions](https://img.shields.io/pypi/pyversions/confopt.svg?color=lightgrey)](https://pypi.org/project/confopt/)
+[![License](https://img.shields.io/badge/License-Apache_2.0-orange.svg)](https://opensource.org/licenses/Apache-2.0)
 
 </div>
 
