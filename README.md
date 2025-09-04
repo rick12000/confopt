@@ -17,7 +17,7 @@
 
 ---
 
-Built for machine learning practitioners who need both architecture flexibility and statistical rigor, **ConfOpt** delivers superior optimization performance through conformal uncertainty quantification and a wide selection of surrogate models.
+Built for machine learning practitioners requiring flexible and robust hyperparameter tuning, **ConfOpt** delivers superior optimization performance through conformal uncertainty quantification and a wide selection of surrogate models.
 
 ## 📦 Installation
 
