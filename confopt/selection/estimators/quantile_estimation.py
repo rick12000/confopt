@@ -566,7 +566,7 @@ class QuantileGP(BaseSingleFitQuantileEstimator):
         kernel: Optional[Union[str, Kernel]] = None,
         noise_variance: Optional[Union[str, float]] = "optimize",
         alpha: float = 1e-10,
-        n_restarts_optimizer: int = 10,
+        n_restarts_optimizer: int = 5,
         random_state: Optional[int] = None,
         batch_size: Optional[int] = None,
         optimize_hyperparameters: bool = True,
@@ -707,7 +707,15 @@ class QuantileGP(BaseSingleFitQuantileEstimator):
         )
 
         try:
-            temp_gp.fit(self.X_train_, self.y_train_)
+            # Suppress sklearn GP convergence warnings about parameter bounds
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=".*close to the specified.*bound.*",
+                    category=UserWarning,
+                    module="sklearn.gaussian_process.kernels",
+                )
+                temp_gp.fit(self.X_train_, self.y_train_)
             # Extract optimized kernel
             self.kernel_ = temp_gp.kernel_
 

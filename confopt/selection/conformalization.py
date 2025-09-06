@@ -604,52 +604,56 @@ class QuantileConformalEstimator:
             if self.conformalize_predictions:
                 # CV+ method: for each validation point i and corresponding fold k(i),
                 # compute Q̂_{-S_{k(i)}}(x) ± R_i, then take quantiles
-                lower_values = []
-                upper_values = []
 
-                # Iterate through each fold and its nonconformity scores for this alpha
+                # Collect all scores for this alpha level
+                all_scores = []
+                for fold_scores in self.nonconformity_scores[i]:
+                    all_scores.extend(fold_scores)
+                all_scores = np.array(all_scores)
+                n_scores = len(all_scores)
+
+                # Pre-allocate arrays for better performance
+                lower_values = np.empty((n_scores, n_predict))
+                upper_values = np.empty((n_scores, n_predict))
+
+                score_idx = 0
                 for fold_idx, fold_scores in enumerate(self.nonconformity_scores[i]):
-                    # Get predictions from the corresponding fold estimator
                     fold_pred = self.fold_estimators[fold_idx].predict(X_processed)
+                    n_fold_scores = len(fold_scores)
 
-                    # Add to CV+ collections for each score in this fold
-                    for score in fold_scores:
-                        lower_values.extend(fold_pred[:, lower_idx] - score)
-                        upper_values.extend(fold_pred[:, upper_idx] + score)
+                    # Vectorized computation for all scores in this fold
+                    fold_lower_pred = fold_pred[:, lower_idx]  # shape: (n_predict,)
+                    fold_upper_pred = fold_pred[:, upper_idx]  # shape: (n_predict,)
 
-                # Reshape to group by prediction point
-                n_scores = sum(
-                    len(fold_scores) for fold_scores in self.nonconformity_scores[i]
+                    # Broadcast operations
+                    fold_scores_array = np.array(fold_scores).reshape(
+                        -1, 1
+                    )  # shape: (n_fold_scores, 1)
+
+                    lower_values[score_idx : score_idx + n_fold_scores] = (
+                        fold_lower_pred - fold_scores_array
+                    )
+                    upper_values[score_idx : score_idx + n_fold_scores] = (
+                        fold_upper_pred + fold_scores_array
+                    )
+
+                    score_idx += n_fold_scores
+
+                # Vectorized quantile computation
+                quantile_factor = alpha_adjusted / (1 + 1 / n_scores)
+                upper_quantile_factor = (1 - alpha_adjusted) / (1 + 1 / n_scores)
+
+                lower_interval_bound = np.quantile(
+                    lower_values, quantile_factor, axis=0, method="linear"
                 )
-                lower_values = np.array(lower_values).reshape(n_scores, n_predict)
-                upper_values = np.array(upper_values).reshape(n_scores, n_predict)
-
-                # Compute CV+ interval bounds for each prediction point
-                lower_bounds = []
-                upper_bounds = []
-
-                for pred_idx in range(n_predict):
-                    lower_bound = np.quantile(
-                        lower_values[:, pred_idx],
-                        alpha_adjusted / (1 + 1 / n_scores),
-                        method="linear",
-                    )
-                    upper_bound = np.quantile(
-                        upper_values[:, pred_idx],
-                        (1 - alpha_adjusted) / (1 + 1 / n_scores),
-                        method="linear",
-                    )
-
-                    lower_bounds.append(lower_bound)
-                    upper_bounds.append(upper_bound)
-
-                lower_interval_bound = np.array(lower_bounds)
-                upper_interval_bound = np.array(upper_bounds)
+                upper_interval_bound = np.quantile(
+                    upper_values, upper_quantile_factor, axis=0, method="linear"
+                )
             else:
                 # Non-conformalized: use first fold estimator (or any single estimator)
                 prediction = self.fold_estimators[0].predict(X_processed)
-                lower_interval_bound = np.array(prediction[:, lower_idx])
-                upper_interval_bound = np.array(prediction[:, upper_idx])
+                lower_interval_bound = prediction[:, lower_idx]
+                upper_interval_bound = prediction[:, upper_idx]
 
             intervals.append(
                 ConformalBounds(
