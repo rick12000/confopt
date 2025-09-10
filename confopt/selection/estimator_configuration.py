@@ -170,7 +170,7 @@ ESTIMATOR_REGISTRY = {
         estimator_name=QKNN_NAME,
         estimator_class=QuantileKNN,
         default_params={
-            "n_neighbors": 5,
+            "n_neighbors": 6,
         },
         estimator_parameter_space={
             "n_neighbors": IntRange(min_value=5, max_value=20),
@@ -256,7 +256,7 @@ ESTIMATOR_REGISTRY = {
             {
                 "class": QuantileKNN,
                 "params": {
-                    "n_neighbors": 5,
+                    "n_neighbors": 6,
                 },
             },
             {
