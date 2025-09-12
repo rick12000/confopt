@@ -78,7 +78,7 @@ class DtACI:
         self.alpha_t_candidates = np.array([alpha] * self.k)
 
         # Theoretical parameters from Algorithm 1 in the paper
-        self.interval = 500
+        self.interval = 50
         self.sigma = 1 / (2 * self.interval)
         self.eta = (
             np.sqrt(3 / self.interval)
