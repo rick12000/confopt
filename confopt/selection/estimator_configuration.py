@@ -118,7 +118,7 @@ ESTIMATOR_REGISTRY = {
         estimator_class=GradientBoostingRegressor,
         default_params={
             "learning_rate": 0.05,
-            "n_estimators": 50,
+            "n_estimators": 100,
             "min_samples_split": 2,
             "min_samples_leaf": 1,
             "max_depth": 3,
@@ -127,7 +127,7 @@ ESTIMATOR_REGISTRY = {
         },
         estimator_parameter_space={
             "learning_rate": FloatRange(min_value=0.02, max_value=0.15),
-            "n_estimators": IntRange(min_value=10, max_value=30),
+            "n_estimators": IntRange(min_value=10, max_value=200),
             "min_samples_split": IntRange(min_value=4, max_value=10),
             "min_samples_leaf": IntRange(min_value=3, max_value=7),
             "max_depth": IntRange(min_value=2, max_value=4),
@@ -201,7 +201,7 @@ ESTIMATOR_REGISTRY = {
         estimator_class=QuantileGBM,
         default_params={
             "learning_rate": 0.1,
-            "n_estimators": 50,
+            "n_estimators": 100,
             "min_samples_split": 6,
             "min_samples_leaf": 1,
             "max_depth": 2,
@@ -211,7 +211,7 @@ ESTIMATOR_REGISTRY = {
         },
         estimator_parameter_space={
             "learning_rate": FloatRange(min_value=0.05, max_value=0.2),
-            "n_estimators": IntRange(min_value=25, max_value=100),
+            "n_estimators": IntRange(min_value=25, max_value=200),
             "min_samples_split": IntRange(min_value=2, max_value=8),
             "min_samples_leaf": IntRange(min_value=1, max_value=3),
             "max_depth": IntRange(min_value=2, max_value=6),
@@ -263,7 +263,7 @@ ESTIMATOR_REGISTRY = {
                 "class": QuantileGBM,
                 "params": {
                     "learning_rate": 0.1,
-                    "n_estimators": 50,
+                    "n_estimators": 100,
                     "min_samples_split": 6,
                     "min_samples_leaf": 1,
                     "max_depth": 2,
@@ -291,7 +291,7 @@ ESTIMATOR_REGISTRY = {
                 "class": QuantileGBM,
                 "params": {
                     "learning_rate": 0.1,
-                    "n_estimators": 50,
+                    "n_estimators": 100,
                     "min_samples_split": 6,
                     "min_samples_leaf": 1,
                     "max_depth": 2,
@@ -330,7 +330,7 @@ ESTIMATOR_REGISTRY = {
                 "class": QuantileGBM,
                 "params": {
                     "learning_rate": 0.1,
-                    "n_estimators": 50,
+                    "n_estimators": 100,
                     "min_samples_split": 6,
                     "min_samples_leaf": 1,
                     "max_depth": 2,
@@ -365,7 +365,7 @@ ESTIMATOR_REGISTRY = {
                 "class": QuantileGBM,
                 "params": {
                     "learning_rate": 0.1,
-                    "n_estimators": 50,
+                    "n_estimators": 100,
                     "min_samples_split": 6,
                     "min_samples_leaf": 1,
                     "max_depth": 2,
@@ -415,7 +415,7 @@ ESTIMATOR_REGISTRY = {
                 "class": QuantileGBM,
                 "params": {
                     "learning_rate": 0.1,
-                    "n_estimators": 50,
+                    "n_estimators": 100,
                     "min_samples_split": 6,
                     "min_samples_leaf": 1,
                     "max_depth": 2,

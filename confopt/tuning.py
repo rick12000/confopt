@@ -18,10 +18,10 @@ from confopt.utils.tracking import (
 from confopt.utils.optimization import FixedSearcherOptimizer, DecayingSearcherOptimizer
 from confopt.selection.acquisition import (
     QuantileConformalSearcher,
-    LowerBoundSampler,
-    PessimisticLowerBoundSampler,
     BaseConformalSearcher,
 )
+from confopt.selection.sampling.bound_samplers import LowerBoundSampler, PessimisticLowerBoundSampler
+from confopt.selection.sampling.thompson_samplers import ThompsonSampler
 
 logger = logging.getLogger(__name__)
 
@@ -707,13 +707,8 @@ class ConformalTuner:
 
         if searcher is None:
             searcher = QuantileConformalSearcher(
-                quantile_estimator_architecture="qrf",
-                sampler=LowerBoundSampler(
-                    interval_width=0.05,
-                    adapter="DtACI",
-                    beta_decay="logarithmic_decay",
-                    c=1,
-                ),
+                quantile_estimator_architecture="qgbm",
+                sampler=ThompsonSampler(n_quantiles=4, adapter="DtACI", enable_optimistic_sampling=False),
             )
 
         self.initialize_tuning_resources()
