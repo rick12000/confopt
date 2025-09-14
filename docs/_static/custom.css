@@ -131,16 +131,20 @@
   font-size: 1.1rem;
   font-weight: 700;
   text-decoration: none;
-  transition: var(--transition);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
 }
 
-.wy-side-nav-search > a:hover {
-  transform: translateY(-1px);
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+/* Disable all link hover effects */
+.wy-side-nav-search > a:hover,
+.wy-side-nav-search > a:focus,
+.wy-side-nav-search > a:active {
+  color: white !important;
+  background: none !important;
+  transform: none !important;
+  text-shadow: none !important;
 }
 
 /* Logo Styling */
@@ -151,10 +155,11 @@
   max-height: var(--logo-height);
   min-height: 40px;
   margin: 0;
-  transition: var(--transition);
+  transition: transform 0.3s ease;
   object-fit: contain;
 }
 
+/* Only the logo should have hover effects */
 .wy-side-nav-search img.logo:hover {
   transform: scale(1.05);
 }
@@ -420,7 +425,7 @@
 .highlight {
   border-radius: var(--border-radius);
   border: 1px solid var(--primary-200);
-  background: linear-gradient(135deg, #ffffff, #fefefe) !important;
+  background: linear-gradient(135deg, #f7e4f0, #ffffff) !important;
   margin: 1.5rem 0;
   overflow: hidden;
   box-shadow: 0 4px 12px rgba(219, 39, 119, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
@@ -434,7 +439,7 @@
   left: 0;
   right: 0;
   height: 3px;
-  background: linear-gradient(90deg, var(--primary-600), var(--primary-400), var(--primary-300));
+  background: linear-gradient(90deg, var(--primary-400), var(--primary-100));
 }
 
 .highlight pre {
@@ -447,40 +452,177 @@
   border: none;
   overflow-x: auto;
   color: var(--gray-800);
+  position: relative;
+}
+
+/* Docstring highlighting within code blocks */
+.highlight .sd {
+  color: #f472b6;
+  font-style: italic;
+  background: rgba(244, 114, 182, 0.1);
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+/* Triple quoted strings (multiline strings) */
+.highlight .s2.triple, .highlight .s1.triple {
+  color: #ec4899;
+  background: rgba(236, 72, 153, 0.05);
+  border-left: 2px solid #f472b6;
+  padding-left: 8px;
+  margin-left: 4px;
+}
+
+/* F-strings and formatted strings */
+.highlight .sa {
+  color: #f472b6;
+  font-weight: 600;
+}
+
+.highlight .si {
+  color: #ec4899;
+  background: rgba(236, 72, 153, 0.15);
+  border-radius: 2px;
+  padding: 1px 2px;
+}
+
+/* Lambda functions */
+.highlight .k.lambda {
+  color: #d946ef;
+  font-style: italic;
+}
+
+/* None, True, False */
+.highlight .kc {
+  color: #7c3aed;
+  font-weight: 700;
+}
+
+/* Import statements enhancement */
+.highlight .kn {
+  color: #c026d3;
+}
+
+.highlight .nn {
+  color: #374151;
+  font-weight: 500;
+}
+
+/* Class inheritance */
+.highlight .nc + .p + .nc {
+  color: #a855f7;
+  font-weight: 500;
 }
 
 /* Enhanced Syntax Highlighting - Modern Pink/Red Theme */
-.highlight .k { color: var(--primary-700); font-weight: 700; } /* Keywords */
-.highlight .s, .highlight .s1, .highlight .s2 { color: var(--accent-green); font-weight: 500; } /* Strings */
-.highlight .c, .highlight .c1, .highlight .cm { color: var(--gray-500); font-style: italic; } /* Comments */
-.highlight .n { color: var(--gray-800); } /* Names */
-.highlight .nb { color: var(--secondary-600); font-weight: 600; } /* Built-ins */
-.highlight .nf { color: var(--accent-purple); font-weight: 700; } /* Functions */
-.highlight .nc { color: var(--primary-600); font-weight: 700; } /* Classes */
-.highlight .mi, .highlight .mf { color: var(--accent-orange); font-weight: 600; } /* Numbers */
-.highlight .o { color: var(--gray-600); font-weight: 500; } /* Operators */
-.highlight .p { color: var(--gray-500); } /* Punctuation */
-.highlight .nd { color: var(--secondary-700); font-weight: 600; } /* Decorators */
-.highlight .kn, .highlight .kd { color: var(--primary-700); font-weight: 600; } /* Import keywords */
-.highlight .bp { color: var(--accent-purple); font-weight: 600; } /* Built-in pseudo */
-.highlight .nv { color: var(--secondary-600); } /* Variables */
+/* Python Keywords (def, class, if, for, while, import, etc.) */
+.highlight .k, .highlight .kw { color: #d946ef; font-weight: 700; } /* Keywords - vibrant purple */
+.highlight .kn, .highlight .kd, .highlight .kc { color: #c026d3; font-weight: 600; } /* Import keywords, declarations, constants */
+
+/* Python Strings */
+.highlight .s, .highlight .s1, .highlight .s2, .highlight .sb, .highlight .sc { color: #ec4899; font-weight: 500; } /* Strings - bright pink */
+.highlight .se { color: #db2777; font-weight: 600; } /* String escapes */
+.highlight .sf, .highlight .sx { color: #be185d; font-style: italic; } /* String formatting */
+
+/* Python Comments */
+.highlight .c, .highlight .c1, .highlight .cm, .highlight .ch { color: #6b7280; font-style: italic; opacity: 0.8; } /* Comments - muted gray */
+.highlight .cs { color: #9ca3af; font-style: italic; font-weight: 500; } /* Comment specials */
+
+/* Python Names and Identifiers */
+.highlight .n, .highlight .na { color: #1f2937; } /* Names - dark gray */
+.highlight .nn { color: #374151; font-weight: 500; } /* Module names */
+
+/* Python Built-ins and Functions */
+.highlight .nb { color: #dc2626; font-weight: 600; } /* Built-ins (print, len, etc.) - red */
+.highlight .nf { color: #be185d; font-weight: 700; } /* Function names - deep pink */
+.highlight .fm { color: #a21caf; font-weight: 600; } /* Magic methods */
+
+/* Python Classes */
+.highlight .nc { color: #db2777; font-weight: 700; } /* Class names - primary pink */
+.highlight .ne { color: #e11d48; font-weight: 600; } /* Exception names */
+
+/* Python Numbers and Literals */
+.highlight .mi, .highlight .mf, .highlight .mb, .highlight .mo { color: #f472b6; font-weight: 600; } /* Numbers - bright pink */
+.highlight .il { color: #ec4899; font-weight: 500; } /* Long integers */
+
+/* Python Operators */
+.highlight .o, .highlight .ow { color: #4b5563; font-weight: 500; } /* Operators - medium gray */
+.highlight .p { color: #6b7280; } /* Punctuation (parentheses, brackets) */
+
+/* Python Variables and Attributes */
+.highlight .nv, .highlight .vi, .highlight .vg { color: #7c3aed; } /* Variables - purple */
+.highlight .bp { color: #8b5cf6; font-weight: 600; } /* Built-in pseudo (self, cls) */
+.highlight .vc { color: #a855f7; } /* Class variables */
+
+/* Python Decorators */
+.highlight .nd { color: #ec4899; font-weight: 600; } /* Decorators (@property, etc.) - pink */
+
+/* Python Error Highlighting */
+.highlight .gr { color: #dc2626; background-color: #fef2f2; } /* Generic error */
+.highlight .ge { font-style: italic; } /* Generic emph */
+.highlight .gs { font-weight: bold; } /* Generic strong */
+
+/* Python Type Hints */
+.highlight .kt { color: #7c2d12; font-weight: 600; } /* Keyword types */
+.highlight .nt { color: #a16207; } /* Name tag */
+
+/* Python Special Tokens */
+.highlight .nl { color: #db2777; font-weight: 600; } /* Name label */
+.highlight .ni { color: #be185d; font-weight: 700; } /* Name entity */
+.highlight .no { color: #991b1b; font-weight: 600; } /* Name constant */
+
+/* Additional Python-specific tokens */
+.highlight .py { color: #374151; } /* Name property */
+.highlight .nd.decorator { color: #f59e0b; font-weight: 600; } /* Specific decorator styling */
+
+/* Whitespace and Invisible Characters */
+.highlight .w { color: transparent; } /* Whitespace */
+
+/* Language-specific enhancements for better readability */
+.highlight .linenos { color: #9ca3af; background-color: #f9fafb; padding-right: 0.5rem; } /* Line numbers */
+.highlight .linenos .normal { color: #6b7280; }
+.highlight .linenos .special { color: #dc2626; font-weight: 600; }
 
 /* Inline Code */
 code {
-  background: linear-gradient(135deg, var(--primary-50), #fef7f7) !important;
-  color: var(--primary-800) !important;
+  background: linear-gradient(135deg, #fdf2f8, #fef7f7) !important;
+  color: #be185d !important;
   padding: 4px 10px;
   border-radius: var(--border-radius-sm);
   font-family: var(--font-mono);
   font-size: 0.875em;
   font-weight: 600;
-  border: 1px solid var(--primary-200);
+  border: 1px solid #fbcfe8;
   box-shadow: 0 1px 2px rgba(219, 39, 119, 0.05);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+/* Inline code within headings */
+h1 code, h2 code, h3 code, h4 code, h5 code, h6 code {
+  background: linear-gradient(135deg, #f3e8ff, #fae8ff) !important;
+  color: #a21caf !important;
+  border-color: #e879f9;
+}
+
+/* Inline code within links */
+a code {
+  background: inherit !important;
+  color: inherit !important;
+  border-color: currentColor;
+  opacity: 0.9;
+}
+
+/* Code within tables */
+.wy-table-responsive table code {
+  background: linear-gradient(135deg, #f8fafc, #f1f5f9) !important;
+  color: #c026d3 !important;
+  border-color: #e2e8f0;
+  font-size: 0.8em;
 }
 
 /* Copy Button */
-.copybtn {
-  background: linear-gradient(135deg, var(--primary-600), var(--primary-700));
+/* .copybtn {
+  background: var(--primary-700);
   color: white;
   border: none;
   border-radius: var(--border-radius);
@@ -493,10 +635,10 @@ code {
 }
 
 .copybtn:hover {
-  background: linear-gradient(135deg, var(--primary-700), var(--primary-800));
+  background: var(--primary-300);
   transform: translateY(-1px);
   box-shadow: 0 4px 8px rgba(219, 39, 119, 0.3);
-}
+} */
 
 /* ===================================================================
    Admonitions & Callouts
@@ -598,7 +740,6 @@ code {
   padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--gray-100);
   color: var(--gray-700);
-  transition: var(--transition);
 }
 
 .wy-table-responsive table tr:hover {
@@ -613,7 +754,6 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--gray-900);
   font-weight: 700;
   line-height: 1.2;
-  transition: var(--transition);
 }
 
 h1 {
@@ -629,26 +769,6 @@ h2 {
   color: var(--gray-800);
   border-bottom: 2px solid var(--primary-200);
   padding-bottom: 0.5rem;
-  position: relative;
-}
-
-h2:hover {
-  color: var(--primary-700);
-}
-
-h2::after {
-  content: '';
-  position: absolute;
-  bottom: -2px;
-  left: 0;
-  width: 0;
-  height: 2px;
-  background: linear-gradient(90deg, var(--primary-600), var(--primary-400));
-  transition: width 0.3s ease;
-}
-
-h2:hover::after {
-  width: 100px;
 }
 
 h3 {
@@ -657,15 +777,28 @@ h3 {
   color: var(--gray-700);
 }
 
-h3:hover {
-  color: var(--primary-600);
+/* Hide headerlink buttons completely */
+.headerlink {
+  display: none !important;
+}
+
+a.headerlink {
+  display: none !important;
+}
+
+.rst-content h1 .headerlink,
+.rst-content h2 .headerlink,
+.rst-content h3 .headerlink,
+.rst-content h4 .headerlink,
+.rst-content h5 .headerlink,
+.rst-content h6 .headerlink {
+  display: none !important;
 }
 
 /* Links */
 a {
   color: var(--primary-600);
   text-decoration: none;
-  transition: var(--transition);
 }
 
 a:hover {
@@ -780,7 +913,6 @@ p.caption {
 .search li {
   border-bottom: 1px solid var(--gray-200);
   padding: 1rem 0;
-  transition: var(--transition);
 }
 
 .search li:hover {
