@@ -187,13 +187,6 @@ After that runs, you can retrieve the best hyperparameters or the best score fou
    best_params = tuner.get_best_params()
    best_mse = tuner.get_best_value()
 
-Expected output:
-
-.. code-block:: text
-
-   Best MSE: 2847.32
-   Best parameters: {'n_estimators': 180, 'max_depth': 12, 'min_samples_split': 2}
-
 Which you can use to instantiate a tuned version of your model:
 
 .. code-block:: python

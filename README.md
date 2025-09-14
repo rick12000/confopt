@@ -38,7 +38,7 @@ pip install -e .
 
 ## 🎯 Getting Started
 
-The example below shows how to optimize hyperparameters for a RandomForest classifier.
+The example below shows how to optimize hyperparameters for a RandomForest classifier. You can find more examples in the [documentation](https://confopt.readthedocs.io/).
 
 ### Step 1: Import Required Libraries
 
@@ -50,7 +50,7 @@ from sklearn.datasets import load_wine
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 ```
-We import the necessary libraries for tuning and model evaluation. The `load_wine` function is used to load the wine dataset, which serves as our example data for optimizing the hyperparameters of the RandomForest classifier.
+We import the necessary libraries for tuning and model evaluation. The `load_wine` function is used to load the wine dataset, which serves as our example data for optimizing the hyperparameters of the RandomForest classifier (the dataset is trivial and we can easily reach 100% accuracy, this is for example purposes only).
 
 ### Step 2: Define the Objective Function
 
@@ -72,18 +72,18 @@ def objective_function(configuration):
 
     return accuracy_score(y_test, predictions)
 ```
-This function defines the objective we want to optimize. It loads the wine dataset, splits it into training and testing sets, and trains a RandomForest model using the provided configuration. The function returns the accuracy score, which serves as the optimization metric.
+This function defines the objective we want to optimize. It loads the wine dataset, splits it into training and testing sets, and trains a RandomForest model using the provided configuration. The function returns test accuracy, which will be the objective value ConfOpt will optimize for.
 
 ### Step 3: Define the Search Space
 
 ```python
 search_space = {
-    'n_estimators': IntRange(50, 200),
-    'max_features': FloatRange(0.1, 1.0),
-    'criterion': CategoricalRange(['gini', 'entropy', 'log_loss'])
+    'n_estimators': IntRange(min_value=50, max_value=200),
+    'max_features': FloatRange(min_value=0.1, max_value=1.0),
+    'criterion': CategoricalRange(choices=['gini', 'entropy', 'log_loss'])
 }
 ```
-Here, we specify the search space for hyperparameters. This includes defining the range for the number of estimators, the proportion of features to consider when looking for the best split, and the criterion for measuring the quality of a split.
+Here, we specify the search space for hyperparameters. In this Random Forest example, this includes defining the range for the number of estimators, the proportion of features to consider when looking for the best split, and the criterion for measuring the quality of a split.
 
 ### Step 4: Create and Run the Tuner
 
@@ -95,7 +95,7 @@ tuner = ConformalTuner(
 )
 tuner.tune(max_searches=50, n_random_searches=10)
 ```
-We initialize the `ConformalTuner` with the objective function and search space. The tuner is then run to find the best hyperparameters by maximizing the accuracy score.
+We initialize the `ConformalTuner` with the objective function and search space. The `tune` method then kickstarts hyperparameter search and finds the hyperparameters that maximize test accuracy.
 
 ### Step 5: Retrieve and Display Results
 
@@ -106,7 +106,7 @@ best_score = tuner.get_best_value()
 print(f"Best accuracy: {best_score:.4f}")
 print(f"Best parameters: {best_params}")
 ```
-Finally, we retrieve the best parameters and score from the tuning process and print them to the console for review.
+Finally, we retrieve the optimization's best parameters and test accuracy score and print them to the console for review.
 
 For detailed examples and explanations see the [documentation](https://confopt.readthedocs.io/).
 
@@ -121,7 +121,7 @@ For detailed examples and explanations see the [documentation](https://confopt.r
 - **[API Reference](https://confopt.readthedocs.io/en/latest/api_reference.html)**:
 Complete reference for main classes, methods, and parameters.
 
-## 🤝 Contributing
+## 📈 Benchmarks
 
 TBI
 
@@ -135,9 +135,11 @@ ConfOpt implements surrogate models and acquisition functions from the following
 > **Optimizing Hyperparameters with Conformal Quantile Regression**
 > [PMLR, 2023](https://proceedings.mlr.press/v202/salinas23a/salinas23a.pdf)
 
-## 📈 Benchmarks
+## 🤝 Contributing
 
-TBI
+If you'd like to contribute, please email [r.doyle.edu@gmail.com](mailto:r.doyle.edu@gmail.com) with a quick summary of the feature you'd like to add and we can discuss it before setting up a PR!
+
+If you want to contribute a fix relating to a new bug, first raise an [issue](https://github.com/rick12000/confopt/issues) on GitHub, then email [r.doyle.edu@gmail.com](mailto:r.doyle.edu@gmail.com) referencing the issue. Issues will be regularly monitored, only send an email if you want to contribute a fix.
 
 ## 📄 License
 
@@ -148,5 +150,5 @@ TBI
 <div align="center">
   <strong>Ready to take your hyperparameter optimization to the next level?</strong><br>
   <a href="https://confopt.readthedocs.io/en/latest/getting_started.html">Get Started</a> |
-  <a href="https://confopt.readthedocs.io/en/latest/api_reference.html">API Docs</a> |
+  <a href="https://confopt.readthedocs.io/en/latest/api_reference.html">API Docs</a>
 </div>

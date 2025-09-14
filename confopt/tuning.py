@@ -105,7 +105,7 @@ class ConformalTuner:
         objective_function: callable,
         search_space: Dict[str, ParameterRange],
         minimize: bool = True,
-        n_candidates: int = 3000,
+        n_candidates: int = 5000,
         warm_starts: Optional[List[Tuple[Dict, float]]] = None,
         dynamic_sampling: bool = True,
     ) -> None:
@@ -652,28 +652,29 @@ class ConformalTuner:
         Example:
             Basic usage::
 
+                import numpy as np
                 from confopt.tuning import ConformalTuner
-                from confopt.wrapping import IntRange, FloatRange
-
-                search_space = {
-                    'lr': FloatRange(0.001, 0.1, log_scale=True),
-                    'units': IntRange(32, 512)
-                }
+                from confopt.wrapping import FloatRange
 
                 def objective(configuration):
-                    model = SomeModel(
-                        learning_rate=configuration['lr'],
-                        hidden_units=configuration['units']
-                    )
-                    return model.evaluate()
+                    x1 = configuration['x1']
+                    x2 = configuration['x2']
+                    A = 10
+                    n = 2
+                    return A * n + (x1**2 - A * np.cos(2 * np.pi * x1)) + (x2**2 - A * np.cos(2 * np.pi * x2))
+
+                search_space = {
+                    'x1': FloatRange(min_value=-5.12, max_value=5.12),
+                    'x2': FloatRange(min_value=-5.12, max_value=5.12)
+                }
 
                 tuner = ConformalTuner(
                     objective_function=objective,
                     search_space=search_space,
-                    metric_optimization='maximize'
+                    minimize=True
                 )
 
-                tuner.tune(n_random_searches=10, max_searches=100)
+                tuner.tune(n_random_searches=10, max_searches=50)
 
                 best_config = tuner.get_best_params()
                 best_score = tuner.get_best_value()

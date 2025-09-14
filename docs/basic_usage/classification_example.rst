@@ -194,13 +194,6 @@ After that runs, you can retrieve the best hyperparameters or the best score fou
    best_params = tuner.get_best_params()
    best_accuracy = tuner.get_best_value()
 
-Expected output:
-
-.. code-block:: text
-
-   Best accuracy: 0.9815
-   Best parameters: {'n_estimators': 187, 'max_features': 0.73, 'criterion': 'entropy'}
-
 Which you can use to instantiate a tuned version of your model:
 
 .. code-block:: python

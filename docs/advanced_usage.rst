@@ -52,8 +52,7 @@ Let's use a ``QuantileConformalSearcher`` with a ``LowerBoundSampler`` and a Qua
            adapter="DtACI", # Conformal adapter to use for calibration
            beta_decay="logarithmic_decay", # Lower Bound Sampling decay function
            c=1.0 # Lower Bound Sampling Decay rate
-       ),
-       n_pre_conformal_trials=32 # Minimum number of trials before conformal calibration kicks in
+       )
    )
 
 And pass our custom searcher to the tuner to use it:
