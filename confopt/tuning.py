@@ -20,7 +20,10 @@ from confopt.selection.acquisition import (
     QuantileConformalSearcher,
     BaseConformalSearcher,
 )
-from confopt.selection.sampling.bound_samplers import LowerBoundSampler, PessimisticLowerBoundSampler
+from confopt.selection.sampling.bound_samplers import (
+    LowerBoundSampler,
+    PessimisticLowerBoundSampler,
+)
 from confopt.selection.sampling.thompson_samplers import ThompsonSampler
 
 logger = logging.getLogger(__name__)
@@ -541,7 +544,6 @@ class ConformalTuner:
                     search_iter,
                 )
 
-
             # Select next configuration
             next_config = self.select_next_configuration(
                 searcher, searchable_configs, X_searchable
@@ -684,7 +686,9 @@ class ConformalTuner:
         if searcher is None:
             searcher = QuantileConformalSearcher(
                 quantile_estimator_architecture="qgbm",
-                sampler=ThompsonSampler(n_quantiles=4, adapter="DtACI", enable_optimistic_sampling=False),
+                sampler=ThompsonSampler(
+                    n_quantiles=4, adapter="DtACI", enable_optimistic_sampling=False
+                ),
             )
 
         self.initialize_tuning_resources()
