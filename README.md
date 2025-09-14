@@ -112,16 +112,14 @@ For detailed examples and explanations see the [documentation](https://confopt.r
 
 ## 📚 Documentation
 
-### **[Examples](https://confopt.readthedocs.io/en/latest/basic_usage.html)**
+### **User Guide**
 - **[Classification Example](https://confopt.readthedocs.io/en/latest/basic_usage/classification_example.html)**: RandomForest hyperparameter tuning on a classification task.
 - **[Regression Example](https://confopt.readthedocs.io/en/latest/basic_usage/regression_example.html)**: RandomForest hyperparameter tuning on a regression task.
 
-### **[API Reference](https://confopt.readthedocs.io/en/latest/api_reference.html)**
+### **Developer Resources**
+- **[Architecture Overview](https://confopt.readthedocs.io/en/latest/architecture.html)**: System design and module interactions.
+- **[API Reference](https://confopt.readthedocs.io/en/latest/api_reference.html)**:
 Complete reference for main classes, methods, and parameters.
-
-### **[Developer Resources](https://confopt.readthedocs.io/en/latest/architecture.html)**
-- **[Architecture Overview](https://confopt.readthedocs.io/en/latest/architecture.html)**: System design and component interactions.
-- **[Components Guide](https://confopt.readthedocs.io/en/latest/components.html)**: Deep dive into modules and mechanics.
 
 ## 🤝 Contributing
 
@@ -150,6 +148,5 @@ TBI
 <div align="center">
   <strong>Ready to take your hyperparameter optimization to the next level?</strong><br>
   <a href="https://confopt.readthedocs.io/en/latest/getting_started.html">Get Started</a> |
-  <a href="https://confopt.readthedocs.io/en/latest/basic_usage.html">Examples</a> |
   <a href="https://confopt.readthedocs.io/en/latest/api_reference.html">API Docs</a> |
 </div>
