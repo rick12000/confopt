@@ -135,6 +135,7 @@ tls_cacerts = ""
 suppress_warnings = [
     "ref.doc",
     "ref.ref",
+    "epub.unknown_project_files",
 ]
 
 # Enable nitpicky mode for better link validation (but suppress known issues)
@@ -206,4 +207,4 @@ texinfo_documents = [
 # -- Options for Epub output -------------------------------------------------
 
 epub_title = project
-epub_exclude_files = ["search.html"]
+epub_exclude_files = ["search.html", ".nojekyll", ".doctrees", "environment.pickle"]
