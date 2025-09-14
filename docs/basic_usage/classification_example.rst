@@ -144,7 +144,9 @@ The objective function defines how the model trains and what metric you want to 
 
        return score
 
-The objective function must take a single argument called ``configuration``, which is a dictionary containing a value for each hyperparameter name specified in your ``search_space``. The values will be chosen automatically by the tuner during optimization. The ``score`` can be any metric of your choosing (e.g., accuracy, log loss, F1 score, etc.). This is the value that ``confopt`` will try to optimize for.
+The objective function must take a single argument called ``configuration``, which is a dictionary containing a hyperparameter value for each hyperparameter name specified in your ``search_space``. The values will be chosen automatically by the tuner during optimization.
+
+The ``score`` can be any metric of your choosing (e.g., accuracy, log loss, F1 score, etc.). This is the value that ``confopt`` will try to optimize for.
 
 In this example, the data is loaded and split inside the objective function for simplicity, but you may prefer to load the data outside (to avoid reloading it for each configuration) and
 either pass the training and test sets as arguments using ``partial`` from the ``functools`` library, or reference them from the global scope.
@@ -185,7 +187,7 @@ Getting the Results
 ~~~~~~~~~~~~~~~~~~~
 
 
-After that runs, you can retrieve the best hyperparameters or the best score found using ``get_best_params()`` and ``get_best_value()``:
+After that runs, you can retrieve the best hyperparameters or the best score found respectively using ``get_best_params()`` and ``get_best_value()``:
 
 .. code-block:: python
 

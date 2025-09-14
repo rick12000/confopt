@@ -318,7 +318,9 @@ class BaseConformalSearcher(ABC):
                 self.conformal_estimator.update_alphas(self.sampler.fetch_alphas())
 
 
-PointEstimatorArchitecture = Literal["gbm", "rf", "knn", "kr", "pens"]
+QuantileEstimatorArchitecture = Literal[
+    "qgbm", "qgp", "qrf", "qknn", "ql", "qleaf", "qens5"
+]
 
 
 class QuantileConformalSearcher(BaseConformalSearcher):
@@ -368,7 +370,7 @@ class QuantileConformalSearcher(BaseConformalSearcher):
 
     def __init__(
         self,
-        quantile_estimator_architecture: str,
+        quantile_estimator_architecture: QuantileEstimatorArchitecture,
         sampler: Union[
             LowerBoundSampler,
             ThompsonSampler,

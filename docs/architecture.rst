@@ -119,7 +119,7 @@ Module Organization and Flow
 **Utilities Layer**
   * ``utils.preprocessing``: Data splitting utilities
   * ``utils.tracking``: Experiment management and progress monitoring
-  * ``utils.optimization``: Bayesian optimization algorithms
+  * ``utils.optimization``: Searcher optimization algorithms
   * ``utils.configurations.*``: Parameter encoding, sampling, and hashing utilities
 
 **Selection Layer**
@@ -143,69 +143,73 @@ The following diagram shows the complete end-to-end flow with class and method i
 
    graph TD
        subgraph "Main Orchestration"
-           CT["ConformalTuner<br/>search()<br/>_run_trials()<br/>_evaluate_configuration()"]
-           STOP["stop_search()<br/>early_stopping_check()"]
+           CT["ConformalTuner<br/>tune()<br/>random_search()<br/>conformal_search()<br/>_evaluate_configuration()"]
+           STOP["stop_search()<br/>check_objective_function()"]
        end
 
        subgraph "Experiment Management"
-           STUDY["Study<br/>add_trial()<br/>get_best_trial()<br/>get_trials()"]
-           TRIAL["Trial<br/>configuration<br/>performance<br/>metadata"]
-           RT["RuntimeTracker<br/>start_timing()<br/>stop_timing()"]
-           PBM["ProgressBarManager<br/>update_progress()"]
+           STUDY["Study<br/>append_trial()<br/>batch_append_trials()<br/>get_best_configuration()<br/>get_best_performance()<br/>get_searched_configurations()<br/>get_searched_performances()<br/>get_average_target_model_runtime()"]
+           TRIAL["Trial<br/>iteration<br/>timestamp<br/>configuration<br/>performance<br/>acquisition_source<br/>lower_bound<br/>upper_bound<br/>searcher_runtime<br/>target_model_runtime"]
+           RT["RuntimeTracker<br/>pause_runtime()<br/>resume_runtime()<br/>return_runtime()"]
+           PBM["ProgressBarManager<br/>create_progress_bar()<br/>update_progress()<br/>close_progress_bar()"]
        end
 
        subgraph "Configuration Management"
-           SCM["StaticConfigurationManager<br/>get_configurations()"]
-           DCM["DynamicConfigurationManager<br/>suggest_configuration()"]
-           CE["ConfigurationEncoder<br/>encode()<br/>decode()"]
-           GTC["get_tuning_configurations()<br/>uniform_sampling()<br/>sobol_sampling()"]
+           BCM["BaseConfigurationManager<br/>mark_as_searched()<br/>tabularize_configs()<br/>listify_configs()<br/>add_to_banned_configurations()"]
+           SCM["StaticConfigurationManager<br/>get_searchable_configurations()<br/>get_searchable_configurations_count()"]
+           DCM["DynamicConfigurationManager<br/>get_searchable_configurations()<br/>get_searchable_configurations_count()"]
+           CE["ConfigurationEncoder<br/>transform()<br/>_build_encoding_schema()<br/>_create_feature_matrix()"]
+           GTC["get_tuning_configurations()<br/>_uniform_sampling()<br/>_sobol_sampling()"]
            CCH["create_config_hash()<br/>hash_generation()"]
        end
 
        subgraph "Acquisition Layer"
-           BCS["BaseConformalSearcher<br/>predict()<br/>update()<br/>get_interval()"]
-
-           QCS["QuantileConformalSearcher<br/>fit()<br/>_predict_with_*()"]
+           BCS["BaseConformalSearcher<br/>predict()<br/>update()<br/>get_interval()<br/>_calculate_betas()"]
+           QCS["QuantileConformalSearcher<br/>fit()<br/>_predict_with_ucb()<br/>_predict_with_thompson()<br/>_predict_with_pessimistic_lower_bound()<br/>_predict_with_expected_improvement()"]
        end
 
        subgraph "Conformal Prediction"
-
-           QCE["QuantileConformalEstimator<br/>fit()<br/>predict_intervals()<br/>calculate_betas()"]
-           DTACI["DtACI<br/>update_alpha()<br/>_calculate_pinball_loss()"]
+           QCE["QuantileConformalEstimator<br/>fit()<br/>predict_intervals()<br/>calculate_betas()<br/>update_alphas()<br/>_fit_non_conformal()<br/>_fit_cv_plus()<br/>_fit_train_test_split()"]
+           DTACI["DtACI<br/>update()<br/>pinball_loss()"]
+           SACS["set_calibration_split()<br/>alpha_to_quantiles()"]
        end
 
        subgraph "Hyperparameter Tuning"
-           RT_TUNER["RandomTuner<br/>tune()<br/>_cross_validate()"]
-           PT["PointTuner<br/>tune()<br/>_evaluate_point_estimator()"]
-           QT["QuantileTuner<br/>tune()<br/>_evaluate_quantile_estimator()"]
+           RT_TUNER["RandomTuner<br/>tune()<br/>_create_fold_indices()<br/>_score_configurations()<br/>_fit_model()<br/>_evaluate_model()"]
+           PT["PointTuner<br/>tune()<br/>_fit_model()<br/>_evaluate_model()"]
+           QT["QuantileTuner<br/>_fit_model()<br/>_evaluate_model()"]
            IE["initialize_estimator()<br/>estimator_creation()"]
+           ASCF["average_scores_across_folds()<br/>score_aggregation()"]
        end
 
        subgraph "Estimator Registry"
-           ER["ESTIMATOR_REGISTRY<br/>estimator_configs"]
-           EC["EstimatorConfig<br/>architecture<br/>param_ranges<br/>default_params"]
+           ER["ESTIMATOR_REGISTRY<br/>rf, gbm, kr, knn<br/>qgbm, qrf, qknn, ql, qgp, qleaf<br/>qens1, qens2, qens3, qens4, qens5"]
+           EC["EstimatorConfig<br/>estimator_name<br/>estimator_class<br/>default_params<br/>estimator_parameter_space<br/>ensemble_components<br/>is_ensemble_estimator()<br/>is_quantile_estimator()"]
        end
 
        subgraph "Quantile Estimators"
+           BMFQE["BaseMultiFitQuantileEstimator<br/>fit()<br/>_fit_quantile_estimator()"]
+           BSFQE["BaseSingleFitQuantileEstimator<br/>fit()<br/>_fit_implementation()"]
            QL["QuantileLasso<br/>fit()<br/>predict_quantiles()"]
            QG["QuantileGBM<br/>fit()<br/>predict_quantiles()"]
            QF["QuantileForest<br/>fit()<br/>predict_quantiles()"]
            QK["QuantileKNN<br/>fit()<br/>predict_quantiles()"]
-           GP["GaussianProcessQuantileEstimator<br/>fit()<br/>predict_quantiles()"]
+           QGP["QuantileGP<br/>fit()<br/>predict_quantiles()"]
+           QLeaf["QuantileLeaf<br/>fit()<br/>predict_quantiles()"]
        end
 
        subgraph "Ensemble Methods"
-           PEE["PointEnsembleEstimator<br/>fit()<br/>predict()<br/>_fit_base_estimators()"]
-           QEE["QuantileEnsembleEstimator<br/>fit()<br/>predict_quantiles()<br/>_fit_base_estimators()"]
+           BEE["BaseEnsembleEstimator<br/>fit()<br/>predict()"]
+           PEE["PointEnsembleEstimator<br/>fit()<br/>predict()<br/>_compute_point_weights()<br/>_compute_linear_stack_weights()<br/>_get_stacking_training_data()"]
+           QEE["QuantileEnsembleEstimator<br/>fit()<br/>predict()<br/>_compute_quantile_weights()<br/>_compute_linear_stack_weights()<br/>_get_stacking_training_data()"]
+           QLM["QuantileLassoMeta<br/>fit()<br/>predict()<br/>_quantile_loss_objective()"]
        end
 
        subgraph "Sampling Strategies"
-           LBS["LowerBoundSampler<br/>calculate_upper_confidence_bound()"]
-           PLBS["PessimisticLowerBoundSampler<br/>calculate_lower_bound()"]
-           TS["ThompsonSampler<br/>sample()<br/>_update_posterior()"]
-           EIS["ExpectedImprovementSampler<br/>sample()<br/>_calculate_expected_improvement()"]
-
-
+           LBS["LowerBoundSampler<br/>calculate_ucb_predictions()<br/>update_exploration_step()<br/>fetch_alphas()<br/>update_interval_width()"]
+           PLBS["PessimisticLowerBoundSampler<br/>fetch_alphas()<br/>update_interval_width()"]
+           TS["ThompsonSampler<br/>calculate_thompson_predictions()<br/>fetch_alphas()<br/>update_interval_width()"]
+           EIS["ExpectedImprovementSampler<br/>calculate_expected_improvement()<br/>update_best_value()<br/>fetch_alphas()<br/>update_interval_width()"]
        end
 
        subgraph "Sampling Utilities"
@@ -215,6 +219,7 @@ The following diagram shows the complete end-to-end flow with class and method i
            UMIW["update_multi_interval_widths()<br/>width_updates()"]
            USIW["update_single_interval_width()<br/>single_width_update()"]
            FCB["flatten_conformal_bounds()<br/>bounds_flattening()"]
+           VEQ["validate_even_quantiles()<br/>quantile_validation()"]
        end
 
        subgraph "Data Processing"
@@ -222,13 +227,13 @@ The following diagram shows the complete end-to-end flow with class and method i
        end
 
        subgraph "Searcher Optimization"
-           DSO["DecayingSearcherOptimizer<br/>select_arm()<br/>_calculate_current_interval()"]
-           FSO["FixedSearcherOptimizer<br/>select_arm()"]
+           DSO["DecayingSearcherOptimizer<br/>select_arm()<br/>update()<br/>_calculate_current_interval()"]
+           FSO["FixedSearcherOptimizer<br/>select_arm()<br/>update()"]
        end
 
        subgraph "Parameter Structures"
            PR["ParameterRange<br/>IntRange<br/>FloatRange<br/>CategoricalRange"]
-           CB["ConformalBounds<br/>lower_bound<br/>upper_bound<br/>alpha"]
+           CB["ConformalBounds<br/>lower_bounds<br/>upper_bounds"]
        end
 
        %% Main Flow Connections
@@ -248,6 +253,8 @@ The following diagram shows the complete end-to-end flow with class and method i
        STUDY --> CE
        STUDY --> GTC
        STUDY --> CCH
+       BCM --> SCM
+       BCM --> DCM
        SCM --> GTC
        DCM --> GTC
        DCM --> DSO
@@ -263,9 +270,13 @@ The following diagram shows the complete end-to-end flow with class and method i
        QCE --> QT
        QCE --> IE
        QCE --> DTACI
+       QCE --> SACS
+       QCS --> SACS
+       DTACI --> SACS
 
        %% Hyperparameter Tuning Flow
        RT_TUNER --> IE
+       RT_TUNER --> ASCF
        PT --> RT_TUNER
        PT --> ER
        QT --> RT_TUNER
@@ -275,33 +286,38 @@ The following diagram shows the complete end-to-end flow with class and method i
 
        %% Estimator Flow
        ER --> EC
-       EC --> QL
-       EC --> QG
-       EC --> QF
-       EC --> QK
-       EC --> GP
-       EC --> PEE
-       EC --> QEE
+       EC --> BMFQE
+       EC --> BSFQE
+       BMFQE --> QL
+       BMFQE --> QG
+       BSFQE --> QF
+       BSFQE --> QK
+       BSFQE --> QGP
+       BSFQE --> QLeaf
+       EC --> BEE
+       BEE --> PEE
+       BEE --> QEE
 
        %% Ensemble Flow
-       PEE --> QL
-       PEE --> QG
-       PEE --> QF
-       QEE --> QL
-       QEE --> QG
-       QEE --> QF
-       QEE --> QK
-       QEE --> GP
+       PEE --> BMFQE
+       PEE --> BSFQE
+       QEE --> BMFQE
+       QEE --> BSFQE
+       QEE --> QLM
 
        %% Sampling Utilities Flow
        LBS --> IQA
+       LBS --> VEQ
        PLBS --> IQA
+       PLBS --> VEQ
        TS --> IQA
        TS --> IMA
        TS --> ISA
+       TS --> VEQ
        EIS --> IQA
        EIS --> UMIW
        EIS --> USIW
+       EIS --> VEQ
 
        %% Adaptive Flow
        IMA --> DTACI
@@ -329,7 +345,7 @@ End-to-End Execution Flow
 
 **Step 1: Initialization and Setup**
 
-When ``ConformalTuner.search()`` starts, it creates a ``Study`` object to track all trials and results. The study initializes a ``RuntimeTracker`` for timing and ``ProgressBarManager`` for user feedback. Parameter spaces are defined using ``ParameterRange`` objects (``IntRange``, ``FloatRange``, ``CategoricalRange``) which specify search bounds and types.
+When ``ConformalTuner.tune()`` starts, it creates a ``Study`` object to track all trials and results. The study initializes a ``RuntimeTracker`` for timing and ``ProgressBarManager`` for user feedback. Parameter spaces are defined using ``ParameterRange`` objects (``IntRange``, ``FloatRange``, ``CategoricalRange``) which specify search bounds and types.
 
 Configuration management happens through either ``StaticConfigurationManager`` (for predefined configurations) or ``DynamicConfigurationManager`` (for adaptive suggestions). The ``ConfigurationEncoder`` handles conversion between different parameter representations, while ``get_tuning_configurations()`` generates initial parameter samples using uniform or Sobol sequences.
 
@@ -364,12 +380,14 @@ The tuning hierarchy works as follows:
    ├── PointTuner (for point estimation)
    └── QuantileTuner (for quantile estimation)
 
-``_tune_fit_component_estimator()`` handles the optimization process:
+``tune()`` handles the optimization process:
 
-1. Checks if sufficient data exists for tuning (``min_obs_for_tuning`` threshold)
-2. Uses ``initialize_estimator()`` to create estimator instances from ``ESTIMATOR_REGISTRY``
-3. Performs cross-validation through ``_cross_validate()``
-4. Returns fitted estimator and best hyperparameters
+1. Creates cross-validation folds through ``_create_fold_indices()``
+2. Scores configurations using ``_score_configurations()``
+3. Uses ``initialize_estimator()`` to create estimator instances from ``ESTIMATOR_REGISTRY``
+4. Performs cross-validation through ``_fit_model()`` and ``_evaluate_model()``
+5. Aggregates results using ``average_scores_across_folds()``
+6. Returns fitted estimator and best hyperparameters
 
 The ``ESTIMATOR_REGISTRY`` contains ``EstimatorConfig`` objects that define:
 
@@ -388,14 +406,20 @@ The system supports multiple quantile estimator types:
 * ``QuantileGBM`` - Gradient boosting for quantile estimation
 * ``QuantileForest`` - Random forest with quantile prediction
 * ``QuantileKNN`` - K-nearest neighbors for quantile estimation
-* ``GaussianProcessQuantileEstimator`` - Gaussian process with quantile likelihood
+* ``QuantileGP`` - Gaussian process with quantile likelihood
+* ``QuantileLeaf`` - Leaf-based quantile estimation
 
 **Ensemble Estimators:**
 
-* ``PointEnsembleEstimator`` - combines multiple point estimators using weighted averaging
-* ``QuantileEnsembleEstimator`` - combines multiple quantile estimators
+* ``BaseEnsembleEstimator`` - abstract base class for ensemble methods
+* ``PointEnsembleEstimator`` - combines multiple point estimators using weighted averaging with uniform or linear stacking strategies
+* ``QuantileEnsembleEstimator`` - combines multiple quantile estimators using uniform or linear stacking approaches
+* ``QuantileLassoMeta`` - specialized meta-learner for quantile ensemble optimization using Lasso regression
 
-Both ensemble types use ``_fit_base_estimators()`` to train component models, then learn optimal weights for combination.
+Ensemble implementations support multiple weighting strategies:
+- Uniform weighting for simple averaging
+- Linear stacking with cross-validation optimization
+- Lasso-based meta-learning for optimal weight computation
 
 **Step 6: Acquisition Strategy Execution**
 
@@ -413,8 +437,8 @@ The ``BaseConformalSearcher.predict()`` method routes to strategy-specific imple
 
 Each strategy calls specific methods:
 
-* ``LowerBoundSampler`` → ``calculate_upper_confidence_bound()``
-* ``ThompsonSampler`` → ``sample()`` and ``_update_posterior()``
+* ``LowerBoundSampler`` → ``calculate_ucb_predictions()``
+* ``ThompsonSampler`` → ``calculate_thompson_predictions()``
 * ``ExpectedImprovementSampler`` → ``_calculate_expected_improvement()``
 
 
@@ -439,25 +463,23 @@ After each evaluation, the system updates:
 
 1. ``get_interval()`` retrieves prediction interval bounds for storage and analysis
 2. ``_calculate_betas()`` computes coverage statistics
-3. ``DtACI.update_alpha()`` adjusts significance levels based on coverage feedback
-4. ``_calculate_pinball_loss()`` provides loss-based adaptation signals
+3. ``DtACI.update()`` adjusts significance levels based on coverage feedback
+4. ``pinball_loss()`` provides loss-based adaptation signals
 
 **Step 9: Trial Management and Optimization**
 
 Results flow back through the trial management system:
 
 1. ``_evaluate_configuration()`` executes the objective function
-2. ``add_trial()`` records results in the study
-3. ``get_best_trial()`` retrieves current optimal configuration
-4. ``_run_trials()`` continues the optimization loop
+2. ``append_trial()`` records results in the study
+3. ``get_best_configuration()`` retrieves current optimal configuration
+4. ``conformal_search()`` continues the optimization loop
 
 **Conformal Searcher Optimization**
 
-All conformal searchers need to train on the configuration to performance pairs accumulated during search, but how should
-we tune them? (tune the tuners, sounds circular I know). Decisions about how often to tune the searchers and how many
-tuning trials to perform can be handled by the optimizers:
+All conformal searchers require training on the accumulated configuration-to-performance pairs during search. The system provides different optimization strategies for determining when and how frequently to retrain the searchers:
 
-* ``DecayingSearcherOptimizer`` - increases tuning intervals over time using linear, exponential, or logarithmic decay functions.
-* ``FixedSearcherOptimizer`` - always suggests the same retraining interval and number of tuning trials to perform.
+* ``DecayingSearcherOptimizer`` - increases tuning intervals over time using linear, exponential, or logarithmic decay functions
+* ``FixedSearcherOptimizer`` - maintains constant retraining intervals and tuning trial counts
 
-There is also an option to not tune at all.
+The system also supports disabling searcher optimization entirely for simpler use cases.

@@ -1,7 +1,9 @@
 Getting Started
 ===============
 
-This section provides practical examples of using ConfOpt for different types of machine learning tasks. Each example demonstrates the core workflow and essential concepts for getting started with hyperparameter optimization.
+This section provides practical examples of using ConfOpt for different types of machine learning tasks.
+
+Each example provides a full code example, followed by a step by step explanation.
 
 .. toctree::
    :maxdepth: 1

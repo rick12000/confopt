@@ -622,21 +622,21 @@ class ConformalTuner:
     ) -> None:
         """Execute hyperparameter optimization using conformal prediction surrogate models.
 
-        Performs intelligent hyperparameter search through two phases: random exploration
-        for baseline data, then conformal prediction-guided optimization using uncertainty
-        quantification to select promising configurations.
+        Performs intelligent hyperparameter search by randomly sampling an initial number
+        of hyperparameter configurations, then activating surrogate based search according
+        to the specified searcher.
 
         Args:
             max_searches: Maximum total configurations to search (random + conformal searches).
                 Default: 100.
             max_runtime: Maximum search time in seconds. Search will terminate after this time,
                 regardless of iterations. Default: None (no time limit).
-            searcher: Conformal acquisition function. Defaults to QuantileConformalSearcher
-                with LowerBoundSampler. You should not need to change this, as the default
-                searcher performs best across most tasks in offline benchmarks. Should you want
-                to use a different searcher, you can pass any subclass of BaseConformalSearcher.
-                See confopt.selection.acquisition for all available searchers and
-                confopt.selection.acquisition.samplers to set the searcher's sampler.
+            searcher: Conformal searcher object responsible for the selection of candidate
+                hyperparameter configurations. When none is provided, the searcher defaults
+                to a QGBM surrogate with a Thompson Sampler.
+                Should you want to use a custom searcher, see confopt.selection.acquisition for
+                searcher instantiation and confopt.selection.acquisition.samplers to set the
+                searcher's sampler.
                 Default: None.
             n_random_searches: Number of random configurations to evaluate before conformal search.
                 Provides initial training data for the surrogate model. Default: 15.
@@ -645,7 +645,7 @@ class ConformalTuner:
                 adaptive tuning with increasing intervals over time, 'fixed' for
                 deterministic tuning at fixed intervals, or None for no tuning. Surrogate tuning
                 adds computational cost and is recommended only if your target model takes more
-                than 1-5 minutes to train. Default: None.
+                than 5 minutes to train. Default: None.
             random_state: Random seed for reproducible results. Default: None.
             verbose: Whether to enable progress display. Default: True.
 
@@ -655,6 +655,11 @@ class ConformalTuner:
                 from confopt.tuning import ConformalTuner
                 from confopt.wrapping import IntRange, FloatRange
 
+                search_space = {
+                    'lr': FloatRange(0.001, 0.1, log_scale=True),
+                    'units': IntRange(32, 512)
+                }
+
                 def objective(configuration):
                     model = SomeModel(
                         learning_rate=configuration['lr'],
@@ -662,18 +667,13 @@ class ConformalTuner:
                     )
                     return model.evaluate()
 
-                search_space = {
-                    'lr': FloatRange(0.001, 0.1, log_scale=True),
-                    'units': IntRange(32, 512)
-                }
-
                 tuner = ConformalTuner(
                     objective_function=objective,
                     search_space=search_space,
                     metric_optimization='maximize'
                 )
 
-                tuner.tune(n_random_searches=25, max_searches=100)
+                tuner.tune(n_random_searches=10, max_searches=100)
 
                 best_config = tuner.get_best_params()
                 best_score = tuner.get_best_value()
@@ -687,8 +687,13 @@ class ConformalTuner:
             searcher = QuantileConformalSearcher(
                 quantile_estimator_architecture="qgbm",
                 sampler=ThompsonSampler(
-                    n_quantiles=4, adapter="DtACI", enable_optimistic_sampling=False
+                    n_quantiles=4,
+                    adapter="DtACI",
+                    enable_optimistic_sampling=False,
                 ),
+                calibration_split_strategy="adaptive",
+                n_calibration_folds=5,
+                n_pre_conformal_trials=32,
             )
 
         self.initialize_tuning_resources()

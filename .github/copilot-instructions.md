@@ -23,3 +23,9 @@
 - Write easily testable and maintainable code.
 - Maximize separation of concerns.
 - Consider how your changes will affect the wider codebase, think several dependancies ahead.
+
+
+To run anything in the terminal or console, ALWAYS:
+1. Run: conda activate confopt_env
+2. Run: pip install .
+3. Run your command
