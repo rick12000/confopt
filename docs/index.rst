@@ -1,5 +1,5 @@
-ConfOpt Documentation
-=====================
+ConfOpt
+=======
 
 ConfOpt is a Python library for hyperparameter optimization using conformal prediction. It provides a statistically principled approach to hyperparameter tuning that combines the efficiency of guided search with the reliability of uncertainty quantification.
 
@@ -14,6 +14,7 @@ ConfOpt is a Python library for hyperparameter optimization using conformal pred
 .. toctree::
    :maxdepth: 1
    :caption: Developer Guide
+   :hidden:
 
    api_reference
    architecture
@@ -21,6 +22,7 @@ ConfOpt is a Python library for hyperparameter optimization using conformal pred
 .. toctree::
    :maxdepth: 1
    :caption: Additional Information
+   :hidden:
 
    roadmap
    contact
