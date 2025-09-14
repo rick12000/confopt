@@ -3,16 +3,17 @@ Classification Example
 
 This example will show you how to use ConfOpt to optimize hyperparameters for a classification task.
 
-First we'll show you the whole code, then we'll break down what each section does!
+If you already used hyperparameter tuning packages, the "Code Example" section below will give you a quick run through of how to use ConfOpt. If not, don't worry, the "Detailed Walkthrough" section will explain everything step-by-step.
 
-Full Code Example
------------------
+Code Example
+------------
 
+1. Set up search space and objective function:
 
 .. code-block:: python
 
 
-   from confopt.tuning import ConformalTuner 
+   from confopt.tuning import ConformalTuner
    from confopt.wrapping import IntRange, FloatRange, CategoricalRange
 
    from sklearn.ensemble import RandomForestClassifier
@@ -20,6 +21,12 @@ Full Code Example
    from sklearn.datasets import load_wine
    from sklearn.model_selection import train_test_split
    from sklearn.metrics import accuracy_score
+
+   search_space = {
+       'n_estimators': IntRange(min_value=50, max_value=200),
+       'max_features': FloatRange(min_value=0.1, max_value=1.0),
+       'criterion': CategoricalRange(choices=['gini', 'entropy', 'log_loss'])
+   }
 
    def objective_function(configuration):
        X, y = load_wine(return_X_y=True)
@@ -40,11 +47,9 @@ Full Code Example
 
        return score
 
-   search_space = {
-       'n_estimators': IntRange(min_value=50, max_value=200),
-       'max_features': FloatRange(min_value=0.1, max_value=1.0),
-       'criterion': CategoricalRange(choices=['gini', 'entropy', 'log_loss'])
-   }
+2. Call ConfOpt to tune hyperparameters:
+
+.. code-block:: python
 
    tuner = ConformalTuner(
        objective_function=objective_function,
@@ -58,14 +63,18 @@ Full Code Example
        verbose=True
    )
 
+3. Extract results:
+
+.. code-block:: python
+
    best_params = tuner.get_best_params()
    best_accuracy = tuner.get_best_value()
 
    tuned_model = RandomForestClassifier(**best_params, random_state=42)
 
 
-Code Breakdown
----------------
+Detailed Walkthrough
+-------------------
 
 Imports
 ~~~~~~~
@@ -90,7 +99,7 @@ Search Space
 
 Next, we need to define the hyperparameter space we want ``confopt`` to optimize over.
 
-This is done using the :ref:`IntRange <intrange>`, :ref:`FloatRange <floatrange>`, and :ref:`CategoricalRange <categoricalrange>` classes, which specify the ranges for each hyperparameter. 
+This is done using the :ref:`IntRange <intrange>`, :ref:`FloatRange <floatrange>`, and :ref:`CategoricalRange <categoricalrange>` classes, which specify the ranges for each hyperparameter.
 Below let's define a simple example with one of each type of hyperparameter:
 
 .. code-block:: python
@@ -196,4 +205,3 @@ Which you can use to instantiate a tuned version of your model:
 
 
    tuned_model = RandomForestClassifier(**best_params, random_state=42)
-

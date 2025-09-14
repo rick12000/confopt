@@ -3,20 +3,28 @@ Regression Example
 
 This example will show you how to use ConfOpt to optimize hyperparameters for a regression task.
 
-First we'll show you the whole code, then we'll break down what each section does!
+If you already used hyperparameter tuning packages, the "Code Example" section below will give you a quick run through of how to use ConfOpt. If not, don't worry, the "Detailed Walkthrough" section will explain everything step-by-step.
 
-Full Code Example
------------------
+Code Example
+------------
+
+1. Set up search space and objective function:
 
 .. code-block:: python
 
 
-   from confopt.tuning import ConformalTuner  
-   from confopt.wrapping import IntRange, FloatRange, CategoricalRange 
+   from confopt.tuning import ConformalTuner
+   from confopt.wrapping import IntRange, FloatRange, CategoricalRange
    from sklearn.ensemble import RandomForestRegressor
    from sklearn.datasets import load_diabetes
    from sklearn.model_selection import train_test_split
    from sklearn.metrics import mean_squared_error, r2_score
+
+   search_space = {
+       'n_estimators': IntRange(min_value=50, max_value=200),
+       'max_depth': IntRange(min_value=3, max_value=15),
+       'min_samples_split': IntRange(min_value=2, max_value=10)
+   }
 
    def objective_function(configuration):
        X, y = load_diabetes(return_X_y=True)
@@ -36,11 +44,9 @@ Full Code Example
        mse = mean_squared_error(y_test, predictions)
        return mse  # Lower is better (minimize MSE)
 
-   search_space = {
-       'n_estimators': IntRange(min_value=50, max_value=200),
-       'max_depth': IntRange(min_value=3, max_value=15),
-       'min_samples_split': IntRange(min_value=2, max_value=10)
-   }
+2. Call ConfOpt to tune hyperparameters:
+
+.. code-block:: python
 
    tuner = ConformalTuner(
        objective_function=objective_function,
@@ -54,32 +60,17 @@ Full Code Example
        verbose=True
    )
 
+3. Extract results:
+
+.. code-block:: python
+
    best_params = tuner.get_best_params()
    best_mse = tuner.get_best_value()
 
    tuned_model = RandomForestRegressor(**best_params, random_state=42)
-   tuned_model.fit(*train_test_split(load_diabetes(return_X_y=True)[0], load_diabetes(return_X_y=True)[1], test_size=0.3, random_state=42)[:2])
 
-   # Compare with default
-   default_model = RandomForestRegressor(random_state=42)
-   default_model.fit(*train_test_split(load_diabetes(return_X_y=True)[0], load_diabetes(return_X_y=True)[1], test_size=0.3, random_state=42)[:2])
-
-   X, y = load_diabetes(return_X_y=True)
-   X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
-   final_predictions = tuned_model.predict(X_test)
-   default_predictions = default_model.predict(X_test)
-   final_mse = mean_squared_error(y_test, final_predictions)
-   default_mse = mean_squared_error(y_test, default_predictions)
-   final_r2 = r2_score(y_test, final_predictions)
-   default_r2 = r2_score(y_test, default_predictions)
-
-   print(f"Optimized - MSE: {final_mse:.4f}, R²: {final_r2:.4f}")
-   print(f"Default - MSE: {default_mse:.4f}, R²: {default_r2:.4f}")
-   print(f"MSE improvement: {default_mse - final_mse:.4f}")
-
-
-Code Breakdown
----------------
+Detailed Walkthrough
+--------------------
 
 Imports
 ~~~~~~~
