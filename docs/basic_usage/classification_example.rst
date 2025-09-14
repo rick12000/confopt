@@ -74,7 +74,7 @@ Code Example
 
 
 Detailed Walkthrough
--------------------
+--------------------
 
 Imports
 ~~~~~~~
