@@ -1,5 +1,5 @@
 from typing import Union
-from pydantic import BaseModel, field_validator, ValidationInfo
+from pydantic import BaseModel, field_validator, ValidationInfo, ConfigDict
 import numpy as np
 
 
@@ -69,5 +69,4 @@ class ConformalBounds(BaseModel):
     lower_bounds: np.ndarray
     upper_bounds: np.ndarray
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)

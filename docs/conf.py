@@ -156,6 +156,16 @@ nitpick_ignore = [
     ("py:class", "sklearn.preprocessing._data.StandardScaler"),
     ("py:class", "confopt.selection.acquisition.BaseConformalSearcher"),
     ("py:class", "confopt.utils.tracking.ProgressBarManager"),
+    ("py:class", "confopt.selection.acquisition.QuantileConformalSearcher"),
+    ("py:class", "confopt.selection.sampling.bound_samplers.LowerBoundSampler"),
+    ("py:class", "confopt.selection.sampling.thompson_samplers.ThompsonSampler"),
+    ("py:class", "confopt.selection.sampling.bound_samplers.PessimisticLowerBoundSampler"),
+    ("py:class", "confopt.selection.sampling.expected_improvement_samplers.ExpectedImprovementSampler"),
+    ("py:class", "confopt.wrapping.ConformalBounds"),
+    ("py:class", "pydantic_core.core_schema.ValidationInfo"),
+    ("py:class", "ConfigDict"),
+    ("py:meth", "confopt.tuning.ConformalTuner.get_best_params"),
+    ("py:meth", "confopt.tuning.ConformalTuner.get_best_value"),
 ]
 
 # -- Options for LaTeX output ------------------------------------------------

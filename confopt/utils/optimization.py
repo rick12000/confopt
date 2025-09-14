@@ -11,15 +11,13 @@ class DecayingSearcherOptimizer:
     This optimizer implements a decaying strategy where the tuning interval
     starts at an initial value and increases over time according to various
     decay rate options. The n_tuning_episodes remains constant throughout
-    the search process.
+    the search process. The conformal model retrains every iteration (frequency = 1).
 
     Args:
         n_tuning_episodes (int): Number of tuning episodes to perform at each
             optimization step. Defaults to 10.
         initial_tuning_interval (int): Initial tuning interval to decay from.
             Must be a positive integer. Defaults to 1.
-        conformal_retraining_frequency (int): Base retraining frequency for
-            validation. All intervals will be multiples of this value. Defaults to 1.
         decay_rate (float): Rate of decay - higher values mean faster increase
             in tuning interval. Defaults to 0.1.
         decay_type (str): Type of decay function. Must be one of 'linear',
@@ -36,22 +34,19 @@ class DecayingSearcherOptimizer:
         - Exponential: interval = initial * (1 + decay_rate)^iter
         - Logarithmic: interval = initial + decay_rate * log(1 + iter)
 
-        All intervals are rounded to integers and adjusted to be multiples of
-        conformal_retraining_frequency.
+        All intervals are rounded to integers.
     """
 
     def __init__(
         self,
         n_tuning_episodes: int = 10,
         initial_tuning_interval: int = 1,
-        conformal_retraining_frequency: int = 1,
         decay_rate: float = 0.1,
         decay_type: str = "linear",
         max_tuning_interval: int = 20,
     ):
         self.n_tuning_episodes = n_tuning_episodes
         self.initial_tuning_interval = initial_tuning_interval
-        self.conformal_retraining_frequency = conformal_retraining_frequency
         self.decay_rate = decay_rate
         self.decay_type = decay_type
         self.max_tuning_interval = max_tuning_interval
@@ -63,19 +58,6 @@ class DecayingSearcherOptimizer:
                 "decay_type must be one of 'linear', 'exponential', 'logarithmic'"
             )
 
-        # Ensure initial_tuning_interval is a multiple of conformal_retraining_frequency
-        if initial_tuning_interval % conformal_retraining_frequency != 0:
-            nearest_multiple = round(
-                initial_tuning_interval / conformal_retraining_frequency
-            )
-            self.initial_tuning_interval = (
-                max(1, nearest_multiple) * conformal_retraining_frequency
-            )
-            logger.warning(
-                f"Initial tuning interval {initial_tuning_interval} is not a multiple of conformal_retraining_frequency {conformal_retraining_frequency}. "
-                f"Using {self.initial_tuning_interval} instead."
-            )
-
     def _calculate_current_interval(self, search_iter: int) -> int:
         """Calculate the current tuning interval based on search iteration.
 
@@ -83,8 +65,7 @@ class DecayingSearcherOptimizer:
             search_iter (int): Current search iteration number.
 
         Returns:
-            int: Calculated tuning interval, rounded to integer and adjusted to be
-                a multiple of conformal_retraining_frequency.
+            int: Calculated tuning interval, rounded to integer.
         """
         if self.decay_type == "linear":
             # Linear increase: interval = initial + decay_rate * iter
@@ -103,14 +84,8 @@ class DecayingSearcherOptimizer:
         # Cap at maximum interval
         interval = min(interval, self.max_tuning_interval)
 
-        # Round to integer and ensure it's a multiple of conformal_retraining_frequency
-        interval = int(round(interval))
-        remainder = interval % self.conformal_retraining_frequency
-        if remainder != 0:
-            interval = interval + (self.conformal_retraining_frequency - remainder)
-
-        # Ensure minimum interval
-        interval = max(interval, self.conformal_retraining_frequency)
+        # Round to integer and ensure minimum interval
+        interval = max(int(round(interval)), 1)
 
         return interval
 
@@ -141,43 +116,26 @@ class FixedSearcherOptimizer:
 
     This optimizer returns fixed tuning parameters regardless of search progress.
     Useful as a baseline or when consistent tuning behavior is desired.
+    The conformal model retrains every iteration (frequency = 1).
 
     Args:
         n_tuning_episodes (int): Number of tuning episodes to perform at each
             optimization step. Defaults to 10.
         tuning_interval (int): Fixed tuning interval to use throughout optimization.
             Defaults to 5.
-        conformal_retraining_frequency (int): Base retraining frequency for validation.
-            The tuning_interval will be adjusted to be a multiple of this value if
-            necessary. Defaults to 1.
 
     Attributes:
         fixed_count (int): Fixed number of tuning episodes.
-        fixed_interval (int): Fixed tuning interval, adjusted to be a multiple of
-            conformal_retraining_frequency.
+        fixed_interval (int): Fixed tuning interval.
     """
 
     def __init__(
         self,
         n_tuning_episodes: int = 10,
         tuning_interval: int = 5,
-        conformal_retraining_frequency: int = 1,
     ):
         self.fixed_count = n_tuning_episodes
-
-        # Ensure tuning interval is a multiple of conformal_retraining_frequency
-        if tuning_interval % conformal_retraining_frequency != 0:
-            # Round to nearest valid interval
-            nearest_multiple = round(tuning_interval / conformal_retraining_frequency)
-            self.fixed_interval = (
-                max(1, nearest_multiple) * conformal_retraining_frequency
-            )
-            logger.warning(
-                f"Tuning interval {tuning_interval} is not a multiple of conformal_retraining_frequency {conformal_retraining_frequency}. "
-                f"Using {self.fixed_interval} instead."
-            )
-        else:
-            self.fixed_interval = tuning_interval
+        self.fixed_interval = tuning_interval
 
     def select_arm(self) -> Tuple[int, int]:
         """Select the fixed tuning count and interval.

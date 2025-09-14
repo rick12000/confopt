@@ -1,10 +1,10 @@
 Classification Example
-=====================
+=======================
 
 This example shows how to use ConfOpt to optimize hyperparameters for a classification task.
 
 Getting Started
---------------
+===============
 
 
 

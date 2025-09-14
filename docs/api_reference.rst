@@ -48,7 +48,7 @@ Acquisition Functions
 .. currentmodule:: confopt.selection.acquisition
 
 QuantileConformalSearcher
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autoclass:: QuantileConformalSearcher
    :members:
    :exclude-members: __init__
@@ -58,12 +58,12 @@ Samplers
 ========
 
 Bound Sampling
---------------
+==============
 
 .. currentmodule:: confopt.selection.sampling.bound_samplers
 
 PessimisticLowerBoundSampler
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autoclass:: PessimisticLowerBoundSampler
    :members:
    :exclude-members: __init__

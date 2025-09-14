@@ -10,8 +10,8 @@ def fixed_surrogate_tuner():
 
 def test_fixed_surrogate_tuner_initialization():
     """Test initialization of FixedSurrogateTuner."""
-    tuner = FixedSearcherOptimizer(tuning_interval=7, conformal_retraining_frequency=3)
-    assert tuner.fixed_interval == 6
+    tuner = FixedSearcherOptimizer(tuning_interval=7)
+    assert tuner.fixed_interval == 7
 
 
 def test_fixed_surrogate_tuner_select_arm(fixed_surrogate_tuner):
@@ -36,7 +36,6 @@ def decaying_tuner():
     return DecayingSearcherOptimizer(
         n_tuning_episodes=10,
         initial_tuning_interval=2,
-        conformal_retraining_frequency=2,
         decay_rate=0.5,
         decay_type="linear",
         max_tuning_interval=20,
@@ -47,16 +46,12 @@ def test_decaying_tuner_initialization():
     """Test that the DecayingSearcherOptimizer initializes correctly."""
     tuner = DecayingSearcherOptimizer(
         initial_tuning_interval=3,
-        conformal_retraining_frequency=2,
     )
-    # Should adjust to nearest multiple (3 -> 4 since 3/2 = 1.5 rounds to 2, then 2*2 = 4)
-    assert tuner.initial_tuning_interval == 4
+    assert tuner.initial_tuning_interval == 3
 
     tuner = DecayingSearcherOptimizer(
         initial_tuning_interval=4,
-        conformal_retraining_frequency=2,
     )
-    # Should keep as is since it's already a multiple
     assert tuner.initial_tuning_interval == 4
 
 
@@ -74,17 +69,17 @@ def test_decaying_tuner_linear_decay(decaying_tuner):
     assert arm[0] == 10  # n_tuning_episodes should remain constant
     assert arm[1] == 2  # initial_tuning_interval
 
-    # At iteration 2: interval = 2 + 0.5 * 2 = 3, rounded to nearest multiple of 2 = 4
+    # At iteration 2: interval = 2 + 0.5 * 2 = 3, rounded to 3
     decaying_tuner.update(search_iter=2)
     arm = decaying_tuner.select_arm()
     assert arm[0] == 10
-    assert arm[1] == 4
+    assert arm[1] == 3
 
-    # At iteration 10: interval = 2 + 0.5 * 10 = 7, rounded to nearest multiple of 2 = 8
+    # At iteration 10: interval = 2 + 0.5 * 10 = 7, rounded to 7
     decaying_tuner.update(search_iter=10)
     arm = decaying_tuner.select_arm()
     assert arm[0] == 10
-    assert arm[1] == 8
+    assert arm[1] == 7
 
 
 def test_decaying_tuner_exponential_decay():
@@ -92,7 +87,6 @@ def test_decaying_tuner_exponential_decay():
     tuner = DecayingSearcherOptimizer(
         n_tuning_episodes=5,
         initial_tuning_interval=2,
-        conformal_retraining_frequency=2,
         decay_rate=0.1,
         decay_type="exponential",
         max_tuning_interval=20,
@@ -104,11 +98,11 @@ def test_decaying_tuner_exponential_decay():
     assert arm[0] == 5
     assert arm[1] == 2  # initial_tuning_interval
 
-    # At iteration 5: interval = 2 * (1.1)^5 ≈ 3.22, rounded to nearest multiple of 2 = 4
+    # At iteration 5: interval = 2 * (1.1)^5 ≈ 3.22, rounded to 3
     tuner.update(search_iter=5)
     arm = tuner.select_arm()
     assert arm[0] == 5
-    assert arm[1] == 4
+    assert arm[1] == 3
 
 
 def test_decaying_tuner_logarithmic_decay():
@@ -116,7 +110,6 @@ def test_decaying_tuner_logarithmic_decay():
     tuner = DecayingSearcherOptimizer(
         n_tuning_episodes=8,
         initial_tuning_interval=2,
-        conformal_retraining_frequency=2,
         decay_rate=2.0,
         decay_type="logarithmic",
         max_tuning_interval=20,
@@ -128,11 +121,11 @@ def test_decaying_tuner_logarithmic_decay():
     assert arm[0] == 8
     assert arm[1] == 2  # initial_tuning_interval
 
-    # At iteration 4: interval = 2 + 2.0 * log(5) ≈ 5.22, rounded to nearest multiple of 2 = 6
+    # At iteration 4: interval = 2 + 2.0 * log(5) ≈ 5.22, rounded to 5
     tuner.update(search_iter=4)
     arm = tuner.select_arm()
     assert arm[0] == 8
-    assert arm[1] == 6
+    assert arm[1] == 5
 
 
 def test_decaying_tuner_max_interval_cap(decaying_tuner):

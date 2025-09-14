@@ -131,7 +131,6 @@ Optimizers control how the surrogate models tune their own hyperparameters.
 
    tuner.tune(
        optimizer_framework='decaying',
-       conformal_retraining_frequency=2,
        max_searches=200,
        verbose=True
    )

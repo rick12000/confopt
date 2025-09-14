@@ -106,7 +106,6 @@ def run_experiment(
 
     tuner.tune(
         n_random_searches=15,
-        conformal_retraining_frequency=1,
         searcher=searcher,
         random_state=seed,
         max_searches=60,
@@ -189,7 +188,6 @@ def test_dtaci_parameter_evolution():
 
     tuner.tune(
         n_random_searches=15,
-        conformal_retraining_frequency=1,
         searcher=searcher,
         random_state=42,
         max_searches=100,

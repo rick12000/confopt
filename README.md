@@ -1,5 +1,6 @@
 <div align="center">
-  <img src="assets/logo.png" alt="ConfOpt Logo" width="450"/>
+
+  <img src="https://raw.githubusercontent.com/rick12000/confopt/add-objective-search/assets/logo.png" alt="ConfOpt Logo" width="300"/>
 </div>
 
 <br>

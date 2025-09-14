@@ -339,16 +339,11 @@ class ConformalTuner:
     def initialize_searcher_optimizer(
         self,
         optimizer_framework: Optional[str],
-        conformal_retraining_frequency: int,
     ):
-        """Initialize multi-armed bandit optimizer for searcher parameter tuning.
-
-        Creates an optimizer instance for automatically tuning searcher parameters
-        such as retraining frequency and internal tuning iterations.
+        """Initialize searcher parameter tuner.
 
         Args:
             optimizer_framework: Tuning strategy ('decaying', 'fixed', None)
-            conformal_retraining_frequency: Base retraining frequency for validation
 
         Returns:
             Configured optimizer instance
@@ -356,14 +351,12 @@ class ConformalTuner:
         if optimizer_framework == "fixed":
             optimizer = FixedSearcherOptimizer(
                 n_tuning_episodes=10,
-                tuning_interval=max(20, conformal_retraining_frequency),
-                conformal_retraining_frequency=conformal_retraining_frequency,
+                tuning_interval=20,
             )
         elif optimizer_framework == "decaying":
             optimizer = DecayingSearcherOptimizer(
                 n_tuning_episodes=10,
-                initial_tuning_interval=max(10, conformal_retraining_frequency),
-                conformal_retraining_frequency=conformal_retraining_frequency,
+                initial_tuning_interval=10,
                 decay_rate=0.1,
                 decay_type="linear",
                 max_tuning_interval=40,
@@ -371,8 +364,7 @@ class ConformalTuner:
         elif optimizer_framework is None:
             optimizer = FixedSearcherOptimizer(
                 n_tuning_episodes=0,
-                tuning_interval=conformal_retraining_frequency,
-                conformal_retraining_frequency=conformal_retraining_frequency,
+                tuning_interval=1,
             )
         else:
             raise ValueError(
@@ -492,7 +484,6 @@ class ConformalTuner:
     def conformal_search(
         self,
         searcher: BaseConformalSearcher,
-        conformal_retraining_frequency: int,
         verbose: bool,
         max_searches: Optional[int],
         max_runtime: Optional[int],
@@ -502,12 +493,10 @@ class ConformalTuner:
 
         Implements the main conformal search loop that iteratively trains conformal
         prediction models, selects promising configurations based on uncertainty
-        quantification, and updates the models with new observations. The method
-        supports adaptive parameter tuning through multi-armed bandit optimization.
+        quantification, and updates the models with new observations.
 
         Args:
             searcher: Conformal prediction searcher for configuration selection
-            conformal_retraining_frequency: Base frequency for model retraining
             verbose: Whether to display search progress
             max_searches: Maximum total iterations including previous phases
             max_runtime: Maximum total runtime budget in seconds
@@ -519,11 +508,10 @@ class ConformalTuner:
         ) = self.setup_conformal_search_resources(verbose, max_runtime, max_searches)
         optimizer = self.initialize_searcher_optimizer(
             optimizer_framework=optimizer_framework,
-            conformal_retraining_frequency=conformal_retraining_frequency,
         )
 
         tuning_count = 0
-        searcher_retuning_frequency = conformal_retraining_frequency
+        searcher_retuning_frequency = 1
         training_runtime = 0
 
         for search_iter in range(conformal_max_searches):
@@ -542,7 +530,7 @@ class ConformalTuner:
             searchable_configs = self.config_manager.get_searchable_configurations()
             X_searchable = self.config_manager.tabularize_configs(searchable_configs)
 
-            if search_iter == 0 or search_iter % conformal_retraining_frequency == 0:
+            if search_iter == 0 or search_iter % 1 == 0:
                 training_runtime = self.retrain_searcher(searcher, X, y, tuning_count)
 
                 (
@@ -553,13 +541,6 @@ class ConformalTuner:
                     search_iter,
                 )
 
-                if (
-                    not searcher_retuning_frequency % conformal_retraining_frequency
-                    == 0
-                ):
-                    raise ValueError(
-                        "searcher_retuning_frequency must be a multiple of conformal_retraining_frequency."
-                    )
 
             # Select next configuration
             next_config = self.select_next_configuration(
@@ -633,7 +614,6 @@ class ConformalTuner:
         max_runtime: Optional[int] = None,
         searcher: Optional[QuantileConformalSearcher] = None,
         n_random_searches: int = 15,
-        conformal_retraining_frequency: int = 1,
         optimizer_framework: Optional[Literal["decaying", "fixed"]] = None,
         random_state: Optional[int] = None,
         verbose: bool = True,
@@ -658,10 +638,6 @@ class ConformalTuner:
                 Default: None.
             n_random_searches: Number of random configurations to evaluate before conformal search.
                 Provides initial training data for the surrogate model. Default: 15.
-            conformal_retraining_frequency: How often the conformal surrogate model retrains
-                (the model will retrain every conformal_retraining_frequency-th search iteration).
-                Recommended values are 1 if your target model takes >1 min to train, 2-5 if your
-                target model is very small to reduce computational overhead. Default: 1.
             optimizer_framework: Controls how and when the surrogate model tunes its own parameters
                 (this is different from tuning your target model). Options are 'decaying' for
                 adaptive tuning with increasing intervals over time, 'fixed' for
@@ -726,7 +702,6 @@ class ConformalTuner:
 
         self.conformal_search(
             searcher=searcher,
-            conformal_retraining_frequency=conformal_retraining_frequency,
             verbose=verbose,
             max_searches=max_searches,
             max_runtime=max_runtime,

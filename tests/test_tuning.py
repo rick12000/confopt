@@ -184,7 +184,6 @@ def test_tune_method_reproducibility(dummy_parameter_grid, random_state):
 
         tuner.tune(
             n_random_searches=10,
-            conformal_retraining_frequency=3,
             searcher=searcher,
             optimizer_framework=None,
             random_state=random_state,
@@ -220,7 +219,6 @@ def test_tune_method_comprehensive_integration(
 
     tuner.tune(
         n_random_searches=15,
-        conformal_retraining_frequency=1,
         searcher=searcher,
         optimizer_framework=None,
         random_state=42,
@@ -274,7 +272,6 @@ def test_conformal_vs_random_performance_averaged(
         tuner, searcher, _, _ = comprehensive_tuning_setup(dynamic_sampling)
         tuner.tune(
             n_random_searches=15,
-            conformal_retraining_frequency=1,
             searcher=searcher,
             optimizer_framework=None,
             random_state=seed,

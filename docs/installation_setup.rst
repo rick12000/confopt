@@ -77,7 +77,7 @@ ConfOpt requires the following Python packages:
 All dependencies are automatically installed when using pip.
 
 Development Installation
------------------------
+=========================
 
 To install ConfOpt with development dependencies:
 
@@ -91,7 +91,7 @@ This installs additional packages for testing and development:
 - pre-commit: Code quality hooks
 
 Testing Installation
--------------------
+=====================
 
 After installation, verify ConfOpt works correctly:
 
