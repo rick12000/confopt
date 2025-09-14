@@ -1,13 +1,13 @@
+API Reference
+-------------
 
-Tuner
-=====
+ConformalTuner
+==============
 
 .. currentmodule:: confopt.tuning
 
 .. _conformaltuner:
 
-ConformalTuner
-~~~~~~~~~~~~~~~
 .. autoclass:: ConformalTuner
    :members:
    :exclude-members: __init__
@@ -42,13 +42,11 @@ CategoricalRange
    :members:
    :noindex:
 
-Acquisition Functions
-======================
+QuantileConformalSearcher
+=========================
 
 .. currentmodule:: confopt.selection.acquisition
 
-QuantileConformalSearcher
-~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autoclass:: QuantileConformalSearcher
    :members:
    :exclude-members: __init__
@@ -56,9 +54,6 @@ QuantileConformalSearcher
 
 Samplers
 ========
-
-Bound Sampling
-==============
 
 .. currentmodule:: confopt.selection.sampling.bound_samplers
 
@@ -76,9 +71,6 @@ LowerBoundSampler
    :exclude-members: __init__
    :noindex:
 
-Thompson Sampling
------------------
-
 .. currentmodule:: confopt.selection.sampling.thompson_samplers
 
 ThompsonSampler
@@ -88,13 +80,11 @@ ThompsonSampler
    :exclude-members: __init__
    :noindex:
 
-Expected Improvement Sampling
-------------------------------
+ExpectedImprovementSampler
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. currentmodule:: confopt.selection.sampling.expected_improvement_samplers
 
-ExpectedImprovementSampler
-~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autoclass:: ExpectedImprovementSampler
    :members:
    :exclude-members: __init__

@@ -110,7 +110,9 @@
   display: flex;
   flex-direction: column;
   justify-content: space-evenly;
-  min-height: 140px;
+  height: 160px;
+  min-height: 160px;
+  max-height: 160px;
 }
 
 .wy-side-nav-search > a {
@@ -170,11 +172,11 @@
 
 .wy-menu-vertical {
   position: fixed !important;
-  top: 140px !important;
+  top: 160px !important;
   left: 0 !important;
   width: var(--sidebar-width) !important;
-  height: calc(100vh - 140px) !important;
-  padding: 1rem 0 !important;
+  height: calc(100vh - 160px) !important;
+  padding: 1.5rem 0 !important;
   overflow-y: auto !important;
   overflow-x: hidden !important;
   background: transparent !important;
@@ -184,7 +186,7 @@
 /* Navigation Items Base */
 .wy-menu-vertical a {
   color: var(--gray-600);
-  padding: 14px 24px !important;
+  padding: 16px 24px !important;
   display: block;
   text-decoration: none;
   border-left: 3px solid transparent;
@@ -192,6 +194,7 @@
   font-size: 15px !important;
   line-height: 1.4;
   font-weight: 500;
+  background: transparent !important;
 }
 
 .wy-menu-vertical a:hover {
@@ -287,7 +290,7 @@
 .wy-menu-vertical::before {
   content: '';
   display: block;
-  height: 1rem;
+  height: 0.5rem;
   width: 100%;
   flex-shrink: 0;
 }
@@ -680,6 +683,9 @@ a:hover {
   .wy-side-nav-search {
     position: relative !important;
     width: 100% !important;
+    height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
   }
 
   .wy-menu-vertical {
@@ -688,7 +694,7 @@ a:hover {
     left: auto !important;
     width: 100% !important;
     height: auto !important;
-    padding: 0 !important;
+    padding: 1rem 0 !important;
   }
 
   .wy-nav-content-wrap {

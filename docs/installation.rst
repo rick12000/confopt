@@ -14,8 +14,3 @@ Alternatively, for the latest development version, clone the repository and inst
    git clone https://github.com/rick12000/confopt.git
    cd confopt
    pip install -e .
-
-Next Steps
-----------
-
-- Read the :doc:`getting_started` documentation to understand how to use ConfOpt.
