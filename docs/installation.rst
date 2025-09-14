@@ -18,4 +18,4 @@ Alternatively, for the latest development version, clone the repository and inst
 Next Steps
 ----------
 
-- Read the :doc:`basic_usage` documentation to understand how to use ConfOpt.
+- Read the :doc:`getting_started` documentation to understand how to use ConfOpt.

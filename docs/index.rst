@@ -67,4 +67,4 @@ Basic usage:
    best_params = tuner.get_best_params()
    best_score = tuner.get_best_value()
 
-For detailed examples and usage patterns, see the :doc:`basic_usage` section.
+For detailed examples and usage patterns, see the :doc:`getting_started` section.
