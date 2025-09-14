@@ -425,7 +425,7 @@
 .highlight {
   border-radius: var(--border-radius);
   border: 1px solid var(--primary-200);
-  background: linear-gradient(135deg, #f7e4f0, #ffffff) !important;
+  background: linear-gradient(135deg, #fdeff8, #fff9ff, #ffffff) !important;
   margin: 1.5rem 0;
   overflow: hidden;
   box-shadow: 0 4px 12px rgba(219, 39, 119, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
