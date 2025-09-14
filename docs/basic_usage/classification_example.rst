@@ -4,9 +4,7 @@ Classification Example
 This example shows how to use ConfOpt to optimize hyperparameters for a classification task.
 
 Getting Started
-===============
-
-
+---------------
 
 First, let's import everything we'll be needing:
 
