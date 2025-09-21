@@ -123,7 +123,15 @@ Complete reference for main classes, methods, and parameters.
 
 ## 📈 Benchmarks
 
-TBI
+<div align="center">
+  <img src="assets/benchmark_results.png" alt="ConfOpt Logo" width="450"/>
+</div>
+
+**ConfOpt** is significantly better than plain old random search, but it also beats established tools like **Optuna** or traditional **Gaussian Processes**!
+
+The above benchmark considers neural architecture search on complex image recognition datasets (JAHS-201) and neural network tuning on tabular classification datasets (LCBench-L).
+
+For a fuller analysis of caveats and benchmarking results, refer to the latest methodological paper.
 
 ## 🔬 Theory
 
