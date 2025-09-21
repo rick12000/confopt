@@ -314,7 +314,7 @@ jobs:
             minimize=True
         )
 
-        tuner.tune(max_searches=5, n_random_searches=3, verbose=False)
+        tuner.tune(max_searches=50, n_random_searches=15, verbose=False)
         best_params = tuner.get_best_params()
         best_value = tuner.get_best_value()
 
@@ -357,7 +357,7 @@ jobs:
             minimize=True
         )
 
-        tuner.tune(max_searches=5, n_random_searches=3, verbose=False)
+        tuner.tune(max_searches=50, n_random_searches=15, verbose=False)
         best_params = tuner.get_best_params()
         best_value = tuner.get_best_value()
 
@@ -460,7 +460,7 @@ jobs:
             minimize=True
         )
 
-        tuner.tune(max_searches=5, n_random_searches=3, verbose=False)
+        tuner.tune(max_searches=50, n_random_searches=15, verbose=False)
         best_params = tuner.get_best_params()
         best_value = tuner.get_best_value()
 
@@ -504,7 +504,7 @@ jobs:
             minimize=True
         )
 
-        tuner.tune(max_searches=5, n_random_searches=3, verbose=False)
+        tuner.tune(max_searches=50, n_random_searches=15, verbose=False)
         best_params = tuner.get_best_params()
         best_value = tuner.get_best_value()
 
