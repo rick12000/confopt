@@ -16,10 +16,6 @@ env:
   PYTHON_VERSION: "3.11"
 
 jobs:
-  # ============================================================================
-  # QUALITY ASSURANCE JOBS (run on all branches)
-  # ============================================================================
-
   test:
     name: Test Suite
     runs-on: ubuntu-latest
@@ -90,143 +86,138 @@ jobs:
     - name: Run pre-commit hooks
       run: pre-commit run --all-files
 
-  # ============================================================================
-  # RELEASE PIPELINE (DISABLED for dev branch testing)
-  # ============================================================================
+  check-package-label:
+    name: Check Package Label
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.merged == true
+    outputs:
+      has_package_label: ${{ steps.check_label.outputs.has_label }}
+      pr_number: ${{ github.event.pull_request.number }}
 
-  # Temporarily disabled for dev branch testing - uncomment when ready to re-enable
-  # check-package-label:
-  #   name: Check Package Label
-  #   runs-on: ubuntu-latest
-  #   if: github.event_name == 'pull_request_target' && github.event.pull_request.merged == true
-  #   outputs:
-  #     has_package_label: ${{ steps.check_label.outputs.has_label }}
-  #     pr_number: ${{ github.event.pull_request.number }}
-  #
-  #   steps:
-  #   - name: Check for Package label
-  #     id: check_label
-  #     uses: actions/github-script@v7
-  #     with:
-  #       script: |
-  #         const labels = context.payload.pull_request.labels.map(label => label.name);
-  #         const has_package_label = labels.includes('package');
-  #
-  #         console.log('PR Labels:', labels);
-  #         console.log('Has package label:', has_package_label);
-  #
-  #         core.setOutput('has_label', has_package_label);
-  #
-  #         if (!has_package_label) {
-  #           console.log('⏭️ Skipping package deployment - no Package label found');
-  #         } else {
-  #           console.log('✅ Package label found - proceeding with deployment pipeline');
-  #         }
+    steps:
+    - name: Check for Package label
+      id: check_label
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const labels = context.payload.pull_request.labels.map(label => label.name);
+          const has_package_label = labels.includes('package');
 
-  # # version-check:
-  #   name: Version Check
-  #   runs-on: ubuntu-latest
-  #   needs: [test, lint, check-package-label]
-  #   if: needs.check-package-label.outputs.has_package_label == 'true'
-  #   outputs:
-  #     version: ${{ steps.get_version.outputs.version }}
-  #     version_changed: ${{ steps.check_version.outputs.changed }}
-  #
-  #   steps:
-  #   - name: Checkout repository with full history
-  #     uses: actions/checkout@v4
-  #     with:
-  #       fetch-depth: 0
-  #       ref: ${{ github.event.pull_request.merge_commit_sha }}
-  #
-  #   - name: Set up Python
-  #     uses: actions/setup-python@v5
-  #     with:
-  #       python-version: ${{ env.PYTHON_VERSION }}
-  #
-  #   - name: Get current version
-  #     id: get_version
-  #     run: |
-  #       python << 'EOF'
-  #       import re
-  #       import sys
-  #       import os
-  #
-  #       with open('pyproject.toml', 'r') as f:
-  #         content = f.read()
-  #       match = re.search(r'version = "([^"]+)"', content)
-  #
-  #       if not match:
-  #         print("❌ ERROR: Could not find version in pyproject.toml")
-  #         sys.exit(1)
-  #
-  #       version = match.group(1)
-  #       with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-  #         f.write(f"version={version}\n")
-  #       print(f"Current version (after merge): {version}")
-  #       EOF
-  #
-  #   - name: Check version change against PR base
-  #     id: check_version
-  #     env:
-  #       BASE_SHA: ${{ github.event.pull_request.base.sha }}
-  #       MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-  #     run: |
-  #       python << 'EOF'
-  #       import re
-  #       import subprocess
-  #       import sys
-  #       import os
-  #
-  #       def get_version_from_commit(commit_sha, commit_name):
-  #         try:
-  #           result = subprocess.run(['git', 'show', f'{commit_sha}:pyproject.toml'],
-  #                                 capture_output=True, text=True, check=True)
-  #           content = result.stdout
-  #           match = re.search(r'version = "([^"]+)"', content)
-  #
-  #           if not match:
-  #             print(f"❌ ERROR: Could not find version in {commit_name} ({commit_sha[:8]})")
-  #             sys.exit(1)
-  #
-  #           version = match.group(1)
-  #           print(f"Version from {commit_name} ({commit_sha[:8]}): {version}")
-  #           return version
-  #         except subprocess.CalledProcessError as e:
-  #           print(f"❌ ERROR: Could not retrieve {commit_name} ({commit_sha[:8]}): {e}")
-  #           sys.exit(1)
-  #
-  #       # Get commit SHAs from environment
-  #       base_sha = os.environ.get('BASE_SHA')
-  #       merge_sha = os.environ.get('MERGE_SHA')
-  #
-  #       if not base_sha or not merge_sha:
-  #         print("❌ ERROR: Missing commit SHAs from GitHub event payload")
-  #         sys.exit(1)
-  #
-  #       print(f"PR base commit (main before merge): {base_sha}")
-  #       print(f"Merge commit (after PR merge): {merge_sha}")
-  #
-  #       # Get versions from both commits
-  #       base_version = get_version_from_commit(base_sha, "PR base")
-  #       merge_version = get_version_from_commit(merge_sha, "merge commit")
-  #
-  #       changed = base_version != merge_version
-  #
-  #       with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-  #         f.write(f"changed={'true' if changed else 'false'}\n")
-  #
-  #       if changed:
-  #         print(f"✅ Version changed from {base_version} → {merge_version}")
-  #       else:
-  #         print(f"❌ Version unchanged ({base_version}) - please bump version in pyproject.toml")
-  #         sys.exit(1)
-  #       EOF
+          console.log('PR Labels:', labels);
+          console.log('Has package label:', has_package_label);
+
+          core.setOutput('has_label', has_package_label);
+
+          if (!has_package_label) {
+            console.log('⏭️ Skipping package deployment - no Package label found');
+          } else {
+            console.log('✅ Package label found - proceeding with deployment pipeline');
+          }
+
+  version-check:
+    name: Version Check
+    runs-on: ubuntu-latest
+    needs: [test, lint, check-package-label]
+    if: needs.check-package-label.outputs.has_package_label == 'true'
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      version_changed: ${{ steps.check_version.outputs.changed }}
+
+    steps:
+    - name: Checkout repository with full history
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Get current version
+      id: get_version
+      run: |
+        python << 'EOF'
+        import re
+        import sys
+        import os
+
+        with open('pyproject.toml', 'r') as f:
+          content = f.read()
+        match = re.search(r'version = "([^"]+)"', content)
+
+        if not match:
+          print("❌ ERROR: Could not find version in pyproject.toml")
+          sys.exit(1)
+
+        version = match.group(1)
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+          f.write(f"version={version}\n")
+        print(f"Current version (after merge): {version}")
+        EOF
+
+    - name: Check version change against PR base
+      id: check_version
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+      run: |
+        python << 'EOF'
+        import re
+        import subprocess
+        import sys
+        import os
+
+        def get_version_from_commit(commit_sha, commit_name):
+          try:
+            result = subprocess.run(['git', 'show', f'{commit_sha}:pyproject.toml'],
+                                  capture_output=True, text=True, check=True)
+            content = result.stdout
+            match = re.search(r'version = "([^"]+)"', content)
+
+            if not match:
+              print(f"❌ ERROR: Could not find version in {commit_name} ({commit_sha[:8]})")
+              sys.exit(1)
+
+            version = match.group(1)
+            print(f"Version from {commit_name} ({commit_sha[:8]}): {version}")
+            return version
+          except subprocess.CalledProcessError as e:
+            print(f"❌ ERROR: Could not retrieve {commit_name} ({commit_sha[:8]}): {e}")
+            sys.exit(1)
+
+        # Get commit SHAs from environment
+        base_sha = os.environ.get('BASE_SHA')
+        merge_sha = os.environ.get('MERGE_SHA')
+
+        if not base_sha or not merge_sha:
+          print("❌ ERROR: Missing commit SHAs from GitHub event payload")
+          sys.exit(1)
+
+        print(f"PR base commit (main before merge): {base_sha}")
+        print(f"Merge commit (after PR merge): {merge_sha}")
+
+        # Get versions from both commits
+        base_version = get_version_from_commit(base_sha, "PR base")
+        merge_version = get_version_from_commit(merge_sha, "merge commit")
+
+        changed = base_version != merge_version
+
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+          f.write(f"changed={'true' if changed else 'false'}\n")
+
+        if changed:
+          print(f"✅ Version changed from {base_version} → {merge_version}")
+        else:
+          print(f"❌ Version unchanged ({base_version}) - please bump version in pyproject.toml")
+          sys.exit(1)
+        EOF
 
   build:
     name: Build Python Package
     runs-on: ubuntu-latest
-    needs: [test, lint]
+    needs: [test, lint, version-check]
 
     steps:
     - name: Checkout code
@@ -517,66 +508,65 @@ jobs:
         rm -rf test_source_env
 
         echo "All TestPyPI installation scenarios validated successfully!"
-  #
-  # publish:
-  #   name: Publish to PyPI
-  #   runs-on: ubuntu-latest
-  #   needs: [verify-testpypi, version-check]
-  #
-  #   steps:
-  #   - name: Download build artifacts
-  #     uses: actions/download-artifact@v4
-  #     with:
-  #       name: python-package-distributions
-  #       path: dist/
-  #
-  #   - name: Publish to PyPI
-  #     uses: pypa/gh-action-pypi-publish@release/v1
-  #     with:
-  #       password: ${{ secrets.PYPI_API_TOKEN }}
-  #
-  # release:
-  #   name: Create GitHub Release
-  #   runs-on: ubuntu-latest
-  #   needs: [publish, version-check, check-package-label]
-  #   permissions:
-  #     contents: write
-  #
-  #   steps:
-  #   - name: Checkout code
-  #     uses: actions/checkout@v4
-  #
-  #   - name: Download build artifacts
-  #     uses: actions/download-artifact@v4
-  #     with:
-  #       name: python-package-distributions
-  #       path: dist/
-  #
-  #   - name: Create GitHub Release Draft
-  #     uses: softprops/action-gh-release@v2
-  #     with:
-  #       tag_name: v${{ needs.version-check.outputs.version }}
-  #       name: Release v${{ needs.version-check.outputs.version }}
-  #       body: |
-  #         ## 📦 Package Information
-  #         - **Version**: ${{ needs.version-check.outputs.version }}
-  #         - **PyPI**: https://pypi.org/project/confopt/${{ needs.version-check.outputs.version }}/
-  #         - **Documentation**: https://confopt.readthedocs.io/en/latest/
-  #
-  #         ## 📋 Installation
-  #         ```bash
-  #         pip install confopt==${{ needs.version-check.outputs.version }}
-  #         ```
-  #
-  #         ## 🔄 Changes
-  #         *Please add release notes and changelog information here before publishing.*
-  #
-  #         ---
-  #
-  #         **Build Information:**
-  #         - Commit: ${{ github.sha }}
-  #         - PR: #${{ needs.check-package-label.outputs.pr_number }}
-  #         - Automated build completed successfully
-  #       files: dist/*
-  #       draft: true
-  #       prerelease: false
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [verify-testpypi]
+
+    steps:
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [publish]
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+
+    - name: Create GitHub Release Draft
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v${{ needs.version-check.outputs.version }}
+        name: Release v${{ needs.version-check.outputs.version }}
+        body: |
+          ## 📦 Package Information
+          - **Version**: ${{ needs.version-check.outputs.version }}
+          - **PyPI**: https://pypi.org/project/confopt/${{ needs.version-check.outputs.version }}/
+          - **Documentation**: https://confopt.readthedocs.io/en/latest/
+
+          ## 📋 Installation
+          ```bash
+          pip install confopt==${{ needs.version-check.outputs.version }}
+          ```
+
+          ## 🔄 Changes
+          *Please add release notes and changelog information here before publishing.*
+
+          ---
+
+          **Build Information:**
+          - Commit: ${{ github.sha }}
+          - PR: #${{ needs.check-package-label.outputs.pr_number }}
+          - Automated build completed successfully
+        files: dist/*
+        draft: true
+        prerelease: false

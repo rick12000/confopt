@@ -1,149 +1,191 @@
 /**
- * ConfOpt Documentation - Dynamic Layout Manager
- * Handles responsive layout calculations for consistent rendering across environments
+ * ConfOpt Documentation - Simplified Layout Manager
+ * Minimal JavaScript for enhanced UX without breaking RTD functionality
  */
 
 (function() {
   'use strict';
 
-  let resizeObserver;
-  let rafId;
+  // Simple debounce utility
+  function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
 
-  function updateHeaderHeight() {
-    // Cancel any pending updates
-    if (rafId) {
-      cancelAnimationFrame(rafId);
+  // Enhance search input with better UX
+  function enhanceSearchInput() {
+    const searchInput = document.querySelector('.wy-side-nav-search input[type="text"]');
+    if (!searchInput) return;
+
+    // Add placeholder text if not already set
+    if (!searchInput.placeholder) {
+      searchInput.placeholder = 'Search documentation...';
     }
 
-    rafId = requestAnimationFrame(() => {
-      const header = document.querySelector('.wy-side-nav-search');
-      if (!header) return;
+    // Add smooth focus/blur animations
+    searchInput.addEventListener('focus', function() {
+      this.parentElement.classList.add('search-focused');
+    });
 
-      try {
-        const rect = header.getBoundingClientRect();
-        const actualHeight = Math.max(rect.height, 80); // Minimum 80px
-        const maxHeight = Math.min(actualHeight, 200); // Maximum 200px
-
-        document.documentElement.style.setProperty(
-          '--dynamic-header-height',
-          `${maxHeight}px`
-        );
-
-        // Also update the navigation menu positioning
-        const menu = document.querySelector('.wy-menu-vertical');
-        if (menu) {
-          menu.style.top = `${maxHeight}px`;
-          menu.style.height = `calc(100vh - ${maxHeight}px)`;
-        }
-
-        // Dispatch custom event for other scripts that might need this info
-        window.dispatchEvent(new CustomEvent('headerHeightUpdated', {
-          detail: { height: maxHeight }
-        }));
-
-      } catch (error) {
-        console.warn('Layout Manager: Error updating header height:', error);
-      }
+    searchInput.addEventListener('blur', function() {
+      this.parentElement.classList.remove('search-focused');
     });
   }
 
-  function initializeLayoutManager() {
-    // Initial update
-    updateHeaderHeight();
+  // Add smooth scroll behavior for navigation links
+  function enhanceNavigation() {
+    const navLinks = document.querySelectorAll('.wy-menu-vertical a[href^="#"]');
 
-    // Handle window resize
-    let resizeTimeout;
-    window.addEventListener('resize', () => {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(updateHeaderHeight, 100);
+    navLinks.forEach(link => {
+      link.addEventListener('click', function(e) {
+        const href = this.getAttribute('href');
+        const target = document.querySelector(href);
+
+        if (target) {
+          e.preventDefault();
+          target.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+          });
+
+          // Update URL without jumping
+          history.pushState(null, null, href);
+        }
+      });
     });
+  }
 
-    // Handle orientation change on mobile
-    window.addEventListener('orientationchange', () => {
-      setTimeout(updateHeaderHeight, 200);
-    });
+  // Add copy button functionality for code blocks (if sphinx-copybutton is not available)
+  function addCopyButtons() {
+    // Only add if sphinx-copybutton is not already present
+    if (document.querySelector('.copybtn')) return;
 
-    // Use ResizeObserver for more precise header size tracking
-    if (window.ResizeObserver) {
-      const header = document.querySelector('.wy-side-nav-search');
-      if (header) {
-        resizeObserver = new ResizeObserver((entries) => {
-          for (const entry of entries) {
-            if (entry.target === header) {
-              updateHeaderHeight();
-              break;
-            }
-          }
-        });
-        resizeObserver.observe(header);
-      }
-    }
+    const codeBlocks = document.querySelectorAll('.highlight pre');
 
-    // Handle dynamic content changes
-    if (window.MutationObserver) {
-      const observer = new MutationObserver((mutations) => {
-        let shouldUpdate = false;
+    codeBlocks.forEach(block => {
+      const button = document.createElement('button');
+      button.className = 'copy-btn';
+      button.innerHTML = '📋';
+      button.title = 'Copy to clipboard';
+      button.style.cssText = `
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: var(--primary-600);
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+      `;
 
-        mutations.forEach((mutation) => {
-          if (mutation.type === 'childList' || mutation.type === 'attributes') {
-            const target = mutation.target;
-            if (target.closest && target.closest('.wy-side-nav-search')) {
-              shouldUpdate = true;
-            }
-          }
-        });
-
-        if (shouldUpdate) {
-          setTimeout(updateHeaderHeight, 50);
+      button.addEventListener('click', async function() {
+        try {
+          await navigator.clipboard.writeText(block.textContent);
+          button.innerHTML = '✅';
+          button.title = 'Copied!';
+          setTimeout(() => {
+            button.innerHTML = '📋';
+            button.title = 'Copy to clipboard';
+          }, 2000);
+        } catch (err) {
+          console.warn('Could not copy text: ', err);
         }
       });
 
-      const header = document.querySelector('.wy-side-nav-search');
-      if (header) {
-        observer.observe(header, {
-          childList: true,
-          subtree: true,
-          attributes: true,
-          attributeFilter: ['style', 'class']
-        });
+      button.addEventListener('mouseenter', function() {
+        this.style.opacity = '1';
+      });
+
+      button.addEventListener('mouseleave', function() {
+        this.style.opacity = '0.7';
+      });
+
+      // Add button to code block container
+      const container = block.parentElement;
+      container.style.position = 'relative';
+      container.appendChild(button);
+    });
+  }
+
+  // Add keyboard navigation enhancement
+  function enhanceKeyboardNavigation() {
+    document.addEventListener('keydown', function(e) {
+      // Alt + S to focus search
+      if (e.altKey && e.key === 's') {
+        e.preventDefault();
+        const searchInput = document.querySelector('.wy-side-nav-search input[type="text"]');
+        if (searchInput) {
+          searchInput.focus();
+          searchInput.select();
+        }
       }
-    }
+
+      // Escape to blur search
+      if (e.key === 'Escape') {
+        const searchInput = document.querySelector('.wy-side-nav-search input[type="text"]:focus');
+        if (searchInput) {
+          searchInput.blur();
+        }
+      }
+    });
   }
 
-  function handleFontLoad() {
-    // Fonts can affect layout, so update when they're loaded
-    if (document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(updateHeaderHeight);
-    }
+  // Add loading state for better perceived performance
+  function addLoadingStates() {
+    // Add loading class to body initially
+    document.body.classList.add('loading');
+
+    // Remove loading class when everything is ready
+    window.addEventListener('load', function() {
+      setTimeout(() => {
+        document.body.classList.remove('loading');
+        document.body.classList.add('loaded');
+      }, 100);
+    });
   }
 
-  function cleanupLayoutManager() {
-    if (resizeObserver) {
-      resizeObserver.disconnect();
-    }
-    if (rafId) {
-      cancelAnimationFrame(rafId);
+  // Main initialization function
+  function init() {
+    try {
+      enhanceSearchInput();
+      enhanceNavigation();
+      addCopyButtons();
+      enhanceKeyboardNavigation();
+      addLoadingStates();
+    } catch (error) {
+      console.warn('ConfOpt Layout Manager: Some enhancements failed to initialize:', error);
     }
   }
 
   // Initialize when DOM is ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeLayoutManager);
+    document.addEventListener('DOMContentLoaded', init);
   } else {
-    initializeLayoutManager();
+    init();
   }
 
-  // Handle font loading
-  handleFontLoad();
+  // Handle page changes for single-page applications
+  window.addEventListener('popstate', debounce(init, 100));
 
-  // Cleanup on page unload
-  window.addEventListener('beforeunload', cleanupLayoutManager);
-
-  // Export for debugging
-  window.ConfOptLayoutManager = {
-    updateHeaderHeight,
-    initializeLayoutManager,
-    cleanupLayoutManager
-  };
+  // Export for debugging (optional)
+  if (typeof window !== 'undefined') {
+    window.ConfOptLayoutManager = {
+      init,
+      enhanceSearchInput,
+      enhanceNavigation,
+      addCopyButtons
+    };
+  }
 
 })();

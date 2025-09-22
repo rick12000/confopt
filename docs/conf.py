@@ -90,16 +90,19 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 html_theme = "sphinx_rtd_theme"
 html_theme_options = {
     "canonical_url": "https://confopt.readthedocs.io/",
-    "logo_only": True,
+    "logo_only": True,  # Show project title alongside logo
     "prev_next_buttons_location": "bottom",
-    "style_external_links": False,
-    "style_nav_header_background": "#2563eb",
-    # Toc options - optimized for better navigation
+    "style_external_links": True,
+    "style_nav_header_background": "#db2777",  # Match our pink theme
+    # Navigation options - optimized for usability
     "collapse_navigation": False,
     "sticky_navigation": True,
     "navigation_depth": 3,
     "includehidden": True,
     "titles_only": False,
+    # Additional RTD theme options
+    "vcs_pageview_mode": "blob",
+    "navigation_with_keys": True,
 }
 
 html_static_path = ["_static"]
