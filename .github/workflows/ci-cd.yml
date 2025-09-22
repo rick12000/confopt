@@ -548,17 +548,11 @@ jobs:
         tag_name: v${{ needs.version-check.outputs.version }}
         name: Release v${{ needs.version-check.outputs.version }}
         body: |
-          ## 📦 Package Information
+          ## Package Information
           - **Version**: ${{ needs.version-check.outputs.version }}
           - **PyPI**: https://pypi.org/project/confopt/${{ needs.version-check.outputs.version }}/
-          - **Documentation**: https://confopt.readthedocs.io/en/latest/
 
-          ## 📋 Installation
-          ```bash
-          pip install confopt==${{ needs.version-check.outputs.version }}
-          ```
-
-          ## 🔄 Changes
+          ## Changes
           *Please add release notes and changelog information here before publishing.*
 
           ---
@@ -566,7 +560,6 @@ jobs:
           **Build Information:**
           - Commit: ${{ github.sha }}
           - PR: #${{ needs.check-package-label.outputs.pr_number }}
-          - Automated build completed successfully
         files: dist/*
         draft: true
         prerelease: false
