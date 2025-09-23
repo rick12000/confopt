@@ -7,7 +7,8 @@ from confopt.tuning import (
     ConformalTuner,
 )
 from confopt.utils.configurations.sampling import get_tuning_configurations
-from confopt.selection.acquisition import QuantileConformalSearcher, LowerBoundSampler
+from confopt.selection.acquisition import QuantileConformalSearcher
+from confopt.selection.sampling.bound_samplers import LowerBoundSampler
 from confopt.wrapping import FloatRange, IntRange, CategoricalRange, ConformalBounds
 from sklearn.base import BaseEstimator
 from confopt.selection.estimator_configuration import (
@@ -209,6 +210,19 @@ def dummy_parameter_grid():
         "param_1": FloatRange(min_value=0.01, max_value=100, log_scale=True),
         "param_2": IntRange(min_value=1, max_value=100),
         "param_3": CategoricalRange(choices=["option1", "option2", "option3"]),
+    }
+
+
+@pytest.fixture
+def rastrigin_parameter_grid():
+    """Parameter grid for 6-dimensional Rastrigin function optimization."""
+    return {
+        "x1": FloatRange(min_value=-5.12, max_value=5.12),
+        "x2": FloatRange(min_value=-5.12, max_value=5.12),
+        "x3": FloatRange(min_value=-5.12, max_value=5.12),
+        "x4": FloatRange(min_value=-5.12, max_value=5.12),
+        "x5": FloatRange(min_value=-5.12, max_value=5.12),
+        "x6": FloatRange(min_value=-5.12, max_value=5.12),
     }
 
 
@@ -637,18 +651,28 @@ def conformal_bounds_deterministic():
 
 
 @pytest.fixture
-def comprehensive_tuning_setup(dummy_parameter_grid):
+def comprehensive_tuning_setup(rastrigin_parameter_grid):
     """Fixture for comprehensive integration test setup (objective, warm starts, tuner, searcher)."""
 
     def optimization_objective(configuration: Dict) -> float:
-        x1 = configuration["param_1"]
-        x2 = configuration["param_2"]
-        x3_val = {"option1": 0, "option2": 1, "option3": 2}[configuration["param_3"]]
-        return (x1 - 1) ** 2 + (x2 - 10) ** 2 * 0.01 + x3_val * 0.5
+        # Extract 6-dimensional vector from configuration
+        x = np.array(
+            [
+                configuration["x1"],
+                configuration["x2"],
+                configuration["x3"],
+                configuration["x4"],
+                configuration["x5"],
+                configuration["x6"],
+            ]
+        )
+
+        # Use Rastrigin function for minimization
+        return rastrigin(x)
 
     warm_start_configs_raw = get_tuning_configurations(
-        parameter_grid=dummy_parameter_grid,
-        n_configurations=3,
+        parameter_grid=rastrigin_parameter_grid,
+        n_configurations=5,
         random_state=123,
         sampling_method="uniform",
     )
@@ -660,21 +684,23 @@ def comprehensive_tuning_setup(dummy_parameter_grid):
     def make_tuner_and_searcher(dynamic_sampling):
         tuner = ConformalTuner(
             objective_function=optimization_objective,
-            search_space=dummy_parameter_grid,
+            search_space=rastrigin_parameter_grid,
             minimize=True,
-            n_candidates=500,
+            n_candidates=1000,
             warm_starts=warm_start_configs,
             dynamic_sampling=dynamic_sampling,
         )
         searcher = QuantileConformalSearcher(
-            quantile_estimator_architecture="ql",
+            quantile_estimator_architecture="qgbm",
             sampler=LowerBoundSampler(
-                interval_width=0.9,
+                interval_width=0.8,
                 adapter="DtACI",
                 beta_decay="logarithmic_decay",
-                c=1,
+                c=1.0,
+                beta_max=10.0,
             ),
-            n_pre_conformal_trials=20,
+            n_pre_conformal_trials=32,
+            calibration_split_strategy="train_test_split",
         )
         return tuner, searcher, warm_start_configs, optimization_objective
 

@@ -3,7 +3,7 @@ name: CI/CD Pipeline
 on:
   push:
     branches: [ '**' ]
-  pull_request_target:
+  pull_request:
     types: [closed]
     branches: [main]
 
@@ -89,7 +89,7 @@ jobs:
   check-package-label:
     name: Check Package Label
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request_target' && github.event.pull_request.merged == true
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
     outputs:
       has_package_label: ${{ steps.check_label.outputs.has_label }}
       pr_number: ${{ github.event.pull_request.number }}
@@ -121,97 +121,95 @@ jobs:
     if: needs.check-package-label.outputs.has_package_label == 'true'
     outputs:
       version: ${{ steps.get_version.outputs.version }}
-      version_changed: ${{ steps.check_version.outputs.changed }}
+      is_new_version: ${{ steps.check_pypi.outputs.is_new }}
 
     steps:
-    - name: Checkout repository with full history
+    - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        ref: ${{ github.event.pull_request.merge_commit_sha }}
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
-    - name: Get current version
-      id: get_version
+    - name: Install dependencies for PyPI API
+      run: pip install requests packaging
+
+    - name: Get current version and compare with PyPI
+      id: version_check
       run: |
         python << 'EOF'
         import re
         import sys
         import os
+        import requests
+        from packaging import version
 
+        def get_latest_pypi_version(package_name: str) -> str:
+            """Fetch the latest version of a PyPI package by name."""
+            url = f"https://pypi.org/pypi/{package_name}/json"
+            try:
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    return data["info"]["version"]
+                else:
+                    raise Exception(f"Package '{package_name}' returned status {response.status_code}")
+            except requests.exceptions.RequestException as e:
+                raise Exception(f"Failed to fetch package info: {e}")
+
+        # Get current version from pyproject.toml
         with open('pyproject.toml', 'r') as f:
-          content = f.read()
+            content = f.read()
         match = re.search(r'version = "([^"]+)"', content)
 
         if not match:
-          print("❌ ERROR: Could not find version in pyproject.toml")
-          sys.exit(1)
-
-        version = match.group(1)
-        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-          f.write(f"version={version}\n")
-        print(f"Current version (after merge): {version}")
-        EOF
-
-    - name: Check version change against PR base
-      id: check_version
-      env:
-        BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-      run: |
-        python << 'EOF'
-        import re
-        import subprocess
-        import sys
-        import os
-
-        def get_version_from_commit(commit_sha, commit_name):
-          try:
-            result = subprocess.run(['git', 'show', f'{commit_sha}:pyproject.toml'],
-                                  capture_output=True, text=True, check=True)
-            content = result.stdout
-            match = re.search(r'version = "([^"]+)"', content)
-
-            if not match:
-              print(f"❌ ERROR: Could not find version in {commit_name} ({commit_sha[:8]})")
-              sys.exit(1)
-
-            version = match.group(1)
-            print(f"Version from {commit_name} ({commit_sha[:8]}): {version}")
-            return version
-          except subprocess.CalledProcessError as e:
-            print(f"❌ ERROR: Could not retrieve {commit_name} ({commit_sha[:8]}): {e}")
+            print("❌ ERROR: Could not find version in pyproject.toml")
             sys.exit(1)
 
-        # Get commit SHAs from environment
-        base_sha = os.environ.get('BASE_SHA')
-        merge_sha = os.environ.get('MERGE_SHA')
+        current_version = match.group(1)
+        package_name = "confopt"
 
-        if not base_sha or not merge_sha:
-          print("❌ ERROR: Missing commit SHAs from GitHub event payload")
-          sys.exit(1)
+        print(f"Current version from pyproject.toml: {current_version}")
 
-        print(f"PR base commit (main before merge): {base_sha}")
-        print(f"Merge commit (after PR merge): {merge_sha}")
+        # Get latest version from PyPI
+        try:
+            pypi_version = get_latest_pypi_version(package_name)
+            print(f"Latest version on PyPI: {pypi_version}")
+        except Exception as e:
+            print(f"❌ ERROR: Could not fetch PyPI version: {e}")
+            sys.exit(1)
 
-        # Get versions from both commits
-        base_version = get_version_from_commit(base_sha, "PR base")
-        merge_version = get_version_from_commit(merge_sha, "merge commit")
+        # Compare versions
+        try:
+            current_ver = version.parse(current_version)
+            pypi_ver = version.parse(pypi_version)
 
-        changed = base_version != merge_version
+            if current_ver > pypi_ver:
+                print(f"✅ Version bump detected: {pypi_version} → {current_version}")
+                print("Proceeding with deployment")
+                is_new_version = True
+            elif current_ver == pypi_ver:
+                print(f"❌ No version bump: current version {current_version} equals PyPI version {pypi_version}")
+                print("Please bump the version in pyproject.toml before deploying")
+                is_new_version = False
+                sys.exit(1)
+            else:
+                print(f"❌ Version downgrade detected: {pypi_version} → {current_version}")
+                print("Current version is lower than PyPI version - this should not happen")
+                is_new_version = False
+                sys.exit(1)
 
+        except Exception as e:
+            print(f"❌ ERROR: Could not parse versions: {e}")
+            print(f"Current: {current_version}, PyPI: {pypi_version}")
+            sys.exit(1)
+
+        # Set outputs
         with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-          f.write(f"changed={'true' if changed else 'false'}\n")
-
-        if changed:
-          print(f"✅ Version changed from {base_version} → {merge_version}")
-        else:
-          print(f"❌ Version unchanged ({base_version}) - please bump version in pyproject.toml")
-          sys.exit(1)
+            f.write(f"version={current_version}\n")
+            f.write(f"pypi_version={pypi_version}\n")
+            f.write(f"is_new_version={'true' if is_new_version else 'false'}\n")
         EOF
 
   build:
@@ -379,7 +377,7 @@ jobs:
         skip-existing: true  # Skip if version already exists
 
     - name: Wait for TestPyPI propagation
-      run: sleep 10
+      run: sleep 30
   verify-testpypi:
     name: Verify TestPyPI Installation
     runs-on: ubuntu-latest

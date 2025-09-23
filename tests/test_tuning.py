@@ -268,9 +268,11 @@ def test_conformal_vs_random_performance_averaged(
     """Compare conformal vs random search win rate over multiple runs."""
     n_repeats = 20
     conformal_wins, total_comparisons = 0, 0
+
     for seed in range(n_repeats):
-        tuner, searcher, _, _ = comprehensive_tuning_setup(dynamic_sampling)
-        tuner.tune(
+        # Run conformal tuner (15 random + 35 conformal searches)
+        conformal_tuner, searcher, _, _ = comprehensive_tuning_setup(dynamic_sampling)
+        conformal_tuner.tune(
             n_random_searches=15,
             searcher=searcher,
             optimizer_framework=None,
@@ -279,16 +281,25 @@ def test_conformal_vs_random_performance_averaged(
             max_runtime=5 * 60,
             verbose=False,
         )
-        study = tuner.study
-        rs_trials = [t for t in study.trials if t.acquisition_source == "rs"]
-        conformal_trials = [
-            t for t in study.trials if t.acquisition_source not in ["warm_start", "rs"]
-        ]
-        if len(rs_trials) == 0 or len(conformal_trials) == 0:
-            continue
-        last_rs_trial = rs_trials[-1]
-        last_conformal_trial = conformal_trials[-1]
-        if last_conformal_trial.performance < last_rs_trial.performance:
+        conformal_best = conformal_tuner.get_best_value()
+        print(f"Conformal best: {conformal_best}")
+
+        # Run pure random search tuner (50 random searches, no conformal)
+        random_tuner, searcher, _, _ = comprehensive_tuning_setup(dynamic_sampling)
+        random_tuner.tune(
+            n_random_searches=50,
+            searcher=searcher,
+            optimizer_framework=None,
+            random_state=seed,
+            max_searches=50,  # This ensures only 50 random searches, no conformal
+            max_runtime=5 * 60,
+            verbose=False,
+        )
+        random_best = random_tuner.get_best_value()
+        print(f"Random best: {random_best}")
+
+        # Compare best values (lower is better for minimization)
+        if conformal_best < random_best:
             conformal_wins += 1
         total_comparisons += 1
 
@@ -329,3 +340,47 @@ def test_best_fetcher_methods(minimize):
 
     assert best_config == expected_config
     assert best_value == expected_value
+
+
+@pytest.mark.parametrize("minimize", [True, False])
+def test_average_performance_random_vs_conformal(comprehensive_tuning_setup, minimize):
+    """Test that conformal search achieves better average performance than random search."""
+    tuner, searcher, _, _ = comprehensive_tuning_setup(dynamic_sampling=True)
+
+    # Update tuner's minimize setting
+    tuner.minimize = minimize
+    tuner.metric_sign = 1 if minimize else -1
+
+    tuner.tune(
+        n_random_searches=15,
+        searcher=searcher,
+        optimizer_framework=None,
+        random_state=42,
+        max_searches=50,
+        max_runtime=None,
+        verbose=False,
+    )
+
+    study = tuner.study
+
+    # Get random search trials and conformal search trials
+    rs_trials = [t for t in study.trials if t.acquisition_source == "rs"]
+    conformal_trials = [
+        t for t in study.trials if t.acquisition_source not in ["warm_start", "rs"]
+    ]
+
+    # Ensure we have both types of trials
+    assert len(rs_trials) > 0, "No random search trials found"
+    assert len(conformal_trials) > 0, "No conformal search trials found"
+
+    # Calculate average performances
+    rs_avg_performance = np.mean([t.performance for t in rs_trials])
+    conformal_avg_performance = np.mean([t.performance for t in conformal_trials])
+
+    # Check that conformal search has better average performance
+    if minimize:
+        # For minimization, conformal should have lower (better) average performance
+        assert conformal_avg_performance < rs_avg_performance
+    else:
+        # For maximization, conformal should have higher (better) average performance
+        assert conformal_avg_performance > rs_avg_performance
