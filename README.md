@@ -143,6 +143,9 @@ ConfOpt implements surrogate models and acquisition functions from the following
 > **Optimizing Hyperparameters with Conformal Quantile Regression**
 > [PMLR, 2023](https://proceedings.mlr.press/v202/salinas23a/salinas23a.pdf)
 
+> **Enhancing Performance and Calibration in Quantile Hyperparameter Optimization**
+> [arXiv, 2025](https://www.arxiv.org/abs/2509.17051)
+
 ## 🤝 Contributing
 
 If you'd like to contribute, please email [r.doyle.edu@gmail.com](mailto:r.doyle.edu@gmail.com) with a quick summary of the feature you'd like to add and we can discuss it before setting up a PR!

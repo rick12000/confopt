@@ -6,11 +6,22 @@ on:
   pull_request_target:
     types: [closed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version to publish (optional - will use current if not specified)'
+        required: false
+        type: string
+      skip_tests:
+        description: 'Skip running tests (use with caution!)'
+        required: false
+        type: boolean
+        default: false
 
 # Cancel in-progress workflows when a new commit is pushed
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request_target' && github.event.pull_request.number || 'push' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
   PYTHON_VERSION: "3.11"
@@ -57,7 +68,7 @@ jobs:
       with:
         name: test-results-${{ matrix.python-version }}
         path: test-results-${{ matrix.python-version }}.xml
-        retention-days: 2
+        retention-days: 7
 
   lint:
     name: Code Quality
@@ -87,32 +98,44 @@ jobs:
       run: pre-commit run --all-files
 
   check-package-label:
-    name: Check Package Label
+    name: Check Package Label / Manual Trigger
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request_target' && github.event.pull_request.merged == true
+    if: (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true) || github.event_name == 'workflow_dispatch'
     outputs:
-      has_package_label: ${{ steps.check_label.outputs.has_label }}
-      pr_number: ${{ github.event.pull_request.number }}
+      has_package_label: ${{ steps.check_label.outputs.has_label || 'true' }}
+      pr_number: ${{ steps.check_label.outputs.pr_number || '0' }}
+      is_manual: ${{ github.event_name == 'workflow_dispatch' }}
+      manual_version: ${{ steps.manual_version.outputs.version || '' }}
 
     steps:
-    - name: Check for Package label
+    - name: Check for Package label (PR)
       id: check_label
+      if: github.event_name == 'pull_request_target'
       uses: actions/github-script@v7
       with:
         script: |
           const labels = context.payload.pull_request.labels.map(label => label.name);
           const has_package_label = labels.includes('package');
+          const pr_number = context.payload.pull_request.number;
 
           console.log('PR Labels:', labels);
           console.log('Has package label:', has_package_label);
 
           core.setOutput('has_label', has_package_label);
+          core.setOutput('pr_number', pr_number);
 
           if (!has_package_label) {
             console.log('⏭️ Skipping package deployment - no Package label found');
           } else {
             console.log('✅ Package label found - proceeding with deployment pipeline');
           }
+
+    - name: Get manual version
+      id: manual_version
+      if: github.event_name == 'workflow_dispatch' && github.event.inputs.version != ''
+      run: |
+        echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+        echo "✅ Using manually specified version: ${{ github.event.inputs.version }}"
 
   version-check:
     name: Version Check
@@ -121,14 +144,15 @@ jobs:
     if: needs.check-package-label.outputs.has_package_label == 'true'
     outputs:
       version: ${{ steps.get_version.outputs.version }}
-      version_changed: ${{ steps.check_version.outputs.changed }}
+      version_changed: ${{ steps.check_version.outputs.changed || 'true' }}
 
     steps:
-    - name: Checkout repository with full history
+    - name: Checkout repository
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-        ref: ${{ github.event.pull_request.merge_commit_sha }}
+        ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+        token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -154,11 +178,12 @@ jobs:
         version = match.group(1)
         with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
           f.write(f"version={version}\n")
-        print(f"Current version (after merge): {version}")
+        print(f"Current version: {version}")
         EOF
 
     - name: Check version change against PR base
       id: check_version
+      if: github.event_name == 'pull_request_target'
       env:
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
         MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
@@ -168,24 +193,37 @@ jobs:
         import subprocess
         import sys
         import os
+        import time
+        from subprocess import TimeoutExpired
 
-        def get_version_from_commit(commit_sha, commit_name):
-          try:
-            result = subprocess.run(['git', 'show', f'{commit_sha}:pyproject.toml'],
-                                  capture_output=True, text=True, check=True)
-            content = result.stdout
-            match = re.search(r'version = "([^"]+)"', content)
+        def get_version_from_commit(commit_sha, commit_name, retries=3):
+          for attempt in range(retries):
+            try:
+              result = subprocess.run(['git', 'show', f'{commit_sha}:pyproject.toml'],
+                                    capture_output=True, text=True, check=True, timeout=30)
+              content = result.stdout
+              match = re.search(r'version = "([^"]+)"', content)
 
-            if not match:
-              print(f"❌ ERROR: Could not find version in {commit_name} ({commit_sha[:8]})")
-              sys.exit(1)
+              if not match:
+                print(f"❌ ERROR: Could not find version in {commit_name} ({commit_sha[:8]})")
+                if attempt == retries - 1:
+                  sys.exit(1)
+                continue
 
-            version = match.group(1)
-            print(f"Version from {commit_name} ({commit_sha[:8]}): {version}")
-            return version
-          except subprocess.CalledProcessError as e:
-            print(f"❌ ERROR: Could not retrieve {commit_name} ({commit_sha[:8]}): {e}")
-            sys.exit(1)
+              version = match.group(1)
+              print(f"Version from {commit_name} ({commit_sha[:8]}): {version}")
+              return version
+            except subprocess.CalledProcessError as e:
+              print(f"❌ ERROR: Could not retrieve {commit_name} ({commit_sha[:8]}): {e}")
+              if attempt == retries - 1:
+                sys.exit(1)
+              time.sleep(2 ** attempt)  # Exponential backoff
+            except subprocess.TimeoutExpired:
+              print(f"⏱️ Timeout retrieving {commit_name}, retrying...")
+              if attempt == retries - 1:
+                print("❌ ERROR: Timeout after multiple attempts")
+                sys.exit(1)
+              time.sleep(2 ** attempt)
 
         # Get commit SHAs from environment
         base_sha = os.environ.get('BASE_SHA')
@@ -244,7 +282,7 @@ jobs:
       with:
         name: python-package-distributions
         path: dist/
-        retention-days: 2
+        retention-days: 7
   verify_package:
     name: Verify Package Installation
     runs-on: ubuntu-latest
@@ -379,7 +417,28 @@ jobs:
         skip-existing: true  # Skip if version already exists
 
     - name: Wait for TestPyPI propagation
-      run: sleep 10
+      run: |
+        VERSION=${{ needs.version-check.outputs.version }}
+
+        # Wait for TestPyPI to be available with exponential backoff
+        echo "Waiting for TestPyPI propagation..."
+        for i in {1..12}; do  # Up to 2 minutes (1+2+4+8+16+32+64+128+256+512+1024+2048 ms)
+          if pip index versions --index-url https://test.pypi.org/simple/ confopt | grep -q "Available versions:"; then
+            if pip index versions --index-url https://test.pypi.org/simple/ confopt | grep -q "$VERSION"; then
+              echo "✅ TestPyPI package $VERSION is now available"
+              break
+            fi
+          fi
+
+          if [ $i -eq 12 ]; then
+            echo "❌ ERROR: Package not found on TestPyPI after 2 minutes"
+            exit 1
+          fi
+
+          sleep_time=$((2 ** (i-1) / 1000))
+          echo "⏱️  Waiting ${sleep_time}s for TestPyPI propagation (attempt $i/12)..."
+          sleep $sleep_time
+        done
   verify-testpypi:
     name: Verify TestPyPI Installation
     runs-on: ubuntu-latest
@@ -559,7 +618,8 @@ jobs:
 
           **Build Information:**
           - Commit: ${{ github.sha }}
-          - PR: #${{ needs.check-package-label.outputs.pr_number }}
+          - PR: #${{ needs.check-package-label.outputs.pr_number != '0' && format('#{0}', needs.check-package-label.outputs.pr_number) || 'Manual Release' }}
+          - Trigger: ${{ needs.check-package-label.outputs.is_manual == 'true' && 'Manual' || 'PR Merge' }}
         files: dist/*
         draft: true
         prerelease: false
