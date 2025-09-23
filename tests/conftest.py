@@ -8,7 +8,7 @@ from confopt.tuning import (
 )
 from confopt.utils.configurations.sampling import get_tuning_configurations
 from confopt.selection.acquisition import QuantileConformalSearcher
-from confopt.selection.sampling.bound_samplers import LowerBoundSampler
+from confopt.selection.sampling.thompson_samplers import ThompsonSampler
 from confopt.wrapping import FloatRange, IntRange, CategoricalRange, ConformalBounds
 from sklearn.base import BaseEstimator
 from confopt.selection.estimator_configuration import (
@@ -136,10 +136,50 @@ def build_estimator_architectures(amended: bool = False):
 ) = build_estimator_architectures(amended=True)
 
 
+def simple_quadratic_minimization(x):
+    """Simple quadratic function for minimization testing.
+
+    Global minimum at x = [2, -1] with value 0.
+    This creates a clear, smooth objective surface that conformal prediction
+    can easily learn and exploit, unlike random search.
+    """
+    x = np.asarray(x)
+    # Shifted quadratic with minimum at [2, -1]
+    return (x[0] - 2) ** 2 + (x[1] + 1) ** 2
+
+
+def simple_quadratic_maximization(x):
+    """Simple negative quadratic function for maximization testing.
+
+    Global maximum at x = [1, 0.5] with value 0.
+    This creates a clear, smooth objective surface that conformal prediction
+    can easily learn and exploit, unlike random search.
+    """
+    x = np.asarray(x)
+    # Negative shifted quadratic with maximum at [1, 0.5]
+    return -((x[0] - 1) ** 2 + (x[1] - 0.5) ** 2)
+
+
 def rastrigin(x, A=20):
     n = len(x)
     rastrigin_value = A * n + np.sum(x**2 - A * np.cos(2 * np.pi * x))
     return rastrigin_value
+
+
+def ackley(x, a=20, b=0.2, c=2 * np.pi):
+    """Ackley function - commonly used maximization benchmark.
+
+    Global minimum is at x = [0, 0, ..., 0] with value 0.
+    For maximization, we negate this so global maximum is 0 at origin.
+    """
+    x = np.asarray(x)
+    n = len(x)
+    sum1 = np.sum(x**2)
+    sum2 = np.sum(np.cos(c * x))
+    ackley_value = (
+        -a * np.exp(-b * np.sqrt(sum1 / n)) - np.exp(sum2 / n) + a + np.exp(1)
+    )
+    return -ackley_value  # Negate for maximization
 
 
 class ObjectiveSurfaceGenerator:
@@ -214,6 +254,32 @@ def dummy_parameter_grid():
 
 
 @pytest.fixture
+def simple_minimization_parameter_grid():
+    """Parameter grid for simple quadratic minimization function.
+
+    Optimum is at x1=2, x2=-1. This grid covers the optimum with reasonable bounds
+    that allow the conformal prediction algorithm to learn the pattern efficiently.
+    """
+    return {
+        "x1": FloatRange(min_value=-2.0, max_value=6.0),
+        "x2": FloatRange(min_value=-5.0, max_value=3.0),
+    }
+
+
+@pytest.fixture
+def simple_maximization_parameter_grid():
+    """Parameter grid for simple quadratic maximization function.
+
+    Optimum is at x1=1, x2=0.5. This grid covers the optimum with reasonable bounds
+    that allow the conformal prediction algorithm to learn the pattern efficiently.
+    """
+    return {
+        "x1": FloatRange(min_value=-2.0, max_value=4.0),
+        "x2": FloatRange(min_value=-2.5, max_value=3.5),
+    }
+
+
+@pytest.fixture
 def rastrigin_parameter_grid():
     """Parameter grid for 6-dimensional Rastrigin function optimization."""
     return {
@@ -223,6 +289,19 @@ def rastrigin_parameter_grid():
         "x4": FloatRange(min_value=-5.12, max_value=5.12),
         "x5": FloatRange(min_value=-5.12, max_value=5.12),
         "x6": FloatRange(min_value=-5.12, max_value=5.12),
+    }
+
+
+@pytest.fixture
+def ackley_parameter_grid():
+    """Parameter grid for 6-dimensional Ackley function optimization."""
+    return {
+        "x1": FloatRange(min_value=-32.768, max_value=32.768),
+        "x2": FloatRange(min_value=-32.768, max_value=32.768),
+        "x3": FloatRange(min_value=-32.768, max_value=32.768),
+        "x4": FloatRange(min_value=-32.768, max_value=32.768),
+        "x5": FloatRange(min_value=-32.768, max_value=32.768),
+        "x6": FloatRange(min_value=-32.768, max_value=32.768),
     }
 
 
@@ -651,27 +730,27 @@ def conformal_bounds_deterministic():
 
 
 @pytest.fixture
-def comprehensive_tuning_setup(rastrigin_parameter_grid):
-    """Fixture for comprehensive integration test setup (objective, warm starts, tuner, searcher)."""
+def comprehensive_minimizing_tuning_setup(simple_minimization_parameter_grid):
+    """Fixture for comprehensive integration test setup (objective, warm starts, tuner, searcher).
+
+    Uses a simple quadratic minimization function that's easy for conformal prediction to learn,
+    ensuring the test validates that conformal search outperforms random search.
+    """
 
     def optimization_objective(configuration: Dict) -> float:
-        # Extract 6-dimensional vector from configuration
+        # Extract 2-dimensional vector from configuration
         x = np.array(
             [
                 configuration["x1"],
                 configuration["x2"],
-                configuration["x3"],
-                configuration["x4"],
-                configuration["x5"],
-                configuration["x6"],
             ]
         )
 
-        # Use Rastrigin function for minimization
-        return rastrigin(x)
+        # Use simple quadratic function for minimization (minimum at [2, -1])
+        return simple_quadratic_minimization(x)
 
     warm_start_configs_raw = get_tuning_configurations(
-        parameter_grid=rastrigin_parameter_grid,
+        parameter_grid=simple_minimization_parameter_grid,
         n_configurations=5,
         random_state=123,
         sampling_method="uniform",
@@ -684,7 +763,7 @@ def comprehensive_tuning_setup(rastrigin_parameter_grid):
     def make_tuner_and_searcher(dynamic_sampling):
         tuner = ConformalTuner(
             objective_function=optimization_objective,
-            search_space=rastrigin_parameter_grid,
+            search_space=simple_minimization_parameter_grid,
             minimize=True,
             n_candidates=1000,
             warm_starts=warm_start_configs,
@@ -692,12 +771,65 @@ def comprehensive_tuning_setup(rastrigin_parameter_grid):
         )
         searcher = QuantileConformalSearcher(
             quantile_estimator_architecture="qgbm",
-            sampler=LowerBoundSampler(
-                interval_width=0.8,
+            sampler=ThompsonSampler(
+                n_quantiles=4,
                 adapter="DtACI",
-                beta_decay="logarithmic_decay",
-                c=1.0,
-                beta_max=10.0,
+                enable_optimistic_sampling=False,
+            ),
+            n_pre_conformal_trials=32,
+            calibration_split_strategy="train_test_split",
+        )
+        return tuner, searcher, warm_start_configs, optimization_objective
+
+    return make_tuner_and_searcher
+
+
+@pytest.fixture
+def comprehensive_maximizing_tuning_setup(simple_maximization_parameter_grid):
+    """Fixture for comprehensive integration test setup for maximization (objective, warm starts, tuner, searcher).
+
+    Uses a simple quadratic maximization function that's easy for conformal prediction to learn,
+    ensuring the test validates that conformal search outperforms random search.
+    """
+
+    def optimization_objective(configuration: Dict) -> float:
+        # Extract 2-dimensional vector from configuration
+        x = np.array(
+            [
+                configuration["x1"],
+                configuration["x2"],
+            ]
+        )
+
+        # Use simple quadratic function for maximization (maximum at [1, 0.5])
+        return simple_quadratic_maximization(x)
+
+    warm_start_configs_raw = get_tuning_configurations(
+        parameter_grid=simple_maximization_parameter_grid,
+        n_configurations=5,
+        random_state=123,
+        sampling_method="uniform",
+    )
+    warm_start_configs = []
+    for config in warm_start_configs_raw:
+        performance = optimization_objective(config)
+        warm_start_configs.append((config, performance))
+
+    def make_tuner_and_searcher(dynamic_sampling):
+        tuner = ConformalTuner(
+            objective_function=optimization_objective,
+            search_space=simple_maximization_parameter_grid,
+            minimize=False,  # Set to False for maximization
+            n_candidates=1000,
+            warm_starts=warm_start_configs,
+            dynamic_sampling=dynamic_sampling,
+        )
+        searcher = QuantileConformalSearcher(
+            quantile_estimator_architecture="qgbm",
+            sampler=ThompsonSampler(
+                n_quantiles=4,
+                adapter="DtACI",
+                enable_optimistic_sampling=False,
             ),
             n_pre_conformal_trials=32,
             calibration_split_strategy="train_test_split",

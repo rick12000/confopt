@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "confopt"
-version = "1.2.5"
+version = "2.0.0"
 description = "Conformal hyperparameter optimization tool"
 readme = "README.md"
 authors = [
@@ -29,7 +29,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/rick12000/confopt"
+Source = "https://github.com/rick12000/confopt"
+Documentation = "https://confopt.readthedocs.io"
+Changelog = "https://github.com/rick12000/confopt/releases"
 
 [project.optional-dependencies]
 dev = [
