@@ -89,7 +89,7 @@ def test_quantile_fit_and_predict_intervals_shape_and_coverage(
         tuning_iterations=tuning_iterations,
         random_state=42,
     )
-    assert len(estimator.nonconformity_scores) == len(alphas)
+    assert len(estimator.fold_nonconformity_scores) == len(alphas)
 
     intervals = estimator.predict_intervals(X_test)
     assert len(intervals) == len(alphas)

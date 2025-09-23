@@ -289,7 +289,7 @@ class BaseConformalSearcher(ABC):
             self.sampler.update_best_value(y_true)
         if isinstance(self.sampler, LowerBoundSampler):
             self.sampler.update_exploration_step()
-        if self.conformal_estimator.nonconformity_scores is not None:
+        if self.conformal_estimator.fold_nonconformity_scores is not None:
             uses_adaptation = (
                 hasattr(self.sampler, "adapter") and self.sampler.adapter is not None
             ) or (
