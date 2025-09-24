@@ -1,0 +1,8 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+- NEVER commit any changes.
+- NEVER revert commits or affect the commit history.
+- NEVER push commits or pull from remote, or interact at all with remote branches.

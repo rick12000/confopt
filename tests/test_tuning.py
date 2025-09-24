@@ -1,430 +1,353 @@
-import random
-from copy import deepcopy
-
-import numpy as np
-import pandas as pd
 import pytest
+import numpy as np
+from typing import Dict
+from itertools import product
 
-from confopt.config import GBM_NAME
-from confopt.optimization import RuntimeTracker
-from confopt.tuning import (
-    score_predictions,
-    get_best_configuration_idx,
-    process_and_split_estimation_data,
-    normalize_estimation_data,
-    update_adaptive_confidence_level,
-)
-
-DEFAULT_SEED = 1234
+from confopt.tuning import ConformalTuner, stop_search
+from confopt.wrapping import CategoricalRange, IntRange
+from confopt.utils.tracking import RuntimeTracker
+from confopt.selection.acquisition import QuantileConformalSearcher, LowerBoundSampler
 
 
-@pytest.mark.parametrize("optimization_direction", ["direct", "inverse"])
-def test_get_best_configuration_idx(optimization_direction):
-    lower_bound = np.array([5, 4, 3, 2, 1])
-    higher_bound = lower_bound + 1
-    dummy_performance_bounds = (lower_bound, higher_bound)
-
-    best_idx = get_best_configuration_idx(
-        configuration_performance_bounds=dummy_performance_bounds,
-        optimization_direction=optimization_direction,
+def test_stop_search_no_remaining_configurations():
+    assert stop_search(
+        n_remaining_configurations=0,
+        current_iter=5,
+        current_runtime=10.0,
+        max_runtime=100.0,
+        max_searches=50,
     )
 
-    assert best_idx >= 0
-    if optimization_direction == "direct":
-        assert best_idx == np.argmax(higher_bound)
-    elif optimization_direction == "inverse":
-        assert best_idx == np.argmin(lower_bound)
 
-
-@pytest.mark.parametrize(
-    "scoring_function", ["accuracy_score", "mean_squared_error", "log_loss"]
-)
-def test_score_predictions__perfect_score(scoring_function):
-    dummy_y_obs = np.array([1, 0, 1, 0, 1, 1])
-    dummy_y_pred = deepcopy(dummy_y_obs)
-
-    score = score_predictions(
-        y_obs=dummy_y_obs, y_pred=dummy_y_pred, scoring_function=scoring_function
-    )
-
-    if scoring_function == "accuracy_score":
-        assert score == 1
-    elif scoring_function == "mean_squared_error":
-        assert score == 0
-    elif scoring_function == "log_loss":
-        assert 0 < score < 0.001
-
-
-def test_process_and_split_estimation_data(dummy_configurations):
-    train_split = 0.5
-    dummy_searched_configurations = pd.DataFrame(dummy_configurations).to_numpy()
-    stored_dummy_searched_configurations = deepcopy(dummy_searched_configurations)
-    dummy_searched_performances = np.array(
-        [random.random() for _ in range(len(dummy_configurations))]
-    )
-    stored_dummy_searched_performances = deepcopy(dummy_searched_performances)
-
-    X_train, y_train, X_val, y_val = process_and_split_estimation_data(
-        searched_configurations=dummy_searched_configurations,
-        searched_performances=dummy_searched_performances,
-        train_split=train_split,
-        filter_outliers=False,
-        outlier_scope=None,
-        random_state=DEFAULT_SEED,
-    )
-
-    assert len(X_val) == len(y_val)
-    assert len(X_train) == len(y_train)
-
-    assert len(X_val) + len(X_train) == len(dummy_searched_configurations)
-
+@pytest.mark.parametrize("max_runtime", [10.0, 15.0, 20.0])
+def test_stop_search_runtime_exceeded(max_runtime):
+    current_runtime = 25.0
+    should_stop = current_runtime >= max_runtime
     assert (
-        abs(len(X_train) - round(len(dummy_searched_configurations) * train_split)) <= 1
+        stop_search(
+            n_remaining_configurations=10,
+            current_iter=5,
+            current_runtime=current_runtime,
+            max_runtime=max_runtime,
+            max_searches=50,
+        )
+        == should_stop
     )
+
+
+@pytest.mark.parametrize("max_searches", [10, 20, 30])
+def test_stop_search_iterations_exceeded(max_searches):
+    current_iter = 25
+    should_stop = current_iter >= max_searches
     assert (
-        abs(len(X_val) - round(len(dummy_searched_configurations) * (1 - train_split)))
-        <= 1
+        stop_search(
+            n_remaining_configurations=10,
+            current_iter=current_iter,
+            current_runtime=5.0,
+            max_runtime=100.0,
+            max_searches=max_searches,
+        )
+        == should_stop
     )
 
-    # Assert there is no mutability of input:
-    assert np.array_equal(
-        dummy_searched_configurations, stored_dummy_searched_configurations
-    )
-    assert np.array_equal(
-        dummy_searched_performances, stored_dummy_searched_performances
-    )
 
-
-def test_process_and_split_estimation_data__reproducibility(dummy_configurations):
-    train_split = 0.5
-    dummy_searched_configurations = pd.DataFrame(dummy_configurations).to_numpy()
-    dummy_searched_performances = np.array(
-        [random.random() for _ in range(len(dummy_configurations))]
+def test_stop_search_continue_search():
+    assert not stop_search(
+        n_remaining_configurations=10,
+        current_iter=5,
+        current_runtime=10.0,
+        max_runtime=100.0,
+        max_searches=50,
     )
 
-    (
-        X_train_first_call,
-        y_train_first_call,
-        X_val_first_call,
-        y_val_first_call,
-    ) = process_and_split_estimation_data(
-        searched_configurations=dummy_searched_configurations,
-        searched_performances=dummy_searched_performances,
-        train_split=train_split,
-        filter_outliers=False,
-        outlier_scope=None,
-        random_state=DEFAULT_SEED,
-    )
-    (
-        X_train_second_call,
-        y_train_second_call,
-        X_val_second_call,
-        y_val_second_call,
-    ) = process_and_split_estimation_data(
-        searched_configurations=dummy_searched_configurations,
-        searched_performances=dummy_searched_performances,
-        train_split=train_split,
-        filter_outliers=False,
-        outlier_scope=None,
-        random_state=DEFAULT_SEED,
-    )
 
-    assert np.array_equal(X_train_first_call, X_train_second_call)
-    assert np.array_equal(y_train_first_call, y_train_second_call)
-    assert np.array_equal(X_val_first_call, X_val_second_call)
-    assert np.array_equal(y_val_first_call, y_val_second_call)
+def test_check_objective_function_wrong_argument_count(dummy_parameter_grid):
+    def invalid_objective(config1, config2):
+        return 1.0
+
+    with pytest.raises(
+        ValueError, match="Objective function must take exactly one argument"
+    ):
+        ConformalTuner(
+            objective_function=invalid_objective,
+            search_space=dummy_parameter_grid,
+            minimize=True,
+        )
 
 
-def test_normalize_estimation_data(dummy_configurations):
-    # Proportion of all candidate configurations that
-    # have already been searched:
-    searched_split = 0.5
-    # Split of searched configurations that is used as
-    # training data for the search estimator:
-    train_split = 0.5
+def test_check_objective_function_wrong_argument_name(dummy_parameter_grid):
+    def invalid_objective(config):
+        return 1.0
 
-    dummy_searched_configurations = dummy_configurations[
-        : round(len(dummy_configurations) * searched_split)
+    with pytest.raises(
+        ValueError,
+        match="The objective function must take exactly one argument named 'configuration'",
+    ):
+        ConformalTuner(
+            objective_function=invalid_objective,
+            search_space=dummy_parameter_grid,
+            minimize=True,
+        )
+
+
+def test_evaluate_configuration(tuner):
+    config = {"param_1": 0.5, "param_2": 10, "param_3": "option1"}
+
+    performance, runtime = tuner._evaluate_configuration(config)
+
+    assert performance == 2
+    assert runtime >= 0
+
+
+def test_random_search_with_warm_start(
+    mock_constant_objective_function, dummy_parameter_grid
+):
+    warm_start_configs = [
+        ({"param_1": 0.5, "param_2": 10, "param_3": "option1"}, 0.8),
     ]
-    dummy_searchable_configurations = pd.DataFrame(
-        dummy_configurations[round(len(dummy_configurations) * searched_split) :]
-    ).to_numpy()
-    stored_dummy_searchable_configurations = deepcopy(dummy_searchable_configurations)
-    dummy_training_searched_configurations = pd.DataFrame(
-        dummy_searched_configurations[
-            : round(len(dummy_searched_configurations) * train_split)
-        ]
-    ).to_numpy()
-    stored_dummy_training_searched_configurations = deepcopy(
-        dummy_training_searched_configurations
-    )
-    dummy_validation_searched_configurations = pd.DataFrame(
-        dummy_searched_configurations[
-            round(len(dummy_searched_configurations) * train_split) :
-        ]
-    ).to_numpy()
-    stored_dummy_validation_searched_configurations = deepcopy(
-        dummy_validation_searched_configurations
+
+    tuner = ConformalTuner(
+        objective_function=mock_constant_objective_function,
+        search_space=dummy_parameter_grid,
+        minimize=True,
+        warm_starts=warm_start_configs,
     )
 
-    (
-        normalized_training_searched_configurations,
-        normalized_validation_searched_configurations,
-        normalized_searchable_configurations,
-    ) = normalize_estimation_data(
-        training_searched_configurations=dummy_training_searched_configurations,
-        validation_searched_configurations=dummy_validation_searched_configurations,
-        searchable_configurations=dummy_searchable_configurations,
+    tuner.initialize_tuning_resources()
+    tuner.search_timer = RuntimeTracker()
+
+    assert len(tuner.study.trials) == 1
+    assert tuner.study.trials[0].acquisition_source == "warm_start"
+
+    tuner.random_search(
+        max_random_iter=3,
+        verbose=False,
     )
 
-    assert len(normalized_training_searched_configurations) == len(
-        dummy_training_searched_configurations
-    )
-    assert len(normalized_validation_searched_configurations) == len(
-        normalized_validation_searched_configurations
-    )
-    assert len(normalized_searchable_configurations) == len(
-        normalized_searchable_configurations
-    )
-
-    # Assert there is no mutability of inputs:
-    assert np.array_equal(
-        dummy_training_searched_configurations,
-        stored_dummy_training_searched_configurations,
-    )
-    assert np.array_equal(
-        dummy_validation_searched_configurations,
-        stored_dummy_validation_searched_configurations,
-    )
-    assert np.array_equal(
-        dummy_searchable_configurations, stored_dummy_searchable_configurations
-    )
+    assert len(tuner.study.trials) == 4
+    assert tuner.study.trials[0].acquisition_source == "warm_start"
+    assert all(trial.acquisition_source == "rs" for trial in tuner.study.trials[1:])
 
 
-@pytest.mark.parametrize("breach", [True, False])
-@pytest.mark.parametrize("true_confidence_level", [0.2, 0.8])
-@pytest.mark.parametrize("learning_rate", [0.01, 0.1])
-def test_update_adaptive_interval(breach, true_confidence_level, learning_rate):
-    updated_confidence_level = update_adaptive_confidence_level(
-        true_confidence_level=true_confidence_level,
-        last_confidence_level=true_confidence_level,
-        breach=breach,
-        learning_rate=learning_rate,
+def test_random_search_with_nan_performance(dummy_parameter_grid):
+    def nan_objective(configuration: Dict) -> float:
+        return np.nan
+
+    tuner = ConformalTuner(
+        objective_function=nan_objective,
+        search_space=dummy_parameter_grid,
+        minimize=True,
     )
 
-    assert 0 < updated_confidence_level < 1
-    if breach:
-        assert updated_confidence_level >= true_confidence_level
+    tuner.initialize_tuning_resources()
+    tuner.search_timer = RuntimeTracker()
+
+    tuner.random_search(
+        max_random_iter=3,
+        verbose=False,
+    )
+
+    # Should handle NaN gracefully and not crash
+    assert len(tuner.study.trials) == 0
+
+
+@pytest.mark.parametrize("random_state", [42, 123, 999])
+def test_tune_method_reproducibility(dummy_parameter_grid, random_state):
+    """Test that tune method produces identical results with same random seed"""
+
+    def complex_objective(configuration: Dict) -> float:
+        # Complex objective with multiple terms
+        x1 = configuration["param_1"]
+        x2 = configuration["param_2"]
+        x3_val = {"option1": 1, "option2": 2, "option3": 3}[configuration["param_3"]]
+        return x1**2 + np.sin(x2) + x3_val * 0.5
+
+    def run_tune_session():
+        # Create fresh searcher for each run to avoid state contamination
+        searcher = QuantileConformalSearcher(
+            quantile_estimator_architecture="ql",
+            sampler=LowerBoundSampler(
+                interval_width=0.1,
+                adapter="DtACI",
+                beta_decay="logarithmic_decay",
+                c=1,
+            ),
+            n_pre_conformal_trials=5,
+        )
+
+        tuner = ConformalTuner(
+            objective_function=complex_objective,
+            search_space=dummy_parameter_grid,
+            minimize=True,
+            n_candidates=200,
+        )
+
+        tuner.tune(
+            n_random_searches=10,
+            searcher=searcher,
+            optimizer_framework=None,
+            random_state=random_state,
+            max_searches=25,
+            max_runtime=None,
+            verbose=False,
+        )
+
+        return tuner.study
+
+    # Run twice with same seed
+    study1 = run_tune_session()
+    study2 = run_tune_session()
+
+    # Verify identical results
+    assert len(study1.trials) == len(study2.trials)
+
+    for trial1, trial2 in zip(study1.trials, study2.trials):
+        assert trial1.configuration == trial2.configuration
+        assert trial1.performance == trial2.performance
+        # Skip acquisition_source comparison as it contains object addresses
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("dynamic_sampling", [True, False])
+def test_tune_method_comprehensive_integration(
+    comprehensive_minimizing_tuning_setup, dynamic_sampling
+):
+    """Comprehensive integration test for tune method (single run, logic only)"""
+    tuner, searcher, warm_start_configs, _ = comprehensive_minimizing_tuning_setup(
+        dynamic_sampling
+    )
+
+    tuner.tune(
+        n_random_searches=15,
+        searcher=searcher,
+        optimizer_framework=None,
+        random_state=42,
+        max_searches=50,
+        max_runtime=5 * 60,
+        verbose=False,
+    )
+    study = tuner.study
+
+    # Test 1: Verify correct number of trials
+    assert len(study.trials) == 50
+
+    # Test 2: Verify warm starts are present
+    warm_start_trials = [
+        t for t in study.trials if t.acquisition_source == "warm_start"
+    ]
+    assert len(warm_start_trials) == 3
+    warm_start_performances = [t.performance for t in warm_start_trials]
+    expected_performances = [perf for _, perf in warm_start_configs]
+    assert set(warm_start_performances) == set(expected_performances)
+
+    # Test 3: Verify trial sources
+    rs_trials = [t for t in study.trials if t.acquisition_source == "rs"]
+    conformal_trials = [
+        t for t in study.trials if t.acquisition_source not in ["warm_start", "rs"]
+    ]
+    assert len(rs_trials) == 12
+    assert len(conformal_trials) == 35
+
+    # Test 4: Verify configurations are diverse
+    all_configs = [t.configuration for t in study.trials]
+    unique_configs = set(str(config) for config in all_configs)
+    assert len(unique_configs) == len(all_configs)
+
+    # Test 5: Verify study methods work correctly
+    best_config = study.get_best_configuration()
+    best_value = study.get_best_performance()
+    assert best_config in all_configs
+    assert best_value == min(t.performance for t in study.trials)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("minimize", [True, False])
+@pytest.mark.parametrize("dynamic_sampling", [True, False])
+def test_conformal_vs_random_performance_averaged(
+    comprehensive_minimizing_tuning_setup,
+    comprehensive_maximizing_tuning_setup,
+    minimize,
+    dynamic_sampling,
+):
+    """Compare conformal vs random search win rate over multiple runs."""
+    n_repeats = 20
+    conformal_wins, total_comparisons = 0, 0
+
+    if minimize:
+        tuning_setup = comprehensive_minimizing_tuning_setup
     else:
-        assert updated_confidence_level <= true_confidence_level
+        tuning_setup = comprehensive_maximizing_tuning_setup
+
+    for seed in range(n_repeats):
+        # Run conformal tuner (15 random + 35 conformal searches)
+        conformal_tuner, searcher, _, _ = tuning_setup(dynamic_sampling)
+        conformal_tuner.tune(
+            n_random_searches=10,
+            searcher=searcher,
+            optimizer_framework=None,
+            random_state=seed,
+            max_searches=40,
+            max_runtime=5 * 60,
+            verbose=False,
+        )
+        conformal_best = conformal_tuner.get_best_value()
+
+        # Run pure random search tuner (40 random searches, no conformal)
+        random_tuner, searcher, _, _ = tuning_setup(dynamic_sampling)
+        random_tuner.tune(
+            n_random_searches=40,
+            searcher=searcher,
+            optimizer_framework=None,
+            random_state=seed,
+            max_searches=40,  # This ensures only 40 random searches, no conformal
+            max_runtime=5 * 60,
+            verbose=False,
+        )
+        random_best = random_tuner.get_best_value()
+
+        if minimize:
+            conformal_wins_round = conformal_best < random_best
+        else:
+            conformal_wins_round = conformal_best > random_best
+
+        if conformal_wins_round:
+            conformal_wins += 1
+        total_comparisons += 1
+
+    assert conformal_wins / total_comparisons >= 0.8
 
 
-def test_get_tuning_configurations(dummy_initialized_conformal_searcher__gbm_mse):
-    stored_search_space = dummy_initialized_conformal_searcher__gbm_mse.search_space
+@pytest.mark.parametrize("minimize", [True, False])
+def test_best_fetcher_methods(minimize):
+    grid = {
+        "x": CategoricalRange(choices=[0, 1]),
+        "y": IntRange(min_value=0, max_value=2),
+    }
 
-    tuning_configurations = (
-        dummy_initialized_conformal_searcher__gbm_mse._get_tuning_configurations()
+    def objective(configuration):
+        return configuration["x"] + configuration["y"] * 10
+
+    tuner = ConformalTuner(
+        objective_function=objective,
+        search_space=grid,
+        minimize=minimize,
+        n_candidates=100,
     )
+    tuner.initialize_tuning_resources()
+    tuner.search_timer = RuntimeTracker()
 
-    for configuration in tuning_configurations:
-        for param_name, param_value in configuration.items():
-            # Check configuration only has parameter names from parameter grid prompt:
-            assert param_name in stored_search_space.keys()
-            # Check values in configuration come from range in parameter grid prompt:
-            assert param_value in stored_search_space[param_name]
-    # Test for mutability:
-    assert (
-        stored_search_space
-        == dummy_initialized_conformal_searcher__gbm_mse.search_space
-    )
+    total_configs = len(list(product([0, 1], [0, 1, 2])))
+    tuner.random_search(max_random_iter=total_configs, verbose=False)
 
+    # Use built-in methods to get best config and value
+    best_config = tuner.get_best_params()
+    best_value = tuner.get_best_value()
 
-def test_get_tuning_configurations__reproducibility(
-    dummy_initialized_conformal_searcher__gbm_mse,
-):
-    assert (
-        dummy_initialized_conformal_searcher__gbm_mse._get_tuning_configurations()
-        == dummy_initialized_conformal_searcher__gbm_mse._get_tuning_configurations()
-    )
+    if minimize:
+        expected_config = {"x": 0, "y": 0}
+    else:
+        expected_config = {"x": 1, "y": 2}
+    expected_value = objective(expected_config)
 
-
-def test_evaluate_configuration_performance(
-    dummy_initialized_conformal_searcher__gbm_mse, dummy_gbm_configurations
-):
-    # Arbitrarily select the first configuration in the list:
-    dummy_configuration = dummy_gbm_configurations[0]
-    stored_dummy_configuration = deepcopy(dummy_configuration)
-
-    performance = dummy_initialized_conformal_searcher__gbm_mse._evaluate_configuration_performance(
-        configuration=dummy_configuration, random_state=DEFAULT_SEED
-    )
-
-    assert performance > 0
-    # Test for mutability:
-    assert stored_dummy_configuration == dummy_configuration
-
-
-def test_evaluate_configuration_performance__reproducibility(
-    dummy_initialized_conformal_searcher__gbm_mse, dummy_gbm_configurations
-):
-    # Arbitrarily select the first configuration in the list:
-    dummy_configuration = dummy_gbm_configurations[0]
-
-    assert dummy_initialized_conformal_searcher__gbm_mse._evaluate_configuration_performance(
-        configuration=dummy_configuration, random_state=DEFAULT_SEED
-    ) == dummy_initialized_conformal_searcher__gbm_mse._evaluate_configuration_performance(
-        configuration=dummy_configuration, random_state=DEFAULT_SEED
-    )
-
-
-def test_random_search(dummy_initialized_conformal_searcher__gbm_mse):
-    n_searches = 5
-    max_runtime = 30
-    dummy_initialized_conformal_searcher__gbm_mse.search_timer = RuntimeTracker()
-
-    (
-        searched_configurations,
-        searched_performances,
-        searched_timestamps,
-        runtime_per_search,
-    ) = dummy_initialized_conformal_searcher__gbm_mse._random_search(
-        n_searches=n_searches,
-        max_runtime=max_runtime,
-        random_state=DEFAULT_SEED,
-    )
-
-    for performance in searched_performances:
-        assert performance > 0
-    assert len(searched_configurations) > 0
-    assert len(searched_performances) > 0
-    assert len(searched_timestamps) > 0
-    assert (
-        len(searched_configurations)
-        == len(searched_performances)
-        == len(searched_timestamps)
-    )
-    assert len(searched_configurations) == n_searches
-    assert 0 < runtime_per_search < max_runtime
-
-
-def test_random_search__reproducibility(
-    dummy_initialized_conformal_searcher__gbm_mse,
-):
-    n_searches = 5
-    max_runtime = 30
-    dummy_initialized_conformal_searcher__gbm_mse.search_timer = RuntimeTracker()
-
-    (
-        searched_configurations_first_call,
-        searched_performances_first_call,
-        _,
-        _,
-    ) = dummy_initialized_conformal_searcher__gbm_mse._random_search(
-        n_searches=n_searches,
-        max_runtime=max_runtime,
-        random_state=DEFAULT_SEED,
-    )
-    (
-        searched_configurations_second_call,
-        searched_performances_second_call,
-        _,
-        _,
-    ) = dummy_initialized_conformal_searcher__gbm_mse._random_search(
-        n_searches=n_searches,
-        max_runtime=max_runtime,
-        random_state=DEFAULT_SEED,
-    )
-
-    assert searched_configurations_first_call == searched_configurations_second_call
-    assert searched_performances_first_call == searched_performances_second_call
-
-
-def test_search(dummy_initialized_conformal_searcher__gbm_mse):
-    # TODO: Below I hard coded a slice of possible inputs, but consider
-    #  pytest parametrizing these (though test will be very heavy,
-    #  so tag as slow and only run when necessary)
-    confidence_level = 0.2
-    conformal_model_type = GBM_NAME
-    conformal_retraining_frequency = 1
-    conformal_learning_rate = 0.01
-    enable_adaptive_intervals = True
-    max_runtime = 120
-    min_training_iterations = 20
-
-    stored_search_space = dummy_initialized_conformal_searcher__gbm_mse.search_space
-    stored_tuning_configurations = (
-        dummy_initialized_conformal_searcher__gbm_mse.tuning_configurations
-    )
-
-    dummy_initialized_conformal_searcher__gbm_mse.search(
-        conformal_search_estimator=conformal_model_type,
-        confidence_level=confidence_level,
-        n_random_searches=min_training_iterations,
-        runtime_budget=max_runtime,
-        conformal_retraining_frequency=conformal_retraining_frequency,
-        conformal_learning_rate=conformal_learning_rate,
-        enable_adaptive_intervals=enable_adaptive_intervals,
-        verbose=0,
-    )
-
-    assert (
-        len(dummy_initialized_conformal_searcher__gbm_mse.searched_configurations) > 0
-    )
-    assert len(dummy_initialized_conformal_searcher__gbm_mse.searched_performances) > 0
-    assert len(
-        dummy_initialized_conformal_searcher__gbm_mse.searched_configurations
-    ) == len(dummy_initialized_conformal_searcher__gbm_mse.searched_performances)
-    # Test for mutability:
-    assert (
-        stored_search_space
-        == dummy_initialized_conformal_searcher__gbm_mse.search_space
-    )
-    assert (
-        stored_tuning_configurations
-        == dummy_initialized_conformal_searcher__gbm_mse.tuning_configurations
-    )
-
-
-def test_search__reproducibility(dummy_initialized_conformal_searcher__gbm_mse):
-    confidence_level = 0.2
-    conformal_model_type = GBM_NAME
-    conformal_retraining_frequency = 1
-    conformal_learning_rate = 0.01
-    enable_adaptive_intervals = True
-    max_runtime = 120
-    min_training_iterations = 20
-
-    searcher_first_call = deepcopy(dummy_initialized_conformal_searcher__gbm_mse)
-    searcher_second_call = deepcopy(dummy_initialized_conformal_searcher__gbm_mse)
-
-    searcher_first_call.search(
-        conformal_search_estimator=conformal_model_type,
-        confidence_level=confidence_level,
-        n_random_searches=min_training_iterations,
-        runtime_budget=max_runtime,
-        conformal_retraining_frequency=conformal_retraining_frequency,
-        conformal_learning_rate=conformal_learning_rate,
-        enable_adaptive_intervals=enable_adaptive_intervals,
-        verbose=0,
-        random_state=DEFAULT_SEED,
-    )
-    searcher_second_call.search(
-        conformal_search_estimator=conformal_model_type,
-        confidence_level=confidence_level,
-        n_random_searches=min_training_iterations,
-        runtime_budget=max_runtime,
-        conformal_retraining_frequency=conformal_retraining_frequency,
-        conformal_learning_rate=conformal_learning_rate,
-        enable_adaptive_intervals=enable_adaptive_intervals,
-        verbose=0,
-        random_state=DEFAULT_SEED,
-    )
-
-    assert (
-        searcher_first_call.searched_configurations
-        == searcher_second_call.searched_configurations
-    )
-    assert (
-        searcher_first_call.searched_performances
-        == searcher_second_call.searched_performances
-    )
+    assert best_config == expected_config
+    assert best_value == expected_value

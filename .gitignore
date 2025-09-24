@@ -24,3 +24,14 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Compiled extension modules
+*.pyd
+*.so
+*.c
+*.whl
+
+# Dev
+cache/
+_build/
+benchmarks/

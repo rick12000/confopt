@@ -1,0 +1,31 @@
+# Coding Style Guidelines
+
+- Adopt the DRY principle. If code is repeated in multiple places, it should be functionalized and called in those places.
+- Make all inputs explicit. Avoid relying on state or shared context unless encapsulated.
+- Avoid implicit behavior (e.g., mutation of input lists, in place dataframe modification).
+- Variable names should be descriptive and reduced to the shortest possible length.
+- If a function returns multiple types, refactor. Don't return Union[str, dict, None].
+- Use pytest.mark.parametrize for testing functions with categorical input values.
+- If mocking in unit testing is required, mock external APIs and I/O only.
+- No print() statements anywhere in the code. Use logging instead.
+- No single-letter variable names unless in mathematical contexts or loops.
+- No hard coded values. Use constants or configuration files.
+- Don't use early returns in if else statements.
+- Don't create classes if functions are sufficient.
+- Keep modules small and focused (under 500 lines).
+- Comments should explain why, not what. Keep comments under 10% of code.
+- Don't write docstrings.
+- Don't rely on default values for function arguments.
+- Avoid *args or **kwargs unless absolutely necessary.
+- Use pydantic models for configuration values.
+- Always comply with DRY and SOLID principles.
+- Use as little code as is necessary to carry out the desired functionality, do not over-engineer or over-validate your code.
+- Write easily testable and maintainable code.
+- Maximize separation of concerns.
+- Consider how your changes will affect the wider codebase, think several dependancies ahead.
+
+
+To run anything in the terminal or console, ALWAYS:
+1. Run: conda activate confopt_env
+2. Run: pip install .
+3. Run your command

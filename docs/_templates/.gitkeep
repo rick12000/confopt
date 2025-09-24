@@ -1,0 +1,2 @@
+# This file ensures the _templates directory is tracked by git
+# even when it's empty. Sphinx uses this directory for custom templates.

@@ -1,0 +1,550 @@
+/* ===================================================================
+   ConfOpt Documentation - Simplified Modern Pink/Red Theme
+   Compatible with sphinx_rtd_theme
+   ================================================================== */
+
+/* CSS Custom Properties - Simplified Design System */
+:root {
+  /* Primary Pink/Red Palette */
+  --primary-50: #fdf2f8;
+  --primary-100: #fce7f3;
+  --primary-200: #fbcfe8;
+  --primary-300: #f9a8d4;
+  --primary-400: #f472b6;
+  --primary-500: #ec4899;
+  --primary-600: #db2777;
+  --primary-700: #be185d;
+  --primary-800: #9d174d;
+
+  /* Accent Colors */
+  --accent-green: #059669;
+  --accent-orange: #ea580c;
+  --accent-red: #dc2626;
+  --accent-purple: #8b5cf6;
+
+  /* Neutral Palette */
+  --gray-50: #f9fafb;
+  --gray-100: #f3f4f6;
+  --gray-200: #e5e7eb;
+  --gray-300: #d1d5db;
+  --gray-400: #9ca3af;
+  --gray-500: #6b7280;
+  --gray-600: #4b5563;
+  --gray-700: #374151;
+  --gray-800: #1f2937;
+  --gray-900: #111827;
+
+  /* Typography */
+  --font-mono: 'SF Mono', 'Monaco', 'Roboto Mono', 'Courier New', monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(219, 39, 119, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(219, 39, 119, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(219, 39, 119, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+
+  /* Transitions */
+  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ===================================================================
+   Header Customization
+   ================================================================== */
+
+/* RTD Header with Pink Gradient */
+.wy-side-nav-search {
+  background: linear-gradient(135deg, var(--primary-600), var(--primary-200)) !important;
+}
+
+.wy-side-nav-search > a {
+  color: white !important;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.wy-side-nav-search > a:hover {
+  color: white !important;
+  background: none !important;
+}
+
+/* Logo styling */
+.wy-side-nav-search img.logo {
+  max-height: 60px;
+  width: auto;
+  transition: var(--transition);
+}
+
+.wy-side-nav-search img.logo:hover {
+  transform: scale(1.05);
+}
+
+/* Search input styling */
+.wy-side-nav-search input[type="text"] {
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--gray-700);
+  font-size: 14px;
+  transition: var(--transition);
+}
+
+.wy-side-nav-search input[type="text"]:focus {
+  outline: none;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(219, 39, 119, 0.2);
+}
+
+/* ===================================================================
+   Navigation Styling
+   ================================================================== */
+
+/* Navigation background */
+.wy-nav-side {
+  background: var(--gray-50) !important;
+  border-right: 1px solid var(--gray-200);
+}
+
+/* Navigation items */
+.wy-menu-vertical a {
+  color: var(--gray-600) !important;
+  border-left: 3px solid transparent;
+  transition: var(--transition);
+  font-weight: 500;
+}
+
+.wy-menu-vertical a:hover {
+  background: var(--primary-50) !important;
+  color: var(--primary-700) !important;
+  border-left-color: var(--primary-300);
+  transform: translateX(2px);
+}
+
+/* Active navigation items */
+.wy-menu-vertical li.current > a,
+.wy-menu-vertical li.current a {
+  background: var(--primary-100) !important;
+  color: var(--primary-800) !important;
+  border-left-color: var(--primary-600) !important;
+  font-weight: 600;
+}
+
+/* Sub-navigation */
+.wy-menu-vertical li ul li a {
+  color: var(--gray-500) !important;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.wy-menu-vertical li ul li a:hover {
+  background: var(--primary-50) !important;
+  color: var(--primary-600) !important;
+}
+
+.wy-menu-vertical li ul li.current a {
+  background: var(--primary-50) !important;
+  color: var(--primary-700) !important;
+  border-left-color: var(--primary-500) !important;
+  font-weight: 500;
+}
+
+/* ===================================================================
+   Content Area
+   ================================================================== */
+
+/* Main content background */
+.wy-nav-content {
+  background: #ffffff;
+}
+
+/* ===================================================================
+   Typography
+   ================================================================== */
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--gray-900);
+  font-weight: 700;
+}
+
+h1 {
+  color: var(--primary-800);
+  border-bottom: 3px solid var(--primary-200);
+  padding-bottom: 0.5rem;
+}
+
+h2 {
+  color: var(--gray-800);
+  border-bottom: 2px solid var(--primary-100);
+  padding-bottom: 0.25rem;
+}
+
+h3 {
+  color: var(--gray-700);
+}
+
+/* Hide header anchor links */
+.headerlink {
+  display: none !important;
+}
+
+/* Links */
+a {
+  color: var(--primary-600);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--primary-800);
+  text-decoration: underline;
+  text-decoration-color: var(--primary-600);
+}
+
+/* Toctree captions */
+.caption,
+.toctree-caption,
+.rst-content .toctree-wrapper p.caption,
+.rst-content p.caption {
+  color: var(--primary-800) !important;
+  font-weight: 600;
+}
+
+/* ===================================================================
+   Code Blocks & Syntax Highlighting
+   ================================================================== */
+
+/* Code block container */
+.highlight {
+  border-radius: 8px;
+  border: 1px solid var(--primary-200);
+  background: linear-gradient(135deg, #fdeff8, #fff9ff, #ffffff) !important;
+  margin: 1.5rem 0;
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+  position: relative;
+}
+
+/* Code block accent line */
+.highlight::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--primary-200), var(--primary-400));
+}
+
+/* Code content */
+.highlight pre {
+  padding: 1.5rem;
+  line-height: 1.6;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  margin: 0;
+  background: transparent !important;
+  border: none;
+  overflow-x: auto;
+  color: var(--gray-800);
+}
+
+/* Inline code */
+code {
+  background: linear-gradient(135deg, var(--primary-50), #fef7f7) !important;
+  color: var(--primary-300) !important;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  font-weight: 600;
+  border: 1px solid var(--primary-200);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Syntax highlighting - Pink/Red theme */
+.highlight .k, .highlight .kw { color: #d946ef; font-weight: 700; } /* Keywords */
+.highlight .kn, .highlight .kd, .highlight .kc { color: #c026d3; font-weight: 600; } /* Import, declarations */
+.highlight .s, .highlight .s1, .highlight .s2 { color: var(--primary-500); font-weight: 500; } /* Strings */
+.highlight .c, .highlight .c1, .highlight .cm { color: var(--gray-500); font-style: italic; opacity: 0.8; } /* Comments */
+.highlight .n, .highlight .na { color: var(--gray-800); } /* Names */
+.highlight .nb { color: var(--accent-red); font-weight: 600; } /* Built-ins */
+.highlight .nf { color: var(--primary-700); font-weight: 700; } /* Functions */
+.highlight .nc { color: var(--primary-600); font-weight: 700; } /* Classes */
+.highlight .mi, .highlight .mf { color: var(--primary-400); font-weight: 600; } /* Numbers */
+.highlight .o, .highlight .ow { color: var(--gray-600); font-weight: 500; } /* Operators */
+.highlight .p { color: var(--gray-500); } /* Punctuation */
+
+/* ===================================================================
+   Admonitions
+   ================================================================== */
+
+.admonition {
+  border-radius: 8px;
+  border: none;
+  margin: 1.5rem 0;
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+  background: white;
+}
+
+.admonition-title {
+  padding: 1rem 1.25rem;
+  margin: 0;
+  font-weight: 700;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.admonition p {
+  padding: 1.25rem;
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* Admonition types */
+.admonition.note {
+  border-left: 4px solid var(--primary-600);
+}
+.admonition.note .admonition-title {
+  background: linear-gradient(135deg, var(--primary-100), var(--primary-50));
+  color: var(--primary-800);
+}
+
+.admonition.warning {
+  border-left: 4px solid var(--accent-orange);
+}
+.admonition.warning .admonition-title {
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  color: #92400e;
+}
+
+.admonition.important {
+  border-left: 4px solid var(--accent-green);
+}
+.admonition.important .admonition-title {
+  background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+  color: #065f46;
+}
+
+.admonition.tip {
+  border-left: 4px solid var(--accent-purple);
+}
+.admonition.tip .admonition-title {
+  background: linear-gradient(135deg, #ede9fe, #f3e8ff);
+  color: #5b21b6;
+}
+
+/* ===================================================================
+   Tables
+   ================================================================== */
+
+.wy-table-responsive table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1.5rem 0;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--gray-200);
+}
+
+.wy-table-responsive table th {
+  background: linear-gradient(135deg, var(--primary-50), #ffffff);
+  padding: 1rem 1.25rem;
+  text-align: left;
+  font-weight: 700;
+  color: var(--gray-800);
+  border-bottom: 2px solid var(--primary-600);
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.wy-table-responsive table td {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--gray-100);
+  color: var(--gray-700);
+}
+
+.wy-table-responsive table tr:hover {
+  background: linear-gradient(90deg, var(--primary-50) 0%, transparent 100%);
+}
+
+/* ===================================================================
+   API Documentation
+   ================================================================== */
+
+.class > dt,
+.function > dt,
+.method > dt {
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--gray-800);
+  box-shadow: var(--shadow-sm);
+}
+
+.sig-name {
+  color: var(--primary-700);
+  font-weight: 700;
+}
+
+.sig-param {
+  color: var(--accent-red);
+  font-style: italic;
+}
+
+/* ===================================================================
+   Responsive Design
+   ================================================================== */
+
+@media screen and (max-width: 768px) {
+  .wy-menu-vertical a {
+    font-size: 14px;
+    padding: 12px 16px;
+  }
+
+  h1 {
+    font-size: 2rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+  }
+
+  .highlight pre {
+    padding: 1rem;
+    font-size: 13px;
+  }
+
+  code {
+    font-size: 0.8em;
+    padding: 2px 6px;
+  }
+}
+
+/* ===================================================================
+   RTD Theme Compatibility
+   ================================================================== */
+
+/* Ensure RTD mobile menu works properly */
+.wy-nav-top {
+  background: var(--primary-600) !important;
+}
+
+.wy-nav-top a {
+  color: white !important;
+}
+
+/* RTD version selector styling */
+.rst-versions {
+  border-top: 2px solid var(--primary-600);
+}
+
+.rst-versions .rst-current-version {
+  background: var(--primary-700);
+}
+
+.rst-versions .rst-current-version .fa {
+  color: var(--primary-200);
+}
+
+/* RTD search results */
+.wy-side-nav-search .wy-dropdown > a:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* ===================================================================
+   Loading States & Performance
+   ================================================================== */
+
+/* Loading state */
+body.loading {
+  opacity: 0.9;
+}
+
+body.loaded {
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+/* Search focus enhancement */
+.wy-side-nav-search.search-focused {
+  box-shadow: 0 0 20px rgba(219, 39, 119, 0.3);
+}
+
+/* Copy button styles (fallback if sphinx-copybutton not available) */
+.copy-btn:hover {
+  background: var(--primary-700) !important;
+  transform: scale(1.05);
+}
+
+/* ===================================================================
+   Accessibility & Performance
+   ================================================================== */
+
+/* Focus states */
+*:focus {
+  outline: 2px solid var(--primary-600);
+  outline-offset: 2px;
+}
+
+/* Skip link for screen readers */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 6px;
+  background: var(--primary-600);
+  color: white;
+  padding: 8px;
+  text-decoration: none;
+  border-radius: 0 0 4px 4px;
+  z-index: 1000;
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  :root {
+    --primary-600: #000;
+    --primary-700: #333;
+    --gray-600: #000;
+    --gray-700: #000;
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .copy-btn:hover {
+    transform: none !important;
+  }
+}
+
+/* Print styles */
+@media print {
+  .highlight {
+    border: 1px solid #ccc;
+    background: #f5f5f5 !important;
+  }
+
+  .wy-nav-side {
+    display: none !important;
+  }
+
+  .copy-btn {
+    display: none !important;
+  }
+}

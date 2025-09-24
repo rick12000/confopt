@@ -1,0 +1,563 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ '**' ]
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+# Cancel in-progress workflows when a new commit is pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: pip-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/pyproject.toml', '**/requirements*.txt') }}
+        restore-keys: |
+          pip-${{ runner.os }}-${{ matrix.python-version }}-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+        pip install build twine
+
+    - name: Run tests
+      run: |
+        pytest tests/ -v --tb=short --junitxml=test-results-${{ matrix.python-version }}.xml -m "not slow"
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results-${{ matrix.python-version }}
+        path: test-results-${{ matrix.python-version }}.xml
+        retention-days: 2
+
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Cache pre-commit
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pre-commit
+        key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+    - name: Install pre-commit
+      run: |
+        python -m pip install --upgrade pip
+        pip install pre-commit
+
+    - name: Run pre-commit hooks
+      run: pre-commit run --all-files
+
+  check-package-label:
+    name: Check Package Label
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    outputs:
+      has_package_label: ${{ steps.check_label.outputs.has_label }}
+      pr_number: ${{ github.event.pull_request.number }}
+
+    steps:
+    - name: Check for Package label
+      id: check_label
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const labels = context.payload.pull_request.labels.map(label => label.name);
+          const has_package_label = labels.includes('package');
+
+          console.log('PR Labels:', labels);
+          console.log('Has package label:', has_package_label);
+
+          core.setOutput('has_label', has_package_label);
+
+          if (!has_package_label) {
+            console.log('⏭️ Skipping package deployment - no Package label found');
+          } else {
+            console.log('✅ Package label found - proceeding with deployment pipeline');
+          }
+
+  version-check:
+    name: Version Check
+    runs-on: ubuntu-latest
+    needs: [test, lint, check-package-label]
+    if: needs.check-package-label.outputs.has_package_label == 'true'
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      is_new_version: ${{ steps.check_pypi.outputs.is_new }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies for PyPI API
+      run: pip install requests packaging
+
+    - name: Get current version and compare with PyPI
+      id: version_check
+      run: |
+        python << 'EOF'
+        import re
+        import sys
+        import os
+        import requests
+        from packaging import version
+
+        def get_latest_pypi_version(package_name: str) -> str:
+            """Fetch the latest version of a PyPI package by name."""
+            url = f"https://pypi.org/pypi/{package_name}/json"
+            try:
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    return data["info"]["version"]
+                else:
+                    raise Exception(f"Package '{package_name}' returned status {response.status_code}")
+            except requests.exceptions.RequestException as e:
+                raise Exception(f"Failed to fetch package info: {e}")
+
+        # Get current version from pyproject.toml
+        with open('pyproject.toml', 'r') as f:
+            content = f.read()
+        match = re.search(r'version = "([^"]+)"', content)
+
+        if not match:
+            print("❌ ERROR: Could not find version in pyproject.toml")
+            sys.exit(1)
+
+        current_version = match.group(1)
+        package_name = "confopt"
+
+        print(f"Current version from pyproject.toml: {current_version}")
+
+        # Get latest version from PyPI
+        try:
+            pypi_version = get_latest_pypi_version(package_name)
+            print(f"Latest version on PyPI: {pypi_version}")
+        except Exception as e:
+            print(f"❌ ERROR: Could not fetch PyPI version: {e}")
+            sys.exit(1)
+
+        # Compare versions
+        try:
+            current_ver = version.parse(current_version)
+            pypi_ver = version.parse(pypi_version)
+
+            if current_ver > pypi_ver:
+                print(f"✅ Version bump detected: {pypi_version} → {current_version}")
+                print("Proceeding with deployment")
+                is_new_version = True
+            elif current_ver == pypi_ver:
+                print(f"❌ No version bump: current version {current_version} equals PyPI version {pypi_version}")
+                print("Please bump the version in pyproject.toml before deploying")
+                is_new_version = False
+                sys.exit(1)
+            else:
+                print(f"❌ Version downgrade detected: {pypi_version} → {current_version}")
+                print("Current version is lower than PyPI version - this should not happen")
+                is_new_version = False
+                sys.exit(1)
+
+        except Exception as e:
+            print(f"❌ ERROR: Could not parse versions: {e}")
+            print(f"Current: {current_version}, PyPI: {pypi_version}")
+            sys.exit(1)
+
+        # Set outputs
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"version={current_version}\n")
+            f.write(f"pypi_version={pypi_version}\n")
+            f.write(f"is_new_version={'true' if is_new_version else 'false'}\n")
+        EOF
+
+  build:
+    name: Build Python Package
+    runs-on: ubuntu-latest
+    needs: [test, lint, version-check]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+
+    - name: Build package (wheel and sdist)
+      run: python -m build
+
+    - name: Verify built packages
+      run: twine check dist/*
+
+    - name: Upload built packages
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+        retention-days: 2
+  verify_package:
+    name: Verify Package Installation
+    runs-on: ubuntu-latest
+    needs: [build]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: List built packages
+      run: |
+        echo "Built packages:"
+        ls -la dist/
+        echo ""
+        echo "Package summary:"
+        echo "Source distributions: $(ls dist/*.tar.gz 2>/dev/null | wc -l)"
+        echo "Wheels: $(ls dist/*.whl 2>/dev/null | wc -l)"
+
+    - name: Test wheel installation
+      run: |
+        # Test wheel installation
+        python -m venv test_wheel_env
+        source test_wheel_env/bin/activate
+        pip install --upgrade pip
+        pip install dist/*.whl
+
+        # Run minimal confopt test
+        python -c "
+        import numpy as np
+        from confopt.tuning import ConformalTuner
+        from confopt.wrapping import IntRange, FloatRange
+
+        # Minimal synthetic test
+        def simple_objective(configuration):
+            # Simple quadratic function with noise
+            x, y = configuration['x'], configuration['y']
+            return (x - 2)**2 + (y - 3)**2 + np.random.normal(0, 0.1)
+
+        search_space = {
+            'x': FloatRange(min_value=0.0, max_value=5.0),
+            'y': FloatRange(min_value=0.0, max_value=5.0)
+        }
+
+        tuner = ConformalTuner(
+            objective_function=simple_objective,
+            search_space=search_space,
+            minimize=True
+        )
+
+        tuner.tune(max_searches=50, n_random_searches=15, verbose=False)
+        best_params = tuner.get_best_params()
+        best_value = tuner.get_best_value()
+
+        print(f'Wheel installation and basic functionality test successful!')
+        print(f'Best params: {best_params}')
+        print(f'Best value: {best_value:.4f}')
+        "
+
+        deactivate
+        rm -rf test_wheel_env
+
+    - name: Test source distribution installation
+      run: |
+        # Test source installation
+        python -m venv test_sdist_env
+        source test_sdist_env/bin/activate
+        pip install --upgrade pip
+        pip install dist/*.tar.gz
+
+        # Run minimal confopt test
+        python -c "
+        import numpy as np
+        from confopt.tuning import ConformalTuner
+        from confopt.wrapping import IntRange, FloatRange
+
+        # Minimal synthetic test
+        def simple_objective(configuration):
+            # Simple quadratic function with noise
+            x, y = configuration['x'], configuration['y']
+            return (x - 2)**2 + (y - 3)**2 + np.random.normal(0, 0.1)
+
+        search_space = {
+            'x': FloatRange(min_value=0.0, max_value=5.0),
+            'y': FloatRange(min_value=0.0, max_value=5.0)
+        }
+
+        tuner = ConformalTuner(
+            objective_function=simple_objective,
+            search_space=search_space,
+            minimize=True
+        )
+
+        tuner.tune(max_searches=50, n_random_searches=15, verbose=False)
+        best_params = tuner.get_best_params()
+        best_value = tuner.get_best_value()
+
+        print(f'Source distribution installation and basic functionality test successful!')
+        print(f'Best params: {best_params}')
+        print(f'Best value: {best_value:.4f}')
+        "
+
+        deactivate
+        rm -rf test_sdist_env
+  test-publish:
+    name: Publish to TestPyPI
+    runs-on: ubuntu-latest
+    needs: [verify_package]
+
+    steps:
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+
+    - name: Publish to TestPyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository-url: https://test.pypi.org/legacy/
+        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        skip-existing: true  # Skip if version already exists
+
+    - name: Wait for TestPyPI propagation
+      run: sleep 30
+  verify-testpypi:
+    name: Verify TestPyPI Installation
+    runs-on: ubuntu-latest
+    needs: [test-publish]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Get version
+      id: get_version
+      run: |
+        # Get version from pyproject.toml
+        python << 'EOF'
+        import re
+        import sys
+        import os
+
+        with open('pyproject.toml', 'r') as f:
+            content = f.read()
+        match = re.search(r'version = "([^"]+)"', content)
+
+        if not match:
+            print("ERROR: Could not find version in pyproject.toml")
+            sys.exit(1)
+
+        version = match.group(1)
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"version={version}\n")
+        print(f"Current version: {version}")
+        EOF
+
+    - name: Test installation scenarios from TestPyPI
+      run: |
+        VERSION=${{ steps.get_version.outputs.version }}
+
+        # Test wheel installation from TestPyPI
+        echo "Test: Wheel installation from TestPyPI..."
+        python -m venv test_wheel_env
+        source test_wheel_env/bin/activate
+        pip install --upgrade pip
+
+        pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==$VERSION
+
+        python -c "
+        import numpy as np
+        from confopt.tuning import ConformalTuner
+        from confopt.wrapping import IntRange, FloatRange
+
+        # Minimal synthetic test
+        def simple_objective(configuration):
+            # Simple quadratic function with noise
+            x, y = configuration['x'], configuration['y']
+            return (x - 2)**2 + (y - 3)**2 + np.random.normal(0, 0.1)
+
+        search_space = {
+            'x': FloatRange(min_value=0.0, max_value=5.0),
+            'y': FloatRange(min_value=0.0, max_value=5.0)
+        }
+
+        tuner = ConformalTuner(
+            objective_function=simple_objective,
+            search_space=search_space,
+            minimize=True
+        )
+
+        tuner.tune(max_searches=50, n_random_searches=15, verbose=False)
+        best_params = tuner.get_best_params()
+        best_value = tuner.get_best_value()
+
+        print('TestPyPI wheel installation and functionality test successful!')
+        print(f'Best params: {best_params}')
+        print(f'Best value: {best_value:.4f}')
+        "
+
+        deactivate
+        rm -rf test_wheel_env
+
+
+
+        # Test source installation from TestPyPI
+        echo "Test: Source installation from TestPyPI..."
+        python -m venv test_source_env
+        source test_source_env/bin/activate
+        pip install --upgrade pip
+
+        pip install --no-binary=confopt --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ confopt==$VERSION
+
+        python -c "
+        import numpy as np
+        from confopt.tuning import ConformalTuner
+        from confopt.wrapping import IntRange, FloatRange
+
+        # Minimal synthetic test
+        def simple_objective(configuration):
+            # Simple quadratic function with noise
+            x, y = configuration['x'], configuration['y']
+            return (x - 2)**2 + (y - 3)**2 + np.random.normal(0, 0.1)
+
+        search_space = {
+            'x': FloatRange(min_value=0.0, max_value=5.0),
+            'y': FloatRange(min_value=0.0, max_value=5.0)
+        }
+
+        tuner = ConformalTuner(
+            objective_function=simple_objective,
+            search_space=search_space,
+            minimize=True
+        )
+
+        tuner.tune(max_searches=50, n_random_searches=15, verbose=False)
+        best_params = tuner.get_best_params()
+        best_value = tuner.get_best_value()
+
+        print('TestPyPI source installation and functionality test successful!')
+        print(f'Best params: {best_params}')
+        print(f'Best value: {best_value:.4f}')
+        "
+
+        deactivate
+        rm -rf test_source_env
+
+        echo "All TestPyPI installation scenarios validated successfully!"
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [verify-testpypi]
+
+    steps:
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [publish]
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+
+    - name: Create GitHub Release Draft
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v${{ needs.version-check.outputs.version }}
+        name: Release v${{ needs.version-check.outputs.version }}
+        body: |
+          ## Package Information
+          - **Version**: ${{ needs.version-check.outputs.version }}
+          - **PyPI**: https://pypi.org/project/confopt/${{ needs.version-check.outputs.version }}/
+
+          ## Changes
+          *Please add release notes and changelog information here before publishing.*
+
+          ---
+
+          **Build Information:**
+          - Commit: ${{ github.sha }}
+          - PR: #${{ needs.check-package-label.outputs.pr_number }}
+        files: dist/*
+        draft: true
+        prerelease: false

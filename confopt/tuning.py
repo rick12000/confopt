@@ -1,887 +1,741 @@
 import logging
 import random
-from copy import deepcopy
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, Dict, Tuple, get_type_hints, Literal, List
+from confopt.wrapping import ParameterRange
 
 import numpy as np
-from sklearn.metrics import mean_squared_error, accuracy_score, log_loss
-from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 from datetime import datetime
-
-from confopt.config import (
-    NON_NORMALIZING_ARCHITECTURES,
-    METRIC_PROPORTIONALITY_LOOKUP,
-    QUANTILE_ESTIMATOR_ARCHITECTURES,
+import inspect
+from confopt.utils.tracking import (
+    Trial,
+    Study,
+    RuntimeTracker,
+    StaticConfigurationManager,
+    DynamicConfigurationManager,
+    ProgressBarManager,
 )
-from confopt.estimation import (
-    QuantileConformalRegression,
-    LocallyWeightedConformalRegression,
+from confopt.utils.optimization import FixedSearcherOptimizer, DecayingSearcherOptimizer
+from confopt.selection.acquisition import (
+    QuantileConformalSearcher,
+    BaseConformalSearcher,
 )
-from confopt.optimization import derive_optimal_tuning_count, RuntimeTracker
-from confopt.preprocessing import train_val_split, remove_iqr_outliers
-from confopt.utils import get_tuning_configurations, tabularize_configurations
-
-from confopt.wrapping import TunableModel
-from sklearn.base import BaseEstimator
+from confopt.selection.sampling.bound_samplers import (
+    LowerBoundSampler,
+    PessimisticLowerBoundSampler,
+)
+from confopt.selection.sampling.thompson_samplers import ThompsonSampler
 
 logger = logging.getLogger(__name__)
 
 
-def update_model_parameters(
-    model_instance: Any, configuration: Dict, random_state: int = None
-):
+def stop_search(
+    n_remaining_configurations: int,
+    current_iter: int,
+    current_runtime: float,
+    max_runtime: Optional[float] = None,
+    max_searches: Optional[int] = None,
+) -> bool:
+    """Determine whether to terminate the hyperparameter search process.
+
+    Evaluates multiple stopping criteria to determine if the optimization should halt.
+    The function implements a logical OR of termination conditions: exhausted search space,
+    runtime budget exceeded, or iteration limit reached.
+
+    Args:
+        n_remaining_configurations: Number of configurations still available for evaluation
+        current_iter: Current iteration count in the search process
+        current_runtime: Elapsed time since search initiation in seconds
+        max_runtime: Maximum allowed runtime in seconds, None for no limit
+        max_searches: Maximum allowed iterations, None for no limit
+
+    Returns:
+        True if any stopping criterion is met, False otherwise
     """
-    Updates the attributes of an initialized model object.
+    if n_remaining_configurations == 0:
+        return True
 
-    Only attributes which are specified in the 'configuration'
-    dictionary input of this function will be overridden.
+    if max_runtime is not None:
+        if current_runtime >= max_runtime:
+            return True
 
-    Parameters
-    ----------
-    model_instance :
-        An instance of a prediction model.
-    configuration :
-        A dictionary whose keys represent the attributes of
-        the model instance that need to be overridden and whose
-        values represent what they should be overridden to.
-        Keys must match model instance attribute names.
-    random_state :
-        Random generation seed.
+    if max_searches is not None:
+        if current_iter >= max_searches:
+            return True
 
-    Returns
-    -------
-    updated_model_instance :
-        Model instance with updated attributes.
-    """
-    updated_model_instance = deepcopy(model_instance)
-    for tuning_attr_name, tuning_attr in configuration.items():
-        setattr(updated_model_instance, tuning_attr_name, tuning_attr)
-    if hasattr(updated_model_instance, "random_state"):
-        setattr(updated_model_instance, "random_state", random_state)
-    return updated_model_instance
+    return False
 
 
-def score_predictions(
-    y_obs: np.array, y_pred: np.array, scoring_function: str
-) -> float:
-    """
-    Score a model's predictions against observed realizations.
+class ConformalTuner:
+    """Conformal prediction-based hyperparameter optimization framework.
 
-    Parameters
-    ----------
-    y_obs :
-        Observed target variable realizations.
-    y_pred :
-        Model predicted target variable values.
-    scoring_function :
-        Type of scoring function to use. Can be one of
-        either:
-            - 'accuracy_score'
-            - 'log_loss'
-            - 'mean_squared_error'
+    Implements a sophisticated hyperparameter optimization system that combines random search
+    initialization with conformal prediction-guided exploration. The tuner uses uncertainty
+    quantification to make statistically principled decisions about which configurations
+    to evaluate next, providing both efficiency improvements and theoretical guarantees.
 
-    Returns
-    -------
-    score :
-        Scored model predictions.
-    """
-    if scoring_function == "accuracy_score":
-        score = accuracy_score(y_true=y_obs, y_pred=y_pred)
-    elif scoring_function == "log_loss":
-        score = log_loss(y_true=y_obs, y_pred=y_pred)
-    elif scoring_function == "mean_squared_error":
-        score = mean_squared_error(y_true=y_obs, y_pred=y_pred)
-    else:
-        raise ValueError(f"{scoring_function} is not a recognized scoring function.")
+    The optimization process follows a two-phase strategy:
+    1. Random search phase: Explores the search space randomly to establish baseline performance
+    2. Conformal search phase: Uses conformal prediction models to guide configuration selection
 
-    return score
+    The framework supports adaptive retraining of prediction models, dynamic configuration
+    sampling, and multi-armed bandit optimization for automatically tuning searcher parameters.
+    Statistical validity is maintained through proper conformal prediction procedures that
+    provide distribution-free coverage guarantees.
 
+    Args:
+        objective_function: Function to optimize, must accept 'configuration' dict parameter
+        search_space: Dictionary mapping parameter names to ParameterRange objects
+        minimize: Whether to minimize (True) or maximize (False) the objective function
+        n_candidates: Number of candidate configurations to sample from the search space at
+            each iteration of conformal search
+        warm_starts: Pre-evaluated (configuration, performance) pairs to seed the search
+        dynamic_sampling: Whether to dynamically resample configuration candidates at each
+            iteration of conformal search
+        random_state: Random seed for reproducible results. Default: None.
 
-def process_and_split_estimation_data(
-    searched_configurations: np.array,
-    searched_performances: np.array,
-    train_split: float,
-    filter_outliers: bool = False,
-    outlier_scope: str = "top_and_bottom",
-    random_state: Optional[int] = None,
-) -> Tuple[np.array, np.array, np.array, np.array]:
-    """
-    Preprocess configuration data used to train conformal search estimators.
-
-    Data is split into training and validation sets, with optional
-    outlier filtering.
-
-    Parameters
-    ----------
-    searched_configurations :
-        Parameter configurations selected for search as part
-        of conformal hyperparameter optimization framework.
-    searched_performances :
-        Validation performance of each parameter configuration.
-    train_split :
-        Proportion of overall configurations that should be allocated
-        to the training set.
-    filter_outliers :
-        Whether to remove outliers from the input configuration
-        data based on performance.
-    outlier_scope :
-        Determines which outliers are removed. Takes:
-            - 'top_only': Only upper threshold outliers are removed.
-            - 'bottom_only': Only lower threshold outliers are removed.
-            - 'top_and_bottom': All outliers are removed.
-    random_state :
-        Random generation seed.
-
-    Returns
-    -------
-    X_train :
-        Training portion of configurations.
-    y_train :
-        Training portion of configuration performances.
-    X_val :
-        Validation portion of configurations.
-    y_val :
-        Validation portion of configuration performances.
-    """
-    X = searched_configurations.copy()
-    y = searched_performances.copy()
-    logger.debug(f"Minimum performance in searcher data: {y.min()}")
-    logger.debug(f"Maximum performance in searcher data: {y.max()}")
-
-    if filter_outliers:
-        X, y = remove_iqr_outliers(X=X, y=y, scope=outlier_scope)
-
-    X_train, y_train, X_val, y_val = train_val_split(
-        X=X,
-        y=y,
-        train_split=train_split,
-        normalize=False,
-        ordinal=False,
-        random_state=random_state,
-    )
-
-    return X_train, y_train, X_val, y_val
-
-
-def normalize_estimation_data(
-    training_searched_configurations: np.array,
-    validation_searched_configurations: np.array,
-    searchable_configurations: np.array,
-):
-    """
-    Normalize configuration data used to train conformal search estimators.
-
-    Parameters
-    ----------
-    training_searched_configurations :
-        Training portion of parameter configurations selected for
-        search as part of conformal optimization framework.
-    validation_searched_configurations :
-        Validation portion of parameter configurations selected for
-        search as part of conformal optimization framework.
-    searchable_configurations :
-        Larger range of parameter configurations that remain
-        un-searched (i.e. whose validation performance has not
-        yet been evaluated).
-
-    Returns
-    -------
-    normalized_training_searched_configurations :
-        Normalized training portion of searched parameter
-        configurations.
-    normalized_validation_searched_configurations :
-        Normalized validation portion of searched parameter
-        configurations.
-    normalized_searchable_configurations :
-        Normalized un-searched parameter configurations.
-    """
-    scaler = StandardScaler()
-    scaler.fit(training_searched_configurations)
-    normalized_searchable_configurations = scaler.transform(searchable_configurations)
-    normalized_training_searched_configurations = scaler.transform(
-        training_searched_configurations
-    )
-    normalized_validation_searched_configurations = scaler.transform(
-        validation_searched_configurations
-    )
-
-    return (
-        normalized_training_searched_configurations,
-        normalized_validation_searched_configurations,
-        normalized_searchable_configurations,
-    )
-
-
-def get_best_configuration_idx(
-    configuration_performance_bounds: Tuple[np.array, np.array],
-    optimization_direction: str,
-) -> int:
-    """
-    Get index of best performing parameter configuration.
-
-    Parameters
-    ----------
-    configuration_performance_bounds :
-        Tuple of upper and lower performance bound estimates
-        for each available configuration.
-    optimization_direction :
-        Whether the best configuration is one that maximizes
-        (direct) the upper bound or minimizes (inverse) the
-        lower bound.
-
-    Returns
-    -------
-    best_idx :
-        Index of best performing configuration based on
-        performance bounds.
-    """
-    (
-        performance_lower_bounds,
-        performance_higher_bounds,
-    ) = configuration_performance_bounds
-    if optimization_direction == "inverse":
-        best_idx = np.argmin(performance_lower_bounds)
-
-    elif optimization_direction == "direct":
-        best_idx = np.argmax(performance_higher_bounds)
-    else:
-        raise ValueError(
-            f"{optimization_direction} is not a valid loss direction instruction."
-        )
-
-    return best_idx
-
-
-def get_best_performance_idx(
-    custom_loss_function: str, searched_performances: List[float]
-) -> int:
-    if METRIC_PROPORTIONALITY_LOOKUP[custom_loss_function] == "direct":
-        best_performance_idx = searched_performances.index(max(searched_performances))
-    elif METRIC_PROPORTIONALITY_LOOKUP[custom_loss_function] == "inverse":
-        best_performance_idx = searched_performances.index(min(searched_performances))
-    else:
-        raise ValueError()
-
-    return best_performance_idx
-
-
-def update_adaptive_confidence_level(
-    true_confidence_level: float,
-    last_confidence_level: float,
-    breach: bool,
-    learning_rate: float,
-) -> float:
-    """
-    Update adaptive confidence level based on breach events.
-
-    The confidence level is increased or decreased based on
-    a specified learning rate and whether the last used interval
-    was breached or not.
-
-    Parameters
-    ----------
-    true_confidence_level :
-        Global confidence level specified at the beginning of
-        conformal hyperparameter search.
-    last_confidence_level :
-        Confidence level as of the last used interval.
-    learning_rate :
-        Learning rate dictating the magnitude of the confidence
-        level update.
-
-    Returns
-    -------
-    updated_confidence_level :
-        Updated confidence level.
-    """
-    updated_confidence_level = 1 - (
-        (1 - last_confidence_level)
-        + learning_rate * ((1 - true_confidence_level) - breach)
-    )
-    updated_confidence_level = min(max(0.01, updated_confidence_level), 0.99)
-    logger.debug(
-        f"Updated confidence level of {last_confidence_level} to {updated_confidence_level}."
-    )
-
-    return updated_confidence_level
-
-
-class ConformalSearcher:
-    """
-    Conformal hyperparameter searcher.
-
-    Tunes a desired model by inferentially searching a
-    specified hyperparameter space using conformal estimators.
+    Attributes:
+        study: Container for storing trial results and optimization history
+        config_manager: Handles configuration sampling and tracking
+        search_timer: Tracks total optimization runtime
     """
 
     def __init__(
         self,
-        model: BaseEstimator | TunableModel,
-        X_train: np.array,
-        y_train: np.array,
-        X_val: np.array,
-        y_val: np.array,
-        search_space: Dict,
-        prediction_type: str,
-        custom_loss_function: Optional[str] = None,
-    ):
-        """
-        Create a conformal searcher instance.
+        objective_function: callable,
+        search_space: Dict[str, ParameterRange],
+        minimize: bool = True,
+        n_candidates: int = 5000,
+        warm_starts: Optional[List[Tuple[Dict, float]]] = None,
+        dynamic_sampling: bool = True,
+    ) -> None:
+        self.objective_function = objective_function
+        self.check_objective_function()
 
-        Parameters
-        ----------
-        model :
-            Model object to tune through conformal search. Must
-            be an instance with a .fit() and .predict() method.
-        X_train :
-            Training portion of explanatory variable examples.
-        y_train :
-            Training portion of target variable examples.
-        X_val :
-            Validation portion of explanatory variable examples.
-        y_val :
-            Validation portion of target variable examples.
-        search_space :
-            Dictionary mapping parameter names to possible parameter
-            values they can take.
-        prediction_type :
-            The type of prediction to perform on the X and y data.
-            Can be one of either:
-                - 'regression'
-                - 'classification'
-        custom_loss_function :
-            Loss functions are inferred based on the type of prediction
-            to perform (regression or classification), but if it's
-            desirable to use a specific loss function one may be
-            specified here. Current support is limited to:
-                - 'mean_squared_error'
-                - 'accuracy_score'
-                - 'log_loss'
-        """
-
-        if isinstance(model, BaseEstimator) or isinstance(model, TunableModel):
-            self.model = model
-        else:
-            raise ValueError(
-                "Model to tune must be a sklearn BaseEstimator model or wrapped as subclass of TunableModel abstract class."
-            )
-
-        self.X_train = X_train
-        self.y_train = y_train
-        self.X_val = X_val
-        self.y_val = y_val
         self.search_space = search_space
-        self.prediction_type = prediction_type
+        self.minimize = minimize
+        self.metric_sign = 1 if minimize else -1
+        self.warm_starts = warm_starts
+        self.n_candidates = n_candidates
+        self.dynamic_sampling = dynamic_sampling
+        self.config_manager = None
 
-        self.custom_loss_function = (
-            self._set_default_evaluation_metric()
-            if custom_loss_function is None
-            else custom_loss_function
-        )
-        self.tuning_configurations = self._get_tuning_configurations()
+    def check_objective_function(self) -> None:
+        """Validate objective function signature and type annotations.
 
-    def _set_default_evaluation_metric(self) -> str:
-        if self.prediction_type == "regression":
-            custom_loss_function = "mean_squared_error"
-        elif self.prediction_type == "classification":
-            custom_loss_function = "accuracy_score"
-        else:
+        Ensures the objective function conforms to the required interface:
+        single parameter named 'configuration' of type Dict, returning numeric value.
+        This validation prevents runtime errors and ensures compatibility with
+        the optimization framework.
+
+        Raises:
+            ValueError: If function signature doesn't match requirements
+            TypeError: If type annotations are incorrect
+        """
+        signature = inspect.signature(self.objective_function)
+        args = list(signature.parameters.values())
+
+        if len(args) != 1:
+            raise ValueError("Objective function must take exactly one argument.")
+
+        first_arg = args[0]
+        if first_arg.name != "configuration":
             raise ValueError(
-                f"Unable to auto-allocate evaluation metric for {self.prediction_type} prediction type."
+                "The objective function must take exactly one argument named 'configuration'."
             )
-        return custom_loss_function
 
-    def _get_tuning_configurations(self):
-        logger.debug("Creating hyperparameter space...")
-        tuning_configurations = get_tuning_configurations(
-            parameter_grid=self.search_space, n_configurations=1000, random_state=1234
-        )
-        return tuning_configurations
+        type_hints = get_type_hints(self.objective_function)
+        if "configuration" in type_hints and type_hints["configuration"] is not Dict:
+            raise TypeError(
+                "The 'configuration' argument of the objective must be of type Dict."
+            )
+        if "return" in type_hints and type_hints["return"] not in [
+            int,
+            float,
+            np.number,
+        ]:
+            raise TypeError(
+                "The return type of the objective function must be numeric (int, float, or np.number)."
+            )
 
-    def _evaluate_configuration_performance(
-        self, configuration: Dict, random_state: Optional[int] = None
-    ) -> float:
+    def process_warm_starts(self) -> None:
+        """Initialize optimization with pre-evaluated configurations.
+
+        Processes warm start configurations by marking them as searched and creating
+        corresponding trial records. This allows the optimization to begin with
+        prior knowledge, potentially accelerating convergence by skipping known
+        poor configurations and leveraging good starting points.
+
+        The warm start configurations are treated as iteration 0 data and assigned
+        the 'warm_start' acquisition source for tracking purposes.
         """
-        Evaluate the performance of a specified parameter configuration.
+        for idx, (config, performance) in enumerate(self.warm_starts):
+            self.config_manager.mark_as_searched(config, performance)
+            trial = Trial(
+                iteration=idx,
+                timestamp=datetime.now(),
+                configuration=config.copy(),
+                tabularized_configuration=self.config_manager.listify_configs([config])[
+                    0
+                ],
+                performance=performance,
+                acquisition_source="warm_start",
+            )
+            self.study.append_trial(trial)
 
-        Parameters
-        ----------
-        configuration :
-            Parameter configuration for the base model being tuned using
-            conformal search.
-        random_state :
-            Random generation seed.
+    def initialize_tuning_resources(self) -> None:
+        """Initialize core optimization components and data structures.
 
-        Returns
-        -------
-        performance :
-            Specified configuration's validation performance.
+        Sets up the study container for trial tracking, configuration manager for
+        handling search space sampling, and processes any warm start configurations.
+        The configuration manager uses the optimized incremental approach for
+        maximum performance.
         """
-        logger.debug(f"Evaluating model with configuration: {configuration}")
-
-        updated_model = update_model_parameters(
-            model_instance=self.model,
-            configuration=configuration,
-            random_state=random_state,
+        self.study = Study(
+            metric_optimization="minimize" if self.minimize else "maximize"
         )
-        updated_model.fit(X=self.X_train, y=self.y_train)
 
-        if self.custom_loss_function in ["log_loss"]:
-            y_pred = updated_model.predict_proba(self.X_val)
+        # Instantiate appropriate configuration manager based on dynamic_sampling setting
+        if self.dynamic_sampling:
+            self.config_manager = DynamicConfigurationManager(
+                search_space=self.search_space,
+                n_candidate_configurations=self.n_candidates,
+            )
         else:
-            y_pred = updated_model.predict(self.X_val)
+            self.config_manager = StaticConfigurationManager(
+                search_space=self.search_space,
+                n_candidate_configurations=self.n_candidates,
+            )
 
-        performance = score_predictions(
-            y_obs=self.y_val, y_pred=y_pred, scoring_function=self.custom_loss_function
+        if self.warm_starts:
+            self.process_warm_starts()
+
+    def _evaluate_configuration(self, configuration: Dict) -> Tuple[float, float]:
+        """Evaluate a configuration and measure execution time.
+
+        Executes the objective function with the given configuration while tracking
+        runtime. This method provides the core evaluation mechanism used throughout
+        both random and conformal search phases.
+
+        Args:
+            configuration: Parameter configuration dictionary to evaluate
+
+        Returns:
+            Tuple of (performance_value, evaluation_runtime)
+        """
+        runtime_tracker = RuntimeTracker()
+        performance = self.objective_function(configuration=configuration)
+        runtime = runtime_tracker.return_runtime()
+        return performance, runtime
+
+    def random_search(
+        self,
+        max_random_iter: int,
+        max_runtime: Optional[int] = None,
+        max_searches: Optional[int] = None,
+        verbose: bool = True,
+    ) -> None:
+        """Execute random search phase to initialize optimization with baseline data.
+
+        Performs uniform random sampling of configurations to establish initial
+        performance landscape understanding. This phase is crucial for subsequent
+        conformal prediction model training, as it provides the foundational
+        dataset for uncertainty quantification.
+
+        Args:
+            max_random_iter: Maximum number of random configurations to evaluate
+            max_runtime: Optional runtime budget in seconds
+            max_searches: Optional total iteration limit
+            verbose: Whether to display progress information
+        """
+
+        available_configs = self.config_manager.get_searchable_configurations()
+        adj_n_searches = min(max_random_iter, len(available_configs))
+        if adj_n_searches == 0:
+            logger.warning("No configurations available for random search")
+
+        search_idxs = np.random.choice(
+            len(available_configs), size=adj_n_searches, replace=False
+        )
+        sampled_configs = [available_configs[idx] for idx in search_idxs]
+
+        progress_iter = (
+            tqdm(sampled_configs, desc="Random search: ")
+            if verbose
+            else sampled_configs
         )
 
-        return performance
-
-    def _random_search(
-        self,
-        n_searches: int,
-        max_runtime: int,
-        verbose: bool = True,
-        random_state: Optional[int] = None,
-    ) -> Tuple[List, List, List, float]:
-        """
-        Randomly search a portion of the model's hyperparameter space.
-
-        Parameters
-        ----------
-        n_searches :
-            Number of random searches to perform.
-        max_runtime :
-            Maximum runtime after which search stops.
-        verbose :
-            Whether to print updates during code execution.
-        random_state :
-            Random generation seed.
-
-        Returns
-        -------
-        searched_configurations :
-            List of parameter configurations that were randomly
-            selected and searched.
-        searched_performances :
-            Search performance of each searched configuration,
-            consisting of out of sample, validation performance
-            of a model trained using the searched configuration.
-        searched_timestamps :
-            List of timestamps corresponding to each searched
-            hyperparameter configuration.
-        runtime_per_search :
-            Average time taken to train the model being tuned
-            across configurations, in seconds.
-        """
-        random.seed(random_state)
-        np.random.seed(random_state)
-
-        searched_configurations = []
-        searched_performances = []
-        searched_timestamps = []
-
-        skipped_configuration_counter = 0
-        runtime_per_search = 0
-
-        shuffled_tuning_configurations = self.tuning_configurations.copy()
-        random.seed(random_state)
-        random.shuffle(shuffled_tuning_configurations)
-        randomly_sampled_configurations = shuffled_tuning_configurations[
-            : min(n_searches, len(self.tuning_configurations))
-        ]
-
-        model_training_timer = RuntimeTracker()
-        model_training_timer.pause_runtime()
-        if verbose:
-            randomly_sampled_configurations = tqdm(
-                randomly_sampled_configurations, desc="Random search: "
-            )
-        for config_idx, hyperparameter_configuration in enumerate(
-            randomly_sampled_configurations
-        ):
-            model_training_timer.resume_runtime()
-            validation_performance = self._evaluate_configuration_performance(
-                configuration=hyperparameter_configuration, random_state=random_state
-            )
-            model_training_timer.pause_runtime()
+        for config in progress_iter:
+            validation_performance, training_time = self._evaluate_configuration(config)
 
             if np.isnan(validation_performance):
-                skipped_configuration_counter += 1
                 logger.debug(
                     "Obtained non-numerical performance, skipping configuration."
                 )
+                self.config_manager.add_to_banned_configurations(config)
                 continue
 
-            searched_configurations.append(hyperparameter_configuration.copy())
-            searched_performances.append(validation_performance)
-            searched_timestamps.append(datetime.now())
+            self.config_manager.mark_as_searched(config, validation_performance)
 
-            runtime_per_search = (
-                runtime_per_search + model_training_timer.return_runtime()
-            ) / (config_idx - skipped_configuration_counter + 1)
-
-            logger.debug(
-                f"Random search iter {config_idx} performance: {validation_performance}"
-            )
-
-            if self.search_timer.return_runtime() > max_runtime:
-                raise RuntimeError(
-                    "confopt preliminary random search exceeded total runtime budget. "
-                    "Retry with larger runtime budget or set iteration-capped budget instead."
-                )
-
-        return (
-            searched_configurations,
-            searched_performances,
-            searched_timestamps,
-            runtime_per_search,
-        )
-
-    @staticmethod
-    def _set_conformal_validation_split(X: np.array) -> float:
-        if len(X) <= 30:
-            validation_split = 5 / len(X)
-        else:
-            validation_split = 0.33
-        return validation_split
-
-    def search(
-        self,
-        runtime_budget: int,
-        confidence_level: float = 0.8,
-        conformal_search_estimator: str = "qgbm",
-        n_random_searches: int = 20,
-        conformal_retraining_frequency: int = 1,
-        enable_adaptive_intervals: bool = True,
-        conformal_learning_rate: float = 0.1,
-        verbose: bool = True,
-        random_state: Optional[int] = None,
-    ):
-        """
-        Search model hyperparameter space using conformal estimators.
-
-        Model and hyperparameter space are defined in the initialization
-        of this class. This method takes as inputs a limit on the duration
-        of search and several overrides for search behaviour.
-
-        Search involves randomly evaluating an initial number of hyperparameter
-        configurations, then training a conformal estimator on the relationship
-        between configurations and performance to optimally select the next
-        best configuration to sample at each subsequent sampling event.
-        Upon exceeding the maximum search duration, search results are stored
-        in the class instance and accessible via dedicated externalizing methods.
-
-        Parameters
-        ----------
-        runtime_budget :
-            Maximum time budget to allocate to hyperparameter search in seconds.
-            After the budget is exceeded, search stops and results are stored in
-            the instance for later access.
-            An error will be raised if the budget is not sufficient to carry out
-            conformal search, in which case it should be raised.
-        confidence_level :
-            Confidence level used during construction of conformal searchers'
-            intervals. The confidence level controls the exploration/exploitation
-            tradeoff, with smaller values making search greedier.
-            Confidence level must be bound between [0, 1].
-        conformal_search_estimator :
-            String identifier specifying which type of estimator should be
-            used to infer model hyperparameter performance.
-            Supported estimators include:
-                - 'qgbm' (default): quantile gradient boosted machine.
-                - 'qrf': quantile random forest.
-                - 'kr': kernel ridge.
-                - 'gp': gaussian process.
-                - 'gbm': gradient boosted machine.
-                - 'knn': k-nearest neighbours.
-                - 'rf': random forest.
-                - 'dnn': dense neural network.
-        n_random_searches :
-            Number of initial random searches to perform before switching
-            to inferential search. A larger number delays the beginning of
-            conformal search, but provides the search estimator with more
-            data and more robust patterns. The more parameters are being
-            optimized during search, the more random search observations
-            are needed before the conformal searcher can extrapolate
-            effectively. This value defaults to 20, which is the minimum
-            advisable number before the estimator will struggle to train.
-        conformal_retraining_frequency :
-            Sampling interval after which conformal search estimators should be
-            retrained. Eg. an interval of 5, would mean conformal estimators
-            are retrained after every 5th sampled/searched parameter configuration.
-            A lower retraining frequency is always desirable, but may be increased
-            to reduce runtime.
-        enable_adaptive_intervals :
-            Whether to allow conformal intervals used for configuration sampling
-            to change after each sampling event. This allows for better interval
-            coverage under covariate shift and is enabled by default.
-        conformal_learning_rate :
-            Learning rate dictating how rapidly adaptive intervals are updated.
-        verbose :
-            Whether to print updates during code execution.
-        random_state :
-            Random generation seed.
-        """
-
-        self.random_state = random_state
-        self.search_timer = RuntimeTracker()
-
-        (
-            self.searched_configurations,
-            self.searched_performances,
-            self.searched_timestamps,
-            runtime_per_search,
-        ) = self._random_search(
-            n_searches=n_random_searches,
-            max_runtime=runtime_budget,
-            verbose=verbose,
-            random_state=random_state,
-        )
-
-        search_model_tuning_count = 0
-
-        search_idx_range = range(len(self.tuning_configurations) - n_random_searches)
-        search_progress_bar = tqdm(total=runtime_budget, desc="Conformal search: ")
-        for config_idx in search_idx_range:
-            if verbose:
-                search_progress_bar.update(
-                    int(self.search_timer.return_runtime()) - search_progress_bar.n
-                )
-            searchable_configurations = [
-                configuration
-                for configuration in self.tuning_configurations
-                if configuration not in self.searched_configurations
-            ]
-            tabularized_searchable_configurations = tabularize_configurations(
-                configurations=searchable_configurations
-            ).to_numpy()
-            tabularized_searched_configurations = tabularize_configurations(
-                configurations=self.searched_configurations.copy()
-            ).to_numpy()
-
-            validation_split = ConformalSearcher._set_conformal_validation_split(
-                tabularized_searched_configurations
-            )
-            remove_outliers = (
-                True
-                if self.custom_loss_function == "log_loss"
-                or self.prediction_type == "regression"
-                else False
-            )
-            outlier_scope = "top_only"
-            (
-                X_train_conformal,
-                y_train_conformal,
-                X_val_conformal,
-                y_val_conformal,
-            ) = process_and_split_estimation_data(
-                searched_configurations=tabularized_searched_configurations,
-                searched_performances=np.array(self.searched_performances),
-                train_split=(1 - validation_split),
-                filter_outliers=remove_outliers,
-                outlier_scope=outlier_scope,
-                random_state=random_state,
-            )
-
-            if conformal_search_estimator.lower() not in NON_NORMALIZING_ARCHITECTURES:
-                (
-                    X_train_conformal,
-                    X_val_conformal,
-                    tabularized_searchable_configurations,
-                ) = normalize_estimation_data(
-                    training_searched_configurations=X_train_conformal,
-                    validation_searched_configurations=X_val_conformal,
-                    searchable_configurations=tabularized_searchable_configurations,
-                )
-
-            hit_retraining_interval = config_idx % conformal_retraining_frequency == 0
-            if config_idx == 0 or hit_retraining_interval:
-                if config_idx == 0:
-                    latest_confidence_level = confidence_level
-
-                if conformal_search_estimator in QUANTILE_ESTIMATOR_ARCHITECTURES:
-                    conformal_regressor = QuantileConformalRegression(
-                        quantile_estimator_architecture=conformal_search_estimator
-                    )
-
-                    conformal_regressor.fit(
-                        X_train=X_train_conformal,
-                        y_train=y_train_conformal,
-                        X_val=X_val_conformal,
-                        y_val=y_val_conformal,
-                        confidence_level=latest_confidence_level,
-                        tuning_iterations=search_model_tuning_count,
-                        random_state=random_state,
-                    )
-
-                else:
-                    (
-                        HR_X_pe_fitting,
-                        HR_y_pe_fitting,
-                        HR_X_ve_fitting,
-                        HR_y_ve_fitting,
-                    ) = train_val_split(
-                        X_train_conformal,
-                        y_train_conformal,
-                        train_split=0.75,
-                        normalize=False,
-                        random_state=random_state,
-                    )
-                    logger.debug(
-                        f"Obtained sub training set of size {HR_X_pe_fitting.shape} "
-                        f"and sub validation set of size {HR_X_ve_fitting.shape}"
-                    )
-
-                    conformal_regressor = LocallyWeightedConformalRegression(
-                        point_estimator_architecture=conformal_search_estimator,
-                        demeaning_estimator_architecture=conformal_search_estimator,
-                        variance_estimator_architecture=conformal_search_estimator,
-                    )
-
-                    conformal_regressor.fit(
-                        X_pe=HR_X_pe_fitting,
-                        y_pe=HR_y_pe_fitting,
-                        X_ve=HR_X_ve_fitting,
-                        y_ve=HR_y_ve_fitting,
-                        X_val=X_val_conformal,
-                        y_val=y_val_conformal,
-                        tuning_iterations=search_model_tuning_count,
-                        random_state=random_state,
-                    )
-
-            hyperreg_model_runtime_per_iter = conformal_regressor.training_time
-            search_model_tuning_count = derive_optimal_tuning_count(
-                baseline_model_runtime=runtime_per_search,
-                search_model_runtime=hyperreg_model_runtime_per_iter,
-                search_model_retraining_freq=conformal_retraining_frequency,
-                search_to_baseline_runtime_ratio=0.3,
-            )
-
-            (
-                parameter_performance_lower_bounds,
-                parameter_performance_higher_bounds,
-            ) = conformal_regressor.predict(
-                X=tabularized_searchable_configurations,
-                confidence_level=latest_confidence_level,
-            )
-
-            maximal_idx = get_best_configuration_idx(
-                configuration_performance_bounds=(
-                    parameter_performance_lower_bounds,
-                    parameter_performance_higher_bounds,
-                ),
-                optimization_direction=METRIC_PROPORTIONALITY_LOOKUP[
-                    self.custom_loss_function
+            trial = Trial(
+                iteration=len(self.study.trials),
+                timestamp=datetime.now(),
+                configuration=config.copy(),
+                tabularized_configuration=self.config_manager.listify_configs([config])[
+                    0
                 ],
+                performance=validation_performance,
+                acquisition_source="rs",
+                target_model_runtime=training_time,
             )
+            self.study.append_trial(trial)
 
-            maximal_parameter = searchable_configurations[maximal_idx].copy()
-            validation_performance = self._evaluate_configuration_performance(
-                configuration=maximal_parameter, random_state=random_state
+            searchable_count = self.config_manager.get_searchable_configurations_count()
+            current_runtime = self.search_timer.return_runtime()
+
+            stop = stop_search(
+                n_remaining_configurations=searchable_count,
+                current_runtime=current_runtime,
+                max_runtime=max_runtime,
+                current_iter=len(self.study.trials),
+                max_searches=max_searches,
             )
-            logger.debug(
-                f"Conformal search iter {config_idx} performance: {validation_performance}"
-            )
-
-            if np.isnan(validation_performance):
-                continue
-
-            if (
-                validation_performance
-                > parameter_performance_higher_bounds[maximal_idx]
-            ) or (
-                validation_performance < parameter_performance_lower_bounds[maximal_idx]
-            ):
-                is_last_interval_breached = True
-            else:
-                is_last_interval_breached = False
-
-            if enable_adaptive_intervals:
-                latest_confidence_level = update_adaptive_confidence_level(
-                    true_confidence_level=confidence_level,
-                    last_confidence_level=latest_confidence_level,
-                    breach=is_last_interval_breached,
-                    learning_rate=conformal_learning_rate,
-                )
-
-            self.searched_configurations.append(maximal_parameter.copy())
-            self.searched_performances.append(validation_performance)
-            self.searched_timestamps.append(datetime.now())
-
-            if self.search_timer.return_runtime() > runtime_budget:
-                if verbose:
-                    search_progress_bar.update(runtime_budget - search_progress_bar.n)
-                    search_progress_bar.close()
+            if stop:
                 break
 
-    def get_best_params(self) -> Dict:
-        """
-        Extract hyperparameters from best performing parameter
-        configuration identified during conformal search.
+    def setup_conformal_search_resources(
+        self,
+        verbose: bool,
+        max_runtime: Optional[int],
+        max_searches: Optional[int],
+    ) -> Tuple[ProgressBarManager, float]:
+        """Initialize progress tracking and iteration limits for conformal search.
 
-        Returns
-        -------
-        best_params :
-            Best performing model hyperparameters.
+        Sets up the progress bar manager for displaying search progress and calculates
+        the maximum number of conformal search iterations based on total limits and
+        already completed trials from previous phases.
+
+        Args:
+            verbose: Whether to display progress information
+            max_runtime: Optional maximum runtime in seconds
+            max_searches: Optional maximum total iterations
+
+        Returns:
+            Tuple of (progress_manager, conformal_max_searches)
         """
-        best_performance_idx = get_best_performance_idx(
-            custom_loss_function=self.custom_loss_function,
-            searched_performances=self.searched_performances,
+        progress_manager = ProgressBarManager(verbose=verbose)
+        progress_manager.create_progress_bar(
+            max_runtime=max_runtime,
+            max_searches=max_searches,
+            current_trials=len(self.study.trials),
+            description="Conformal search",
         )
-        best_params = self.searched_configurations[best_performance_idx]
 
-        return best_params
+        conformal_max_searches = (
+            max_searches - len(self.study.trials)
+            if max_searches is not None
+            else float("inf")
+        )
+
+        return progress_manager, conformal_max_searches
+
+    def initialize_searcher_optimizer(
+        self,
+        optimizer_framework: Optional[str],
+    ):
+        """Initialize searcher parameter tuner.
+
+        Args:
+            optimizer_framework: Tuning strategy ('decaying', 'fixed', None)
+
+        Returns:
+            Configured optimizer instance
+        """
+        if optimizer_framework == "fixed":
+            optimizer = FixedSearcherOptimizer(
+                n_tuning_episodes=10,
+                tuning_interval=20,
+            )
+        elif optimizer_framework == "decaying":
+            optimizer = DecayingSearcherOptimizer(
+                n_tuning_episodes=10,
+                initial_tuning_interval=10,
+                decay_rate=0.1,
+                decay_type="linear",
+                max_tuning_interval=40,
+            )
+        elif optimizer_framework is None:
+            optimizer = FixedSearcherOptimizer(
+                n_tuning_episodes=0,
+                tuning_interval=1,
+            )
+        else:
+            raise ValueError(
+                "optimizer_framework must be either 'fixed', 'decaying', or None."
+            )
+        return optimizer
+
+    def retrain_searcher(
+        self,
+        searcher: BaseConformalSearcher,
+        X: np.array,
+        y: np.array,
+        tuning_count: int,
+    ) -> float:
+        """Train conformal prediction searcher on accumulated data.
+
+        Fits the conformal prediction model using the provided data,
+        tracking training time and model performance for adaptive parameter
+        optimization. The tuning_count parameter controls internal hyperparameter
+        optimization within the searcher.
+
+        Args:
+            searcher: Conformal searcher instance to train
+            X: Feature matrix (sign-adjusted)
+            y: Target values (sign-adjusted)
+            tuning_count: Number of internal tuning iterations
+
+        Returns:
+            Training runtime in seconds
+        """
+        runtime_tracker = RuntimeTracker()
+        searcher.fit(
+            X=X,
+            y=y,
+            tuning_iterations=tuning_count,
+        )
+
+        training_runtime = runtime_tracker.return_runtime()
+        return training_runtime
+
+    def select_next_configuration(
+        self,
+        searcher: BaseConformalSearcher,
+        searchable_configs: List,
+        transformed_configs: np.array,
+    ) -> Dict:
+        """Select the most promising configuration using conformal predictions.
+
+        Uses the conformal searcher to predict lower bounds for all available
+        configurations and selects the one with the minimum predicted lower bound.
+        This implements a pessimistic acquisition strategy that favors configurations
+        with high confidence of good performance.
+
+        Args:
+            searcher: Trained conformal searcher for predictions
+            searchable_configs: List of available configuration dictionaries
+            transformed_configs: Scaled feature matrix for configurations
+
+        Returns:
+            Selected configuration dictionary
+        """
+        bounds = searcher.predict(X=transformed_configs)
+        next_idx = np.argmin(bounds)
+        next_config = searchable_configs[next_idx]
+        return next_config
+
+    def get_interval_if_applicable(
+        self,
+        searcher: BaseConformalSearcher,
+        transformed_config: np.array,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        """Get prediction interval bounds if supported by searcher.
+
+        Returns the lower and upper bounds of the prediction interval for
+        configurations using lower bound samplers. This provides the raw
+        interval information for storage and analysis.
+
+        Args:
+            searcher: Conformal searcher instance
+            transformed_config: Scaled configuration features
+
+        Returns:
+            Tuple of (lower_bound, upper_bound) if applicable, (None, None) otherwise
+        """
+        if isinstance(
+            searcher.sampler, (LowerBoundSampler, PessimisticLowerBoundSampler)
+        ):
+            lower_bound, upper_bound = searcher.get_interval(X=transformed_config)
+            return lower_bound, upper_bound
+        else:
+            return None, None
+
+    def update_optimizer_parameters(
+        self,
+        optimizer,
+        search_iter: int,
+    ) -> Tuple[int, int]:
+        """Update multi-armed bandit optimizer and select new parameter values.
+
+        Updates the parameter optimizer with the current search iteration and
+        selects new parameter values for subsequent iterations.
+
+        Args:
+            optimizer: Multi-armed bandit optimizer instance
+            search_iter: Current search iteration number
+
+        Returns:
+            Tuple of (new_tuning_count, new_searcher_retuning_frequency)
+        """
+        optimizer.update(
+            search_iter=search_iter,
+        )
+
+        new_tuning_count, new_searcher_retuning_frequency = optimizer.select_arm()
+        return new_tuning_count, new_searcher_retuning_frequency
+
+    def conformal_search(
+        self,
+        searcher: BaseConformalSearcher,
+        verbose: bool,
+        max_searches: Optional[int],
+        max_runtime: Optional[int],
+        optimizer_framework: Optional[str] = None,
+    ) -> None:
+        """Execute conformal prediction-guided hyperparameter search.
+
+        Implements the main conformal search loop that iteratively trains conformal
+        prediction models, selects promising configurations based on uncertainty
+        quantification, and updates the models with new observations.
+
+        Args:
+            searcher: Conformal prediction searcher for configuration selection
+            verbose: Whether to display search progress
+            max_searches: Maximum total iterations including previous phases
+            max_runtime: Maximum total runtime budget in seconds
+            optimizer_framework: Parameter tuning strategy
+        """
+        (
+            progress_manager,
+            conformal_max_searches,
+        ) = self.setup_conformal_search_resources(verbose, max_runtime, max_searches)
+        optimizer = self.initialize_searcher_optimizer(
+            optimizer_framework=optimizer_framework,
+        )
+
+        tuning_count = 0
+        searcher_retuning_frequency = 1
+        training_runtime = 0
+
+        for search_iter in range(conformal_max_searches):
+            progress_manager.update_progress(
+                current_runtime=(
+                    self.search_timer.return_runtime() if max_runtime else None
+                ),
+                iteration_count=1 if max_searches else 0,
+            )
+
+            X = self.config_manager.tabularize_configs(
+                self.config_manager.searched_configs
+            )
+            y = np.array(self.config_manager.searched_performances) * self.metric_sign
+
+            searchable_configs = self.config_manager.get_searchable_configurations()
+            X_searchable = self.config_manager.tabularize_configs(searchable_configs)
+
+            if search_iter == 0 or search_iter % 1 == 0:
+                training_runtime = self.retrain_searcher(searcher, X, y, tuning_count)
+
+                (
+                    tuning_count,
+                    searcher_retuning_frequency,
+                ) = self.update_optimizer_parameters(
+                    optimizer,
+                    search_iter,
+                )
+
+            # Select next configuration
+            next_config = self.select_next_configuration(
+                searcher, searchable_configs, X_searchable
+            )
+
+            # Evaluate configuration
+            performance, _ = self._evaluate_configuration(next_config)
+            if np.isnan(performance):
+                self.config_manager.add_to_banned_configurations(next_config)
+                continue
+
+            # Get interval bounds
+            transformed_config = self.config_manager.tabularize_configs([next_config])
+
+            lower_bound, upper_bound = self.get_interval_if_applicable(
+                searcher, transformed_config
+            )
+
+            # Convert bounds back to original units and handle interval orientation
+            if lower_bound is not None and upper_bound is not None:
+                converted_lower = lower_bound * self.metric_sign
+                converted_upper = upper_bound * self.metric_sign
+                # For maximization (metric_sign = -1), swap bounds to maintain proper ordering
+                if not self.minimize:
+                    signed_lower_bound = converted_upper  # What was upper becomes lower
+                    signed_upper_bound = converted_lower  # What was lower becomes upper
+                else:
+                    signed_lower_bound = converted_lower
+                    signed_upper_bound = converted_upper
+            else:
+                signed_lower_bound = None
+                signed_upper_bound = None
+
+            signed_performance = self.metric_sign * performance
+            searcher.update(X=transformed_config.flatten(), y_true=signed_performance)
+
+            self.config_manager.mark_as_searched(next_config, performance)
+            trial = Trial(
+                iteration=len(self.study.trials),
+                timestamp=datetime.now(),
+                configuration=next_config.copy(),
+                tabularized_configuration=self.config_manager.listify_configs(
+                    [next_config]
+                )[0],
+                performance=performance,
+                acquisition_source=str(searcher),
+                searcher_runtime=training_runtime,
+                lower_bound=signed_lower_bound,
+                upper_bound=signed_upper_bound,
+            )
+            self.study.append_trial(trial)
+
+            searchable_count = self.config_manager.get_searchable_configurations_count()
+            should_stop = stop_search(
+                n_remaining_configurations=searchable_count,
+                current_runtime=self.search_timer.return_runtime(),
+                max_runtime=max_runtime,
+                current_iter=len(self.study.trials),
+                max_searches=max_searches,
+            )
+
+            if should_stop:
+                break
+
+        progress_manager.close_progress_bar()
+
+    def tune(
+        self,
+        max_searches: Optional[int] = 100,
+        max_runtime: Optional[int] = None,
+        searcher: Optional[QuantileConformalSearcher] = None,
+        n_random_searches: int = 15,
+        optimizer_framework: Optional[Literal["decaying", "fixed"]] = None,
+        random_state: Optional[int] = None,
+        verbose: bool = True,
+    ) -> None:
+        """Execute hyperparameter optimization using conformal prediction surrogate models.
+
+        Performs intelligent hyperparameter search by randomly sampling an initial number
+        of hyperparameter configurations, then activating surrogate based search according
+        to the specified searcher.
+
+        Args:
+            max_searches: Maximum total configurations to search (random + conformal searches).
+                Default: 100.
+            max_runtime: Maximum search time in seconds. Search will terminate after this time,
+                regardless of iterations. Default: None (no time limit).
+            searcher: Conformal searcher object responsible for the selection of candidate
+                hyperparameter configurations. When none is provided, the searcher defaults
+                to a QGBM surrogate with a Thompson Sampler.
+                Should you want to use a custom searcher, see confopt.selection.acquisition for
+                searcher instantiation and confopt.selection.acquisition.samplers to set the
+                searcher's sampler.
+                Default: None.
+            n_random_searches: Number of random configurations to evaluate before conformal search.
+                Provides initial training data for the surrogate model. Default: 15.
+            optimizer_framework: Controls how and when the surrogate model tunes its own parameters
+                (this is different from tuning your target model). Options are 'decaying' for
+                adaptive tuning with increasing intervals over time, 'fixed' for
+                deterministic tuning at fixed intervals, or None for no tuning. Surrogate tuning
+                adds computational cost and is recommended only if your target model takes more
+                than 5 minutes to train. Default: None.
+            random_state: Random seed for reproducible results. Default: None.
+            verbose: Whether to enable progress display. Default: True.
+
+        Example:
+            Basic usage::
+
+                import numpy as np
+                from confopt.tuning import ConformalTuner
+                from confopt.wrapping import FloatRange
+
+                def objective(configuration):
+                    x1 = configuration['x1']
+                    x2 = configuration['x2']
+                    A = 10
+                    n = 2
+                    return A * n + (x1**2 - A * np.cos(2 * np.pi * x1)) + (x2**2 - A * np.cos(2 * np.pi * x2))
+
+                search_space = {
+                    'x1': FloatRange(min_value=-5.12, max_value=5.12),
+                    'x2': FloatRange(min_value=-5.12, max_value=5.12)
+                }
+
+                tuner = ConformalTuner(
+                    objective_function=objective,
+                    search_space=search_space,
+                    minimize=True
+                )
+
+                tuner.tune(n_random_searches=10, max_searches=50)
+
+                best_config = tuner.get_best_params()
+                best_score = tuner.get_best_value()
+        """
+
+        if random_state is not None:
+            random.seed(a=random_state)
+            np.random.seed(seed=random_state)
+
+        if searcher is None:
+            searcher = QuantileConformalSearcher(
+                quantile_estimator_architecture="qgbm",
+                sampler=ThompsonSampler(
+                    n_quantiles=4,
+                    adapter="DtACI",
+                    enable_optimistic_sampling=False,
+                ),
+                calibration_split_strategy="adaptive",
+                n_calibration_folds=5,
+                n_pre_conformal_trials=32,
+            )
+
+        self.initialize_tuning_resources()
+        self.search_timer = RuntimeTracker()
+
+        n_warm_starts = len(self.warm_starts) if self.warm_starts else 0
+        remaining_random_searches = max(0, n_random_searches - n_warm_starts)
+        if remaining_random_searches > 0:
+            self.random_search(
+                max_random_iter=remaining_random_searches,
+                max_runtime=max_runtime,
+                max_searches=max_searches,
+                verbose=verbose,
+            )
+
+        self.conformal_search(
+            searcher=searcher,
+            verbose=verbose,
+            max_searches=max_searches,
+            max_runtime=max_runtime,
+            optimizer_framework=optimizer_framework,
+        )
+
+    def get_best_params(self) -> Dict:
+        """Retrieve the best configuration found during optimization.
+
+        Returns the parameter configuration that achieved the optimal objective
+        function value, according to the specified optimization direction.
+
+        Returns:
+            Dictionary containing the optimal parameter configuration
+        """
+        return self.study.get_best_configuration()
 
     def get_best_value(self) -> float:
+        """Retrieve the best objective function value achieved during optimization.
+
+        Returns the optimal performance value found across all evaluated
+        configurations, according to the specified optimization direction.
+
+        Returns:
+            Best objective function value achieved
         """
-        Extract validation performance of best performing parameter
-        configuration identified during conformal search.
-
-        Returns
-        -------
-        best_performance :
-            Best predictive performance achieved.
-        """
-        best_performance_idx = get_best_performance_idx(
-            custom_loss_function=self.custom_loss_function,
-            searched_performances=self.searched_performances,
-        )
-        best_performance = self.searched_performances[best_performance_idx]
-
-        return best_performance
-
-    def configure_best_model(self):
-        """
-        Extract best initialized (but unfitted) model identified
-        during conformal search.
-
-        Returns
-        -------
-        best_model :
-            Best model from search.
-        """
-        best_model = update_model_parameters(
-            model_instance=self.model,
-            configuration=self.get_best_params(),
-            random_state=self.random_state,
-        )
-        return best_model
-
-    def fit_best_model(self):
-        """
-        Fit best model identified during conformal search.
-
-        Returns
-        -------
-        best_fitted_model :
-            Best model from search, fit on all available data.
-        """
-        best_fitted_model = self.configure_best_model()
-        X_full = np.vstack((self.X_train, self.X_val))
-        y_full = np.hstack((self.y_train, self.y_val))
-
-        best_fitted_model.fit(X=X_full, y=y_full)
-
-        return best_fitted_model
+        return self.study.get_best_performance()

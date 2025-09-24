@@ -6,6 +6,7 @@ repos:
     -   id: end-of-file-fixer
     -   id: check-yaml
     -   id: check-added-large-files
+        exclude: \.c$
     -   id: debug-statements
     -   id: detect-private-key
 -   repo: https://github.com/psf/black
@@ -16,4 +17,9 @@ repos:
     rev: 7.0.0
     hooks:
     -   id: flake8
-        args: ['--max-line-length=131', '--ignore=E203,W503']
+        args: ['--max-line-length=131', '--ignore=E203,W503,E501']
+-   repo: https://github.com/PyCQA/autoflake
+    rev: v2.2.0  # Use the latest stable version
+    hooks:
+    -   id: autoflake
+        args: ["--remove-all-unused-imports", "--remove-unused-variables", "--in-place"]

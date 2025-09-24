@@ -1,0 +1,35 @@
+# Include essential files
+include LICENSE
+include README.md
+include requirements.txt
+
+# Exclude build artifacts and temporary files
+prune build
+prune dist
+prune *.egg-info
+prune __pycache__
+global-exclude *.pyc
+global-exclude *.pyo
+
+global-exclude .DS_Store
+
+# Exclude development and testing directories
+prune tests
+prune examples
+prune misc
+prune benchmarks
+prune cache
+prune docs
+prune assets
+
+# Exclude result and profile directories
+prune benchmark_results
+prune code_optimization_results
+prune comparison_results
+prune method_profiles
+prune optimization_results
+
+# Exclude development files
+exclude requirements-dev.txt
+exclude .pre-commit-config.yaml
+exclude .readthedocs.yml
