@@ -154,7 +154,7 @@ If you want to contribute a fix relating to a new bug, first raise an [issue](ht
 
 ## 📄 License
 
-[Apache License 2.0](https://github.com/rick12000/confopt/blob/main/LICENSE)
+[MIT License](https://github.com/rick12000/confopt/blob/main/LICENSE)
 
 ---
 
