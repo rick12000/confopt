@@ -116,7 +116,7 @@ For detailed examples and explanations see the [documentation](https://confopt.r
 
 Advanced users should note **ConfOpt** doesn't currently support parallelization, multi-fidelity optimization and multi-objective optimization.
 
-If you wish to use **ConfOpt** with parallelization or multi-fidelity/pruning, fear not, there's an [Optuna](https://github.com/optuna) integration that supports both.
+If you wish to use **ConfOpt** with parallelization or multi-fidelity/pruning, fear not, there's an [Optuna](https://github.com/optuna) integration that supports both. Parallelization support has been well tested, while multi-fidelity/pruning is still experimental (it should work well and has been spot tested, but if there are any problems please raise an issue).
 
 For instructions on how to use **ConfOpt** in Optuna refer to the official documentation [here](https://hub.optuna.org/samplers/confopt_sampler/).
 
