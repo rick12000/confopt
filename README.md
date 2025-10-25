@@ -20,6 +20,8 @@
 
 Built for machine learning practitioners requiring flexible and robust hyperparameter tuning, **ConfOpt** delivers superior optimization performance through conformal uncertainty quantification and a wide selection of surrogate models.
 
+**ConfOpt** also lends itself well to HPO research and as an add-on, requiring limited [dependancies](https://github.com/rick12000/confopt/blob/main/requirements.txt) and focusing on pure search methodology.
+
 ## 📦 Installation
 
 Install ConfOpt from PyPI using pip:
@@ -109,6 +111,14 @@ print(f"Best parameters: {best_params}")
 Finally, we retrieve the optimization's best parameters and test accuracy score and print them to the console for review.
 
 For detailed examples and explanations see the [documentation](https://confopt.readthedocs.io/).
+
+## 🔗 Integrations
+
+Advanced users should note **ConfOpt** doesn't currently support parallelization, multi-fidelity optimization and multi-objective optimization.
+
+If you wish to use **ConfOpt** with parallelization or multi-fidelity/pruning, fear not, there's an [Optuna](https://github.com/optuna) integration that supports both.
+
+For instructions on how to use **ConfOpt** in Optuna refer to the official documentation [here](https://hub.optuna.org/samplers/confopt_sampler/).
 
 ## 📚 Documentation
 
