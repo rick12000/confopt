@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img src="https://raw.githubusercontent.com/rick12000/confopt/add-objective-search/assets/logo.png" alt="ConfOpt Logo" width="300"/>
+  <img src="https://raw.githubusercontent.com/rick12000/confopt/main/assets/logo.png" alt="ConfOpt Logo" width="300"/>
 </div>
 
 <br>
@@ -134,7 +134,7 @@ Complete reference for main classes, methods, and parameters.
 ## 📈 Benchmarks
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/rick12000/confopt/add-objective-search/assets/benchmark_results.png" alt="ConfOpt Logo" width="450"/>
+  <img src="https://raw.githubusercontent.com/rick12000/confopt/main/assets/benchmark_results.png" alt="ConfOpt Logo" width="450"/>
 </div>
 
 **ConfOpt** is significantly better than plain old random search, but it also beats established tools like **Optuna** or traditional **Gaussian Processes**!
